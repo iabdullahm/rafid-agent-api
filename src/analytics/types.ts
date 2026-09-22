@@ -1,0 +1,116 @@
+/**
+ * Internal analytics layer (Section: "lightweight internal analytics for Rafid discovery, MCP
+ * usage and x402 usage" — never a public capability, never registered in
+ * src/domain/capabilities.ts, so it is structurally unreachable from /agent.json, the tool
+ * catalog, MCP, discovery/OpenAPI output or the x402 route family, exactly like the Partner Data
+ * Feed (marketDataRoutes.ts) and Business Admin (adminRoutes.ts) internal layers before it.
+ *
+ * One append-only event log (`rafid_analytics_events`) covers all four tracked domains —
+ * discovery hits, MCP protocol calls, x402 payment funnel steps, and capability ("tool")
+ * invocations — rather than four separate tables, because every domain shares the same shape
+ * (when it happened, what kind of thing happened, which tool/path it concerned, whether it
+ * succeeded, how long it took, who safely-attributably called it) and a single table keeps
+ * aggregation queries simple. `category` + `eventType` together say what a row means; see the
+ * literal values used at each call site (src/analytics/recorder.ts) for the full vocabulary.
+ *
+ * PRIVACY: an AnalyticsEvent must never carry a raw API key, wallet private key, payment
+ * proof/signature, or authorization header value — see src/analytics/attribution.ts (client
+ * identity is always a coarse one-way hash, never a raw IP) and src/analytics/recorder.ts (every
+ * field here is either a known-safe operational value — a route path, a tool name, a status, a
+ * duration — or has already been redacted/truncated before reaching this type). `txHash` is a
+ * public on-chain transaction identifier, not a secret, and is the one thing the spec explicitly
+ * asks to capture "if safely available".
+ */
+
+export type AnalyticsCategory = "discovery" | "mcp" | "x402" | "tool";
+
+/** Discovery: always "hit" — which surface was hit is carried in `path`. */
+export type DiscoveryEventType = "hit";
+
+/** MCP: the three JSON-RPC methods this layer distinguishes, matching the spec's literal list
+ *  (initialize, tools/list, tools/call) with underscores instead of slashes for a stable SQL/JS
+ *  identifier — no other method name is ever recorded (see recorder.ts's mapMcpMethod()). */
+export type McpEventType = "initialize" | "tools_list" | "tools_call";
+
+/** x402: the five funnel steps the spec asks for. See recorder.ts's classifyX402Outcome() for
+ *  how a response is mapped to one of these from the (necessarily black-box) @x402/express
+ *  payment-gate middleware's observable behavior — status code plus the standard, spec-defined
+ *  X-PAYMENT-RESPONSE/PAYMENT-RESPONSE settlement header. */
+export type X402EventType = "challenge" | "payment_verified" | "payment_failed" | "settlement_success" | "settlement_failure";
+
+/** Tool: always "invocation" — one row per capability call, across every access mode (REST
+ *  X-API-Key, x402, remote MCP). */
+export type ToolEventType = "invocation";
+
+export type AnalyticsEventType = DiscoveryEventType | McpEventType | X402EventType | ToolEventType;
+
+/** How much of a tool invocation's result was backed by real (partner-fed/imported) data versus
+ *  the honest demo/manual fallback — see src/analytics/dataSource.ts's classifyDataSource(),
+ *  which reads this straight off each capability's own already-published provenance fields
+ *  (analyze_oman_property's `provenance`, the three business capabilities' `dataCoverage`) —
+ *  never inferred or guessed. `null` for a tool with no such field (the three plain calculators,
+ *  and search_oman_company where the company registry itself carries no coverage breakdown). */
+export type DataSource = "partner_feed" | "demo_manual" | "mixed" | "unknown";
+
+export interface AnalyticsEvent {
+  category: AnalyticsCategory;
+  eventType: AnalyticsEventType;
+  /** Discovery only — one of the exact surfaces this layer tracks (see recorder.ts's
+   *  DISCOVERY_PATHS). Never a full URL, never a query string. */
+  path: string | null;
+  /** mcp tools_call and tool invocations only — a CapabilityName from the shared registry. */
+  toolName: string | null;
+  /** Whether the underlying call succeeded — an HTTP 2xx / a non-isError MCP result / a
+   *  settled==true payment, depending on category. Null where success/failure isn't a concept
+   *  for this row (a discovery hit, an mcp initialize/tools_list call). */
+  success: boolean | null;
+  durationMs: number | null;
+  /** x402 only — the tool's catalog price (billing/catalog.ts), never the raw on-chain payment
+   *  amount in the payment token's atomic units, so this is always directly comparable to the
+   *  rest of this API's USD-denominated pricing. */
+  amount: number | null;
+  currency: string | null;
+  /** x402 settlement rows only — the public on-chain transaction hash from the x402 settlement
+   *  response header, when present. Never a payment proof, signature, or the raw X-PAYMENT
+   *  header itself. */
+  txHash: string | null;
+  /** Tool invocations only (and only for the four capabilities that publish a provenance/
+   *  coverage field — see dataSource.ts). */
+  dataSource: DataSource | null;
+  /** Coarse, one-way client identity (sha256 of IP+User-Agent, truncated) — never a raw IP. */
+  clientHash: string | null;
+  /** Truncated to attribution.ts's MAX_ATTRIBUTION_FIELD_LENGTH; never assumed trustworthy
+   *  (any caller can send any User-Agent), used only for coarse operator-facing grouping. */
+  userAgent: string | null;
+  /** Origin + path only — query string and fragment are stripped before this ever reaches the
+   *  type (see attribution.ts's sanitizeReferer()), since a referring page's query string can
+   *  carry the caller's own secrets. */
+  referer: string | null;
+  /** From X-Client-Name, falling back to X-Agent-Name — an unauthenticated, self-reported
+   *  caller identity (never verified, never trusted for authorization decisions). */
+  clientName: string | null;
+  createdAt: string;
+}
+
+/** What a caller passes to record() — createdAt defaults to "now" at the repository, so callers
+ *  never need to compute it themselves (and can't accidentally backdate a row). */
+export type AnalyticsEventInput = Omit<AnalyticsEvent, "createdAt"> & { createdAt?: string };
+
+export interface AnalyticsRepository {
+  /** Fire-and-forget from every call site (see recorder.ts) — analytics recording must never
+   *  slow down or fail the real request it's observing. Implementations should not throw for an
+   *  ordinary storage hiccup; callers wrap every call in .catch(() => {}) as a second layer of
+   *  defense regardless. */
+  record(event: AnalyticsEventInput): void | Promise<void>;
+  /** Every event with createdAt >= since, newest first. This is a "lightweight" layer by design
+   *  (see the spec) — aggregation (src/analytics/aggregate.ts) runs in plain JS over this array
+   *  rather than in SQL, so a query result is capped (implementations should cap around
+   *  MAX_QUERY_EVENTS) rather than ever returning an unbounded result set. A capped result under-
+   *  counts rather than OOMing or timing out — see aggregate.ts's doc comment on what that means
+   *  for very high-traffic windows. */
+  queryEvents(since: Date): Promise<AnalyticsEvent[]>;
+}
+
+/** Shared cap between MemoryAnalyticsRepository and PostgresAnalyticsRepository so both
+ *  implementations behave identically at the boundary a test can actually exercise. */
+export const MAX_QUERY_EVENTS = 200_000;

@@ -29,7 +29,15 @@ import type { CompanyRepository } from "../business-data/sources/companyReposito
 import { PostgresCompanyRepository } from "../db/businessStore.js";
 import { getOmanBusinessDatabaseUrl } from "../business-data/config.js";
 import { createAdminRoutes } from "./adminRoutes.js";
-export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository } = {}) {
+import type { AnalyticsRepository, DataSource } from "../analytics/types.js";
+import { MemoryAnalyticsRepository } from "../analytics/memoryRepository.js";
+import { PostgresAnalyticsRepository } from "../db/analyticsStore.js";
+import { getAnalyticsDatabaseUrl, getAnalyticsInternalApiKey } from "../analytics/config.js";
+import { createAnalyticsRoutes } from "./analyticsRoutes.js";
+import { classifyDataSource } from "../analytics/dataSource.js";
+import { extractClientContext } from "../analytics/attribution.js";
+import { recordDiscoveryHit, recordToolInvocation, recordX402Event, classifyX402Outcome, decodeX402SettlementHeader } from "../analytics/recorder.js";
+export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository } = {}) {
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
   const store = config.authMode === "postgres" ? options.store : undefined;
   const app = express();
@@ -39,6 +47,15 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // in-memory, side-effect-free repository (safe for tests and for createApp() in general);
   // src/server.ts wires a ConsoleUsageRepository for real deployments so usage is visible in logs.
   const billingService = options.billingService ?? new BillingService();
+  // Internal analytics layer (Section: discovery/MCP/x402/tool-usage tracking — see
+  // src/api/analyticsRoutes.ts). Always constructed, unlike marketRepository/businessRepository
+  // below: recording itself must always work (defaulting to an in-process
+  // MemoryAnalyticsRepository, exactly like MemoryUsageRepository does for billing usage) even
+  // when no database is configured — only the internal-key-gated read routes can ever surface
+  // it, and they 503 on their own when unconfigured (requireInternalAuth).
+  const analyticsDatabaseUrl = getAnalyticsDatabaseUrl();
+  const analyticsRepository: AnalyticsRepository = options.analyticsRepository
+    ?? (analyticsDatabaseUrl ? new PostgresAnalyticsRepository(analyticsDatabaseUrl) : new MemoryAnalyticsRepository());
   const openapiDoc = buildOpenapi(config);
   app.disable("x-powered-by");
   app.use((req, res, next) => {
@@ -80,6 +97,16 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
           requestId: res.locals.requestId, keyIdentifier, toolName, accessMode, status: res.statusCode, durationMs,
           billableAmount: billingService.isBillable(toolName) ? billingService.getToolPrice(toolName) : 0, currency: "USD"
         });
+        // Internal analytics (TOOL USAGE domain): one row per REST/x402 capability invocation —
+        // remote MCP invocations are recorded separately (mcp/remote.ts), since they never reach
+        // this Express middleware chain at all. `dataSource` is set by the capability handler
+        // itself right after execute() (see below) — classifyDataSource() reads it straight off
+        // the already-computed response, never a second execute() call.
+        recordToolInvocation(analyticsRepository, {
+          toolName, success: res.statusCode < 400, durationMs,
+          dataSource: (res.locals.dataSource as DataSource | undefined) ?? null,
+          client: extractClientContext(req)
+        });
       }
     });
     if (req.method === "OPTIONS") { res.status(204).end(); return; }
@@ -115,7 +142,12 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     res.type("html").send(landingHtml(config));
   });
   for (const path of ["/health", "/api/v1/health"]) app.get(path, (_req, res) => send(res, { ok: true }));
-  app.get("/openapi.json", (_req, res) => res.json(openapiDoc));
+  // Internal analytics DISCOVERY tracking: exactly the 7 surfaces the spec names (see
+  // analytics/recorder.ts's DISCOVERY_PATHS) — "/mcp" is recorded separately, inside
+  // mcp/remote.ts's handler, since it lives on its own route family below. Deliberately NOT
+  // added to every discovery-ish endpoint (e.g. /api/v1/agent, /api/v1/pricing, /.well-known/
+  // ai-plugin.json, /api/v1/mcp/status) — only the ones actually named.
+  app.get("/openapi.json", (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/openapi.json"); res.json(openapiDoc); });
   app.get("/docs", (_req, res) => {
     res.setHeader("Content-Security-Policy", swaggerContentSecurityPolicy);
     res.type("html").send(swaggerHtml);
@@ -124,17 +156,17 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // regardless of X402_ENABLED so an agent can learn how to pay before it decides to.
   app.get(agentBasePath, discoveryLimiter, (_req, res) => send(res, buildAgentInfo(config)));
   app.get(pricingBasePath, discoveryLimiter, (_req, res) => send(res, buildPricingInfo()));
-  app.get(toolsBasePath, discoveryLimiter, (_req, res) => send(res, buildToolCatalog()));
+  app.get(toolsBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, toolsBasePath); send(res, buildToolCatalog()); });
   // Machine-first capability registry (Section 8/13): the same data /agent.json's `tools`
   // field carries, exposed on its own path so a caller that only wants tool metadata doesn't
   // have to fetch the full manifest.
-  app.get(capabilitiesBasePath, discoveryLimiter, (_req, res) => send(res, buildCapabilitiesRegistry(config)));
+  app.get(capabilitiesBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, capabilitiesBasePath); send(res, buildCapabilitiesRegistry(config)); });
   // Top-level agent discovery manifests. Unauthenticated, GET-only, and — like every other
   // discovery endpoint here — read straight from the shared capability registry.
-  app.get("/agent.json", discoveryLimiter, (_req, res) => res.json(buildAgentManifest(config)));
+  app.get("/agent.json", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/agent.json"); res.json(buildAgentManifest(config)); });
   app.get("/.well-known/ai-plugin.json", discoveryLimiter, (req, res) => res.json(buildAiPluginManifest(config, getOrigin(req))));
-  app.get("/.well-known/agent.json", discoveryLimiter, (req, res) => res.json(buildAgentCard(config, getOrigin(req))));
-  app.get("/llms.txt", discoveryLimiter, (_req, res) => res.type("text/plain").send(buildLlmsTxt(config)));
+  app.get("/.well-known/agent.json", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/.well-known/agent.json"); res.json(buildAgentCard(config, getOrigin(req))); });
+  app.get("/llms.txt", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/llms.txt"); res.type("text/plain").send(buildLlmsTxt(config)); });
   // GET /api/v1/mcp/status — always mounted (independent of MCP_REMOTE_ENABLED, like
   // /api/v1/x402/status is independent of X402_ENABLED), so a caller can check whether the
   // remote transport is live without guessing from a manifest.
@@ -178,6 +210,9 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         const input = c.input.parse(req.body);
         await billing.authorize({ capability: c.name, requestId: res.locals.requestId, customerId: res.locals.customerId });
         const data = await c.execute(input);
+        // Analytics only (never changes the response) — read straight off the already-computed
+        // result, picked up by the res.on("finish") tool-invocation recorder above.
+        res.locals.dataSource = classifyDataSource(c.name, data);
         await complete(res,200);
         sendToolResult(res, data, c.name);
       });
@@ -188,6 +223,37 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // paths simply don't exist (404 via the catch-all below). This is real payment
   // enforcement — see src/billing/x402.ts's buildX402Gate() doc comment.
   if (config.x402Enabled) {
+    // Internal analytics (X402 funnel): registered before the real payment gate so its
+    // res.on("finish") listener is attached regardless of how the gate ultimately responds —
+    // a 402 challenge, a verification failure, a settlement failure, or success. `toolName` is
+    // resolved from the request path alone (never from res.locals, which the gate may prevent
+    // from ever being set — see markTool() above for the REST equivalent, only reachable on
+    // success). See recorder.ts's classifyX402Outcome() doc comment for the exact mapping from
+    // (payment header presence, status code, settlement header) to one of the five funnel steps.
+    const toolNameForX402Path = (path: string): CapabilityName | null => {
+      const match = capabilities.find(c => path === x402BasePath + c.path);
+      return match ? match.name : null;
+    };
+    app.use((req, res, next) => {
+      const toolName = toolNameForX402Path(req.path);
+      if (!toolName) { next(); return; }
+      const hadPaymentHeader = Boolean(req.header("x-payment"));
+      res.on("finish", () => {
+        const settlementHeader = (res.getHeader("x-payment-response") ?? res.getHeader("payment-response")) as string | string[] | undefined;
+        const settlement = decodeX402SettlementHeader(settlementHeader);
+        const eventType = classifyX402Outcome({ hadPaymentHeader, status: res.statusCode, settlement });
+        if (!eventType) return;
+        const amount = billingService.getToolPrice(toolName);
+        recordX402Event(analyticsRepository, req, { eventType, toolName, amount, currency: "USD", txHash: settlement?.transaction ?? null });
+        // A settled payment implies verification already succeeded (buildX402Gate()'s doc
+        // comment: settlement is never attempted on an unverified payment) — record both funnel
+        // steps from the one observable success, rather than only the terminal one.
+        if (eventType === "settlement_success") {
+          recordX402Event(analyticsRepository, req, { eventType: "payment_verified", toolName, amount, currency: "USD", txHash: null });
+        }
+      });
+      next();
+    });
     app.use(buildX402Gate(config, billingService));
     const parseJsonX402 = express.json({ limit: "32kb" });
     for (const c of capabilities) {
@@ -197,6 +263,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         parseJsonX402, async (req, res) => {
           const input = c.input.parse(req.body);
           const data = await c.execute(input);
+          res.locals.dataSource = classifyDataSource(c.name, data);
           sendToolResult(res, data, c.name);
         });
     }
@@ -207,7 +274,14 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // this reuses the same createMcpServer() factory as local stdio (src/mcp.ts).
   if (config.mcpRemoteEnabled) {
     app.use(mcpRemotePath, mcpLimiter);
-    app.all(mcpRemotePath, createRemoteMcpHandler(billingService, logger));
+    // Peek the JSON-RPC body once (Content-Type-gated, exactly like every other JSON POST route
+    // in this app — see marketDataRoutes.ts's parseJsonBody) so createRemoteMcpHandler can pass
+    // it straight through to the transport as parsedBody AND read its `method` for internal
+    // analytics (initialize/tools_list — see mcp/remote.ts's doc comment). A GET/DELETE request
+    // (session open/close under the Streamable HTTP transport) has no JSON body and passes
+    // through untouched.
+    app.use(mcpRemotePath, express.json({ limit: "32kb" }));
+    app.all(mcpRemotePath, createRemoteMcpHandler(billingService, logger, analyticsRepository));
   }
   // Partner Data Feed layer (Section 3/4/9/11) — deliberately outside the `capabilities` registry
   // above, so it never appears in /agent.json, the tool catalog, remote MCP, or the x402 route
@@ -242,6 +316,14 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   if (config.adminEnabled && businessRepository) {
     app.use(createAdminRoutes({ config, repository: businessRepository }));
   }
+  // Internal analytics API (discovery/MCP/x402/tool-usage — see analyticsRoutes.ts's doc
+  // comment). Always mounted, unlike the Partner Data Feed/Admin routes above: recording itself
+  // always happens regardless of database configuration, so these read routes always have
+  // something to report; each one individually 503s until ANALYTICS_INTERNAL_API_KEY is set
+  // (requireInternalAuth), rather than the whole router being conditionally absent. Never
+  // registered in the `capabilities` array — structurally unreachable from /agent.json, MCP, the
+  // tool catalog, discovery or the x402 route family, and never a public dashboard.
+  app.use(createAnalyticsRoutes({ repository: analyticsRepository, internalApiKey: getAnalyticsInternalApiKey() }));
   app.use((_req, _res, next) => next(new ApiError(404, "NOT_FOUND", "Endpoint not found")));
   const errors: ErrorRequestHandler = async (error, _req, res, _next) => {
     const type = (error as { type?: string })?.type;

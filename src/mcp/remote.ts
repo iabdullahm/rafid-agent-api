@@ -6,6 +6,10 @@ import type { Logger } from "../utils/logging.js";
 import type { BillingService } from "../billing/service.js";
 import type { CapabilityName } from "../billing/catalog.js";
 import type { Config } from "../config/env.js";
+import type { AnalyticsRepository, DataSource } from "../analytics/types.js";
+import { mcpClientContext } from "../analytics/context.js";
+import { extractClientContext } from "../analytics/attribution.js";
+import { mapMcpMethod, recordMcpEvent, recordToolInvocation, recordDiscoveryHit, currentMcpClientContext } from "../analytics/recorder.js";
 
 /** Public path for the remote (Streamable HTTP) MCP transport. Mounted only when
  *  MCP_REMOTE_ENABLED=true (see api/app.ts); otherwise this path simply 404s, exactly like the
@@ -50,8 +54,20 @@ export function buildMcpStatus(config: Pick<Config, "mcpRemoteEnabled">) {
  * — remote MCP is not a paid channel in this phase), on top of the normal structured log line.
  * Local stdio intentionally stays unmetered, as it always has: an MCP client's own OS user
  * launched that process directly, with no shared server resource to protect.
+ *
+ * Internal analytics: `req.body` is expected to already be JSON-parsed (api/app.ts mounts
+ * express.json() ahead of this handler, exactly like every other JSON POST route in this app) so
+ * it can be passed straight through as `parsedBody` to transport.handleRequest() — this SDK
+ * accepts an already-parsed body specifically so a caller doesn't have to choose between reading
+ * it once for inspection and letting the transport read it itself (see
+ * @modelcontextprotocol/node's own doc comment on handleRequest's third parameter). Peeking the
+ * JSON-RPC `method` off that body is what lets "initialize"/"tools/list" be recorded here
+ * directly (they never reach mcp/server.ts's per-tool logger, which only fires for actual tool
+ * calls); "tools/call" is recorded from inside that logger instead (real success/duration), with
+ * client attribution threaded through via mcpClientContext — see analytics/context.ts's doc
+ * comment for why that indirection is necessary for a shared, stateless server instance.
  */
-export function createRemoteMcpHandler(billingService: BillingService, baseLogger: Logger): RequestHandler {
+export function createRemoteMcpHandler(billingService: BillingService, baseLogger: Logger, analyticsRepository: AnalyticsRepository): RequestHandler {
   const logger: Logger = event => {
     baseLogger({ ...event, endpoint: mcpRemotePath });
     if (event.toolName) {
@@ -65,6 +81,10 @@ export function createRemoteMcpHandler(billingService: BillingService, baseLogge
         billableAmount: 0,
         currency: "USD"
       });
+      const client = currentMcpClientContext(mcpClientContext);
+      const success = event.status < 400;
+      recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: event.toolName, success, durationMs: event.durationMs, client });
+      recordToolInvocation(analyticsRepository, { toolName: event.toolName, success, durationMs: event.durationMs, dataSource: (event.dataSource ?? null) as DataSource | null, client });
     }
   };
   const server = createMcpServer(logger);
@@ -75,18 +95,50 @@ export function createRemoteMcpHandler(billingService: BillingService, baseLogge
   // the handler returned here, so it is safe not to block route registration on it.
   void server.connect(transport);
   return (req, res) => {
-    void transport.handleRequest(req, res).catch(error => {
-      baseLogger({
-        timestamp: new Date().toISOString(),
-        requestId: typeof res.locals.requestId === "string" ? res.locals.requestId : "unknown",
-        endpoint: mcpRemotePath,
-        status: 500,
-        durationMs: 0
-      });
-      if (!res.headersSent) {
-        res.status(500).json({ success: false, error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred" }, meta: { requestId: res.locals.requestId } });
+    const client = extractClientContext(req);
+    // DISCOVERY tracks "/mcp" alongside the other discovery surfaces (see recorder.ts's
+    // DISCOVERY_PATHS) — one row per HTTP request reaching this transport at all, independent of
+    // and in addition to the more granular MCP-category method breakdown (initialize/tools_list/
+    // tools_call) recorded below.
+    recordDiscoveryHit(analyticsRepository, req, mcpRemotePath);
+    const method = mapMcpMethod((req.body as { method?: unknown } | undefined)?.method);
+    if (method === "initialize" || method === "tools_list") {
+      recordMcpEvent(analyticsRepository, { eventType: method, client });
+    }
+    // A tools/call whose arguments fail the tool's own input schema is rejected by the SDK
+    // (@modelcontextprotocol/server's setRequestHandler("tools/call", ...) calls
+    // validateToolInput() before ever invoking our registered callback — see its source) — so
+    // mcp/server.ts's per-tool logger, and therefore recordMcpEvent's normal tools_call branch,
+    // never runs for this request at all. Without this check that failure mode (a very common one
+    // for a real agent caller: wrong argument shape/types) would be silently invisible to
+    // analytics, even though the spec asks for tools/call success/failure tracking. Re-validates
+    // with the exact same zod schema already registered as the tool's inputSchema (capabilities.ts
+    // — never a second, hand-written validation), so this can only ever agree with the SDK's own
+    // verdict; it never changes what is sent back to the caller, and never runs on the success
+    // path (which the real per-tool logger already records with a real measured duration).
+    if (method === "tools_call") {
+      const params = (req.body as { params?: { name?: unknown; arguments?: unknown } } | undefined)?.params;
+      const toolName = typeof params?.name === "string" ? params.name : null;
+      const capability = toolName ? capabilities.find(c => c.name === toolName) : undefined;
+      if (capability && !capability.input.safeParse(params?.arguments ?? {}).success) {
+        recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: capability.name, success: false, durationMs: 0, client });
+        recordToolInvocation(analyticsRepository, { toolName: capability.name, success: false, durationMs: 0, dataSource: null, client });
       }
-      void error;
-    });
+    }
+    void mcpClientContext.run(client, () =>
+      transport.handleRequest(req, res, req.body).catch(error => {
+        baseLogger({
+          timestamp: new Date().toISOString(),
+          requestId: typeof res.locals.requestId === "string" ? res.locals.requestId : "unknown",
+          endpoint: mcpRemotePath,
+          status: 500,
+          durationMs: 0
+        });
+        if (!res.headersSent) {
+          res.status(500).json({ success: false, error: { code: "INTERNAL_ERROR", message: "An unexpected error occurred" }, meta: { requestId: res.locals.requestId } });
+        }
+        void error;
+      })
+    );
   };
 }

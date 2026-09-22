@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { capabilities } from "../domain/capabilities.js";
 import { publicError } from "../utils/errors.js";
 import type { Logger } from "../utils/logging.js";
+import { classifyDataSource } from "../analytics/dataSource.js";
 export function createMcpServer(logger: Logger = () => {}) {
   const server = new McpServer({ name: "rafid-agent-api", version: "0.1.0" });
   for (const c of capabilities) {
@@ -16,15 +17,20 @@ export function createMcpServer(logger: Logger = () => {}) {
     }, async (input: unknown) => {
       const start = performance.now();
       let status = 200;
+      let dataSource: string | null = null;
       try {
         const data = await c.execute(input);
+        // Analytics only (never changes the response): the same real-vs-demo classification
+        // every REST/x402 call site also computes — see analytics/dataSource.ts's doc comment.
+        // Read-only over the already-computed result; never a second execute() call.
+        dataSource = classifyDataSource(c.name, data);
         return { content: [{ type: "text" as const, text: JSON.stringify(data) }], structuredContent: data };
       } catch (error) {
         const result = publicError(error);
         status = result.status;
         return { isError: true, content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: result.error }) }] };
       } finally {
-        logger({ timestamp: new Date().toISOString(), requestId: randomUUID(), toolName: c.name, status, durationMs: Math.round(performance.now() - start) });
+        logger({ timestamp: new Date().toISOString(), requestId: randomUUID(), toolName: c.name, status, durationMs: Math.round(performance.now() - start), dataSource });
       }
     });
   }
