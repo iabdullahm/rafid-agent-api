@@ -37,7 +37,13 @@ import { createAnalyticsRoutes } from "./analyticsRoutes.js";
 import { classifyDataSource } from "../analytics/dataSource.js";
 import { extractClientContext } from "../analytics/attribution.js";
 import { recordDiscoveryHit, recordToolInvocation, recordX402Event, classifyX402Outcome, decodeX402SettlementHeader } from "../analytics/recorder.js";
-export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository } = {}) {
+import type { RevenueLedger } from "../revenue/types.js";
+import { MemoryRevenueLedger } from "../revenue/memoryLedger.js";
+import { PostgresRevenueLedger } from "../db/revenueStore.js";
+import { getRevenueDatabaseUrl, getRevenueInternalApiKey } from "../revenue/config.js";
+import { createRevenueRoutes } from "./revenueRoutes.js";
+import { decodeX402SettlementMetadata, buildSettlementRecord, recordSettlement } from "../revenue/settlementCapture.js";
+export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger } = {}) {
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
   const store = config.authMode === "postgres" ? options.store : undefined;
   const app = express();
@@ -56,6 +62,15 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   const analyticsDatabaseUrl = getAnalyticsDatabaseUrl();
   const analyticsRepository: AnalyticsRepository = options.analyticsRepository
     ?? (analyticsDatabaseUrl ? new PostgresAnalyticsRepository(analyticsDatabaseUrl) : new MemoryAnalyticsRepository());
+  // Revenue ledger (Section: trustworthy x402 settlement accounting — see
+  // src/api/revenueRoutes.ts, src/revenue/types.ts). Always constructed, same reasoning as
+  // analyticsRepository above: recording must always work even with no database configured; only
+  // the internal-key-gated read routes can ever surface it. Deliberately a SEPARATE store from
+  // analyticsRepository — see revenue/types.ts's doc comment for why analytics is never the
+  // accounting source of truth.
+  const revenueDatabaseUrl = getRevenueDatabaseUrl();
+  const revenueLedger: RevenueLedger = options.revenueLedger
+    ?? (revenueDatabaseUrl ? new PostgresRevenueLedger(revenueDatabaseUrl) : new MemoryRevenueLedger());
   const openapiDoc = buildOpenapi(config);
   app.disable("x-powered-by");
   app.use((req, res, next) => {
@@ -103,7 +118,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         // itself right after execute() (see below) — classifyDataSource() reads it straight off
         // the already-computed response, never a second execute() call.
         recordToolInvocation(analyticsRepository, {
-          toolName, success: res.statusCode < 400, durationMs,
+          toolName, channel: accessMode === "x402" ? "x402" : "rest", success: res.statusCode < 400, durationMs,
           dataSource: (res.locals.dataSource as DataSource | undefined) ?? null,
           client: extractClientContext(req)
         });
@@ -251,6 +266,25 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         if (eventType === "settlement_success") {
           recordX402Event(analyticsRepository, req, { eventType: "payment_verified", toolName, amount, currency: "USD", txHash: null });
         }
+        // Revenue ledger (trustworthy accounting — see src/revenue/types.ts): only when a
+        // settlement was actually observed (succeeded or failed), never for a bare 402 challenge
+        // or a verification failure with no settlement attempt — see revenue/types.ts's
+        // RevenueSettlementStatus doc comment for why. Decoded independently of the analytics
+        // decode above (revenue/settlementCapture.ts's doc comment explains why) from the exact
+        // same header, so this never changes what's sent back to the caller.
+        if (eventType === "settlement_success" || eventType === "settlement_failure") {
+          const decoded = decodeX402SettlementMetadata(settlementHeader);
+          if (decoded) {
+            recordSettlement(revenueLedger, buildSettlementRecord({
+              settlement: decoded,
+              requestId: typeof res.locals.requestId === "string" ? res.locals.requestId : randomUUID(),
+              toolName, network: config.x402Network,
+              facilitator: config.cdpConfigured ? "coinbase-cdp" : "public",
+              payToAddress: config.x402WalletAddress,
+              requirementAmountDecimal: amount, currency: "USDC"
+            }));
+          }
+        }
       });
       next();
     });
@@ -324,6 +358,11 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // registered in the `capabilities` array — structurally unreachable from /agent.json, MCP, the
   // tool catalog, discovery or the x402 route family, and never a public dashboard.
   app.use(createAnalyticsRoutes({ repository: analyticsRepository, internalApiKey: getAnalyticsInternalApiKey() }));
+  // Internal revenue/settlement-ledger API (see revenueRoutes.ts's doc comment) — same
+  // always-mounted, individually-503-until-configured discipline as analytics above, gated by
+  // its own dedicated REVENUE_INTERNAL_API_KEY (revenue/config.ts). Never registered in the
+  // `capabilities` array; never a public dashboard.
+  app.use(createRevenueRoutes({ ledger: revenueLedger, analyticsRepository, billingService, internalApiKey: getRevenueInternalApiKey() }));
   app.use((_req, _res, next) => next(new ApiError(404, "NOT_FOUND", "Endpoint not found")));
   const errors: ErrorRequestHandler = async (error, _req, res, _next) => {
     const type = (error as { type?: string })?.type;

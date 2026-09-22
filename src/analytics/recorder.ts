@@ -1,5 +1,5 @@
 import type { Request } from "express";
-import type { AnalyticsRepository, AnalyticsEventType, DataSource, McpEventType, X402EventType } from "./types.js";
+import type { AnalyticsRepository, AnalyticsEventType, AnalyticsChannel, DataSource, McpEventType, X402EventType } from "./types.js";
 import { extractClientContext } from "./attribution.js";
 import type { RequestClientContext } from "./context.js";
 
@@ -39,7 +39,7 @@ function fireAndForget(repository: AnalyticsRepository, event: Parameters<Analyt
 export function recordDiscoveryHit(repository: AnalyticsRepository, req: Request, path: string): void {
   const client = extractClientContext(req);
   fireAndForget(repository, {
-    category: "discovery", eventType: "hit", path, toolName: null, success: true, durationMs: null,
+    category: "discovery", eventType: "hit", path, toolName: null, channel: null, success: true, durationMs: null,
     amount: null, currency: null, txHash: null, dataSource: null, ...client
   });
 }
@@ -67,7 +67,7 @@ export function recordMcpEvent(
   args: { eventType: McpEventType; toolName?: string | null; success?: boolean | null; durationMs?: number | null; client: RequestClientContext }
 ): void {
   fireAndForget(repository, {
-    category: "mcp", eventType: args.eventType, path: "/mcp", toolName: args.toolName ?? null,
+    category: "mcp", eventType: args.eventType, path: "/mcp", toolName: args.toolName ?? null, channel: null,
     success: args.success ?? null, durationMs: args.durationMs ?? null,
     amount: null, currency: null, txHash: null, dataSource: null, ...args.client
   });
@@ -152,7 +152,7 @@ export function recordX402Event(
 ): void {
   const client = extractClientContext(req);
   fireAndForget(repository, {
-    category: "x402", eventType: args.eventType, path: null, toolName: args.toolName,
+    category: "x402", eventType: args.eventType, path: null, toolName: args.toolName, channel: null,
     success: X402_SUCCESS_BY_EVENT_TYPE[args.eventType],
     durationMs: null, amount: args.amount, currency: args.currency, txHash: args.txHash, dataSource: null, ...client
   });
@@ -165,10 +165,10 @@ export function recordX402Event(
  *  currentMcpClientContext()'s doc comment). */
 export function recordToolInvocation(
   repository: AnalyticsRepository,
-  args: { toolName: string; success: boolean; durationMs: number; dataSource: DataSource | null; client: RequestClientContext }
+  args: { toolName: string; channel: AnalyticsChannel; success: boolean; durationMs: number; dataSource: DataSource | null; client: RequestClientContext }
 ): void {
   fireAndForget(repository, {
-    category: "tool", eventType: "invocation" as AnalyticsEventType, path: null, toolName: args.toolName,
+    category: "tool", eventType: "invocation" as AnalyticsEventType, path: null, toolName: args.toolName, channel: args.channel,
     success: args.success, durationMs: args.durationMs, amount: null, currency: null, txHash: null,
     dataSource: args.dataSource, ...args.client
   });

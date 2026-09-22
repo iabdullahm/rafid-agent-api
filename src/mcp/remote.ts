@@ -84,7 +84,7 @@ export function createRemoteMcpHandler(billingService: BillingService, baseLogge
       const client = currentMcpClientContext(mcpClientContext);
       const success = event.status < 400;
       recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: event.toolName, success, durationMs: event.durationMs, client });
-      recordToolInvocation(analyticsRepository, { toolName: event.toolName, success, durationMs: event.durationMs, dataSource: (event.dataSource ?? null) as DataSource | null, client });
+      recordToolInvocation(analyticsRepository, { toolName: event.toolName, channel: "mcp-remote", success, durationMs: event.durationMs, dataSource: (event.dataSource ?? null) as DataSource | null, client });
     }
   };
   const server = createMcpServer(logger);
@@ -122,7 +122,7 @@ export function createRemoteMcpHandler(billingService: BillingService, baseLogge
       const capability = toolName ? capabilities.find(c => c.name === toolName) : undefined;
       if (capability && !capability.input.safeParse(params?.arguments ?? {}).success) {
         recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: capability.name, success: false, durationMs: 0, client });
-        recordToolInvocation(analyticsRepository, { toolName: capability.name, success: false, durationMs: 0, dataSource: null, client });
+        recordToolInvocation(analyticsRepository, { toolName: capability.name, channel: "mcp-remote", success: false, durationMs: 0, dataSource: null, client });
       }
     }
     void mcpClientContext.run(client, () =>

@@ -43,6 +43,12 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
     ).then(() => this.pool.query(
       // Every query filters by created_at (queryEvents) — one index covers the whole read path.
       `CREATE INDEX IF NOT EXISTS rafid_analytics_events_created_at_idx ON rafid_analytics_events (created_at DESC)`
+    )).then(() => this.pool.query(
+      // Additive column for an already-shipped table (see analytics/types.ts's AnalyticsChannel
+      // doc comment — added for the revenue ledger's reconciliation endpoint). ADD COLUMN IF NOT
+      // EXISTS rather than a second CREATE TABLE, so an already-deployed table picks it up
+      // without a separate migration step; existing rows simply read back with channel = null.
+      `ALTER TABLE rafid_analytics_events ADD COLUMN IF NOT EXISTS channel text`
     )).then(() => undefined);
   }
 
@@ -50,11 +56,11 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
     await this.ready;
     await this.pool.query(
       `INSERT INTO rafid_analytics_events(
-        category, event_type, path, tool_name, success, duration_ms, amount, currency, tx_hash,
+        category, event_type, path, tool_name, channel, success, duration_ms, amount, currency, tx_hash,
         data_source, client_hash, user_agent, referer, client_name, created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
       [
-        event.category, event.eventType, event.path, event.toolName, event.success, event.durationMs,
+        event.category, event.eventType, event.path, event.toolName, event.channel, event.success, event.durationMs,
         event.amount, event.currency, event.txHash, event.dataSource, event.clientHash, event.userAgent,
         event.referer, event.clientName, event.createdAt ?? new Date().toISOString()
       ]
@@ -64,13 +70,13 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
   async queryEvents(since: Date): Promise<AnalyticsEvent[]> {
     await this.ready;
     const result = await this.pool.query(
-      `SELECT category, event_type, path, tool_name, success, duration_ms, amount, currency, tx_hash,
+      `SELECT category, event_type, path, tool_name, channel, success, duration_ms, amount, currency, tx_hash,
               data_source, client_hash, user_agent, referer, client_name, created_at
        FROM rafid_analytics_events WHERE created_at >= $1 ORDER BY created_at DESC LIMIT $2`,
       [since.toISOString(), MAX_QUERY_EVENTS]
     );
     return result.rows.map(r => ({
-      category: r.category, eventType: r.event_type, path: r.path, toolName: r.tool_name,
+      category: r.category, eventType: r.event_type, path: r.path, toolName: r.tool_name, channel: r.channel,
       success: r.success, durationMs: r.duration_ms === null ? null : Number(r.duration_ms),
       amount: r.amount === null ? null : Number(r.amount), currency: r.currency, txHash: r.tx_hash,
       dataSource: r.data_source, clientHash: r.client_hash, userAgent: r.user_agent, referer: r.referer,

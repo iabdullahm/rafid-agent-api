@@ -21,6 +21,7 @@
     "ncsi:discover": "node --env-file-if-exists=.env --import tsx src/ncsiDiscoverCli.ts",
     "partner:feeds": "node --env-file-if-exists=.env --import tsx src/partnerFeedsCli.ts",
     "analytics:summary": "node --env-file-if-exists=.env --import tsx src/analyticsSummaryCli.ts",
+    "revenue:summary": "node --env-file-if-exists=.env --import tsx src/revenueSummaryCli.ts",
     "test:ncsi-live": "node --env-file-if-exists=.env --import tsx --test tests/ncsi-live.test.ts",
     "test:db": "node --env-file-if-exists=.env --import tsx scripts/test-db.ts",
     "test:partner-e2e": "node --env-file-if-exists=.env --import tsx scripts/partner-e2e.ts",

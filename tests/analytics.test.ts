@@ -184,11 +184,11 @@ test("analytics/tool-usage: classifyDataSource reads each capability's own prove
 
   const repository = new MemoryAnalyticsRepository();
   const client: RequestClientContext = { clientHash: null, userAgent: null, referer: null, clientName: null };
-  recordToolInvocation(repository, { toolName: "analyze_oman_property", success: true, durationMs: 10, dataSource: "partner_feed", client });
-  recordToolInvocation(repository, { toolName: "analyze_oman_property", success: true, durationMs: 12, dataSource: "demo_manual", client });
-  recordToolInvocation(repository, { toolName: "analyze_oman_property", success: true, durationMs: 8, dataSource: "mixed", client });
-  recordToolInvocation(repository, { toolName: "analyze_oman_property", success: false, durationMs: 20, dataSource: "unknown", client });
-  recordToolInvocation(repository, { toolName: "analyze_property", success: true, durationMs: 5, dataSource: null, client });
+  recordToolInvocation(repository, { toolName: "analyze_oman_property", channel: "rest", success: true, durationMs: 10, dataSource: "partner_feed", client });
+  recordToolInvocation(repository, { toolName: "analyze_oman_property", channel: "x402", success: true, durationMs: 12, dataSource: "demo_manual", client });
+  recordToolInvocation(repository, { toolName: "analyze_oman_property", channel: "rest", success: true, durationMs: 8, dataSource: "mixed", client });
+  recordToolInvocation(repository, { toolName: "analyze_oman_property", channel: "rest", success: false, durationMs: 20, dataSource: "unknown", client });
+  recordToolInvocation(repository, { toolName: "analyze_property", channel: "mcp-remote", success: true, durationMs: 5, dataSource: null, client });
 
   const summary = summarize(repository.all(), new Date());
   assert.equal(summary.last24h.toolInvocations, 5);

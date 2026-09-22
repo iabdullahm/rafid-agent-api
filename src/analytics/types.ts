@@ -52,6 +52,16 @@ export type AnalyticsEventType = DiscoveryEventType | McpEventType | X402EventTy
  *  and search_oman_company where the company registry itself carries no coverage breakdown). */
 export type DataSource = "partner_feed" | "demo_manual" | "mixed" | "unknown";
 
+/** How a "tool" category invocation reached this codebase — REST X-API-Key, x402 pay-per-call,
+ *  or remote MCP. Added for the revenue ledger's reconciliation endpoint (src/revenue/aggregate.ts's
+ *  buildReconciliation()), which needs to compare "successful x402 tool executions" against the
+ *  settlement ledger without conflating an x402 call with a REST/MCP call to the same capability —
+ *  see that function's doc comment. Null for discovery/mcp/x402-category rows, where "channel"
+ *  isn't a meaningful concept (a discovery hit and an x402 funnel event aren't tool invocations at
+ *  all). This is purely additive to an already-shipped table — PostgresAnalyticsRepository adds it
+ *  via ALTER TABLE ... ADD COLUMN IF NOT EXISTS, so existing rows simply read back as null. */
+export type AnalyticsChannel = "rest" | "x402" | "mcp-remote";
+
 export interface AnalyticsEvent {
   category: AnalyticsCategory;
   eventType: AnalyticsEventType;
@@ -60,6 +70,8 @@ export interface AnalyticsEvent {
   path: string | null;
   /** mcp tools_call and tool invocations only — a CapabilityName from the shared registry. */
   toolName: string | null;
+  /** Tool invocations only — see AnalyticsChannel's doc comment. */
+  channel: AnalyticsChannel | null;
   /** Whether the underlying call succeeded — an HTTP 2xx / a non-isError MCP result / a
    *  settled==true payment, depending on category. Null where success/failure isn't a concept
    *  for this row (a discovery hit, an mcp initialize/tools_list call). */
