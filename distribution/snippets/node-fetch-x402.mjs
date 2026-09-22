@@ -3,7 +3,7 @@
 // payment signer from your own client library. Never construct or transmit a raw
 // private key by hand; this snippet does not, and cannot, sign a real payment itself.
 
-const BASE_URL = "https://rafid-agent-api.vercel.app";
+const BASE_URL = "https://api.rafidsystem.com";
 
 async function callWithX402(path, body, wallet) {
   const url = `${BASE_URL}/api/v1/x402${path}`;

@@ -2,7 +2,7 @@
 
 Three ways to call Rafid. Pick one; they all reach the same capability registry and produce the same output shape.
 
-Production base URL: `https://rafid-agent-api.vercel.app`
+Production base URL: `https://api.rafidsystem.com`
 
 Example intent used throughout this pack:
 
@@ -12,7 +12,7 @@ That maps to one call: `analyze_oman_property` with `{ governorate: "Muscat", ar
 
 ## A. Remote MCP
 
-**Endpoint:** `POST https://rafid-agent-api.vercel.app/mcp` — a stateless MCP Streamable HTTP transport (JSON-RPC 2.0). Live status: `GET /api/v1/mcp/status`. Full guide: [`MCP.md`](MCP.md).
+**Endpoint:** `POST https://api.rafidsystem.com/mcp` — a stateless MCP Streamable HTTP transport (JSON-RPC 2.0). Live status: `GET /api/v1/mcp/status`. Full guide: [`MCP.md`](MCP.md).
 
 **Minimal configuration:** point any MCP client that supports the Streamable HTTP transport at the URL above. No API key and no x402 payment is required for remote MCP today — it is unmetered in this phase (see [`MCP.md`](MCP.md) for exactly what that means).
 
@@ -56,12 +56,12 @@ Exact numeric values depend on the live comparable pool at call time — see [`e
 
 ## B. REST / OpenAPI (API-key)
 
-**Endpoint:** `POST https://rafid-agent-api.vercel.app/api/v1/oman/property/analyze`, header `X-API-Key: <your key>`. Full guide: [`OPENAPI.md`](OPENAPI.md).
+**Endpoint:** `POST https://api.rafidsystem.com/api/v1/oman/property/analyze`, header `X-API-Key: <your key>`. Full guide: [`OPENAPI.md`](OPENAPI.md).
 
 **Minimal configuration:** an active Rafid API key in the `X-API-Key` header.
 
 ```bash
-curl -s -X POST https://rafid-agent-api.vercel.app/api/v1/oman/property/analyze \
+curl -s -X POST https://api.rafidsystem.com/api/v1/oman/property/analyze \
   -H "X-API-Key: $RAFID_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"governorate":"Muscat","area":"Al Mouj","propertyType":"villa","bedrooms":4,"sizeSqm":420,"askingPriceOMR":450000}'
@@ -71,18 +71,18 @@ curl -s -X POST https://rafid-agent-api.vercel.app/api/v1/oman/property/analyze 
 
 ## C. x402 pay-per-call (no account)
 
-**Endpoint:** `POST https://rafid-agent-api.vercel.app/api/v1/x402/oman/property/analyze` — no API key. Full guide: [`X402.md`](X402.md).
+**Endpoint:** `POST https://api.rafidsystem.com/api/v1/x402/oman/property/analyze` — no API key. Full guide: [`X402.md`](X402.md).
 
 **Minimal configuration:** an x402-aware HTTP client (or the pattern below done by hand): call once without payment to get a `402` with a `PAYMENT-REQUIRED` header describing accepted payment, satisfy it, retry with an `X-PAYMENT` header.
 
 ```bash
 # 1. Unpaid call — expect 402 with a PAYMENT-REQUIRED header
-curl -s -i -X POST https://rafid-agent-api.vercel.app/api/v1/x402/oman/property/analyze \
+curl -s -i -X POST https://api.rafidsystem.com/api/v1/x402/oman/property/analyze \
   -H "Content-Type: application/json" \
   -d '{"governorate":"Muscat","area":"Al Mouj","propertyType":"villa","bedrooms":4,"sizeSqm":420,"askingPriceOMR":450000}'
 
 # 2. Retry with a valid X-PAYMENT header once payment is satisfied (see X402.md)
-curl -s -X POST https://rafid-agent-api.vercel.app/api/v1/x402/oman/property/analyze \
+curl -s -X POST https://api.rafidsystem.com/api/v1/x402/oman/property/analyze \
   -H "Content-Type: application/json" \
   -H "X-PAYMENT: <payment-proof>" \
   -d '{"governorate":"Muscat","area":"Al Mouj","propertyType":"villa","bedrooms":4,"sizeSqm":420,"askingPriceOMR":450000}'

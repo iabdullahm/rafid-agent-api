@@ -2,7 +2,7 @@
 // (priorityContexts / evidenceTypes / limitations / sampleQueries) — the fields an agent
 // should read before deciding to call analyze_oman_property. See ../AGENT-DISCOVERY.md.
 
-const BASE_URL = "https://rafid-agent-api.vercel.app";
+const BASE_URL = "https://api.rafidsystem.com";
 
 const res = await fetch(`${BASE_URL}/api/v1/capabilities`);
 const { data: tools } = await res.json(); // envelope: { success, data, meta } — data is the array

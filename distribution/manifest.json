@@ -2,7 +2,7 @@
   "name": "Rafid Property Intelligence",
   "tagline": "Property intelligence built for AI agents.",
   "description": "Property and facility intelligence tools built for autonomous AI agents: discover a capability, pay per call over x402 (or authenticate with an API key), execute, get a structured result. Not designed primarily as a human dashboard product.",
-  "baseUrl": "https://rafid-agent-api.vercel.app",
+  "baseUrl": "https://api.rafidsystem.com",
   "version": "0.1.0",
   "audience": "ai-agents",
   "discovery": {
@@ -246,6 +246,6 @@
     ],
     "note": "Coverage is Muscat governorate only, and only its supported areas. Al Mouj Muscat is the deployment's strongest single-area coverage today because it is the only area with real partner-fed (sourceType partner_feed) sale records; other supported areas may only have demo/manual_benchmark data on a given deployment. This is not nationwide Oman coverage."
   },
-  "generatedAt": "2026-09-22T04:01:10.536Z",
+  "generatedAt": "2026-09-22T05:01:55.286Z",
   "generatedBy": "scripts/generateDistributionManifest.ts (derived from src/domain/capabilities.ts — never hand-edit this file)"
 }

@@ -129,7 +129,7 @@ paths[x402BasePath + "/status"] = { get: { operationId: "x402_status", tags: ["x
 } };
 // Section 3/4/5/8: top-level agent discovery. All four reuse the exact builder functions
 // app.ts calls at request time, so this document can never drift from the live responses.
-const exampleOrigin = "https://rafid-agent-api.vercel.app";
+const exampleOrigin = "https://api.rafidsystem.com";
 paths[capabilitiesBasePath] = { get: { operationId: "capabilities", tags: ["Agent"], summary: "Machine-first capability registry", description: "The full capability registry — schemas, pricing, when to use, examples — optimized for an agent (or the model behind it) to decide what to call without reading prose. The single source every other discovery endpoint here reuses.", security: [],
   responses: { "200": { description: "Capability registry", content: json(success({ type: "array", items: { type: "object", required: ["name", "description", "whenToUse", "price", "currency", "paymentProtocol", "endpoint", "inputSchema", "outputSchema"], properties: {
     name: { type: "string" }, description: { type: "string" }, whenToUse: { type: "string" }, useCases: { type: "array", items: { type: "string" } },

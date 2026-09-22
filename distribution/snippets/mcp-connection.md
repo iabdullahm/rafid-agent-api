@@ -6,13 +6,13 @@ Referenced from [`../MCP.md`](../MCP.md#generic-mcp-client-any-language-any-fram
 
 ```bash
 # 1. List tools
-curl -s -X POST https://rafid-agent-api.vercel.app/mcp \
+curl -s -X POST https://api.rafidsystem.com/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
 # 2. Call a tool
-curl -s -X POST https://rafid-agent-api.vercel.app/mcp \
+curl -s -X POST https://api.rafidsystem.com/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"analyze_oman_property","arguments":{"governorate":"Muscat","area":"Al Mouj","propertyType":"apartment","bedrooms":2,"sizeSqm":130,"askingPriceOMR":118000}}}'
@@ -24,7 +24,7 @@ Each response is a standard JSON-RPC 2.0 envelope; the tool result lives at `res
 
 ```javascript
 async function callTool(name, args) {
-  const res = await fetch("https://rafid-agent-api.vercel.app/mcp", {
+  const res = await fetch("https://api.rafidsystem.com/mcp", {
     method: "POST",
     headers: { "Content-Type": "application/json", "Accept": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }),

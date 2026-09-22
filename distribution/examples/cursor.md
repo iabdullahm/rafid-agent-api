@@ -26,7 +26,7 @@ Cursor's remote-server config shape (`url`, `headers`, `auth`) is documented for
 {
   "mcpServers": {
     "rafid-remote": {
-      "url": "https://rafid-agent-api.vercel.app/mcp"
+      "url": "https://api.rafidsystem.com/mcp"
     }
   }
 }

@@ -3,7 +3,7 @@
 import "dotenv/config";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
 
-export const RAFID_API_URL = (process.env.RAFID_API_URL || "https://rafid-agent-api.vercel.app").replace(/\/+$/, "");
+export const RAFID_API_URL = (process.env.RAFID_API_URL || "https://api.rafidsystem.com").replace(/\/+$/, "");
 export const ANALYZE_PATH = "/api/v1/x402/property/analyze";
 export const ANALYZE_URL = RAFID_API_URL + ANALYZE_PATH;
 

@@ -4,10 +4,10 @@ Rafid exposes every capability as an MCP tool — `analyze_property`, `compare_p
 
 ## Remote MCP endpoint
 
-- **Endpoint:** `POST https://rafid-agent-api.vercel.app/mcp`
+- **Endpoint:** `POST https://api.rafidsystem.com/mcp`
 - **Transport:** MCP Streamable HTTP, stateless (`sessionIdGenerator: undefined` — every request is self-contained; there is no session to keep alive, which matters on serverless hosting where two requests can land on different, unrelated warm instances).
 - **Response mode:** plain JSON body (`enableJsonResponse: true`), not an SSE stream, since these are simple request/response calculators.
-- **Live status:** `GET https://rafid-agent-api.vercel.app/api/v1/mcp/status` returns `{ enabled, transport: ["stdio","http"], tools: 4, endpoint: "/mcp" }` when remote MCP is live on a given deployment. Always check this rather than assuming — remote MCP is controlled by `MCP_REMOTE_ENABLED` (default `true`) and can be turned off per deployment, in which case `/mcp` 404s and only stdio is available.
+- **Live status:** `GET https://api.rafidsystem.com/api/v1/mcp/status` returns `{ enabled, transport: ["stdio","http"], tools: 4, endpoint: "/mcp" }` when remote MCP is live on a given deployment. Always check this rather than assuming — remote MCP is controlled by `MCP_REMOTE_ENABLED` (default `true`) and can be turned off per deployment, in which case `/mcp` 404s and only stdio is available.
 - **Auth/payment:** none required today. Every remote MCP call is still recorded through the same usage log as REST/x402 calls (`accessMode: "mcp-remote"`), but at `billableAmount: 0` — remote MCP is not a metered channel in this phase. Don't assume that stays true forever; check `/api/v1/mcp/status` and this document at integration time.
 - **Errors:** every tool call returns `{ isError: true, content: [...] }` with a public, sanitized error (never a raw stack trace) rather than throwing — safe for a remote, untrusted caller.
 
@@ -84,7 +84,7 @@ Some MCP clients accept a remote server as a `url`-keyed entry instead of `comma
 {
   "mcpServers": {
     "rafid": {
-      "url": "https://rafid-agent-api.vercel.app/mcp",
+      "url": "https://api.rafidsystem.com/mcp",
       "transport": "http"
     }
   }
@@ -115,7 +115,7 @@ See [`examples/cursor.md`](examples/cursor.md) for a development workflow built 
 The remote endpoint is just JSON-RPC 2.0 over HTTP POST — any HTTP-capable client can speak to it without an MCP-specific library:
 
 ```bash
-curl -s -X POST https://rafid-agent-api.vercel.app/mcp \
+curl -s -X POST https://api.rafidsystem.com/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
@@ -124,7 +124,7 @@ curl -s -X POST https://rafid-agent-api.vercel.app/mcp \
 then
 
 ```bash
-curl -s -X POST https://rafid-agent-api.vercel.app/mcp \
+curl -s -X POST https://api.rafidsystem.com/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"analyze_oman_property","arguments":{"governorate":"Muscat","area":"Al Mouj","propertyType":"villa","bedrooms":4,"sizeSqm":420,"askingPriceOMR":450000}}}'
@@ -138,7 +138,7 @@ Using the official MCP TypeScript SDK's Streamable HTTP client transport (illust
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
-const transport = new StreamableHTTPClientTransport(new URL("https://rafid-agent-api.vercel.app/mcp"));
+const transport = new StreamableHTTPClientTransport(new URL("https://api.rafidsystem.com/mcp"));
 const client = new Client({ name: "example-agent", version: "1.0.0" });
 await client.connect(transport);
 

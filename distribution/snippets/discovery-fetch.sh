@@ -3,7 +3,7 @@
 # that all discovery documents agree with each other (they're all built from the same
 # capability registry — see ../AGENT-DISCOVERY.md).
 
-BASE_URL="https://rafid-agent-api.vercel.app"
+BASE_URL="https://api.rafidsystem.com"
 
 echo "--- /agent.json ---"
 curl -s "$BASE_URL/agent.json" | head -c 500; echo

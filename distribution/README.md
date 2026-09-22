@@ -6,7 +6,7 @@ Property intelligence built for AI agents.
 
 Rafid Property Intelligence is an AI-agent-first API for Oman property and facility intelligence. It is not designed primarily as a human dashboard product — there is no sign-up flow, no user account, and no billing portal. An agent (or the model behind one) discovers what Rafid can do from a small set of machine-readable documents, pays per call over the x402 protocol (or authenticates with an API key), calls a tool, and gets a structured JSON result back.
 
-Production base URL: `https://rafid-agent-api.vercel.app`
+Production base URL: `https://api.rafidsystem.com`
 Source repository: https://github.com/iabdullahm/rafid-agent-api
 
 ## What's in this pack

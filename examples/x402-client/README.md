@@ -8,7 +8,7 @@ against the deployed API.
 It calls:
 
 ```
-POST https://rafid-agent-api.vercel.app/api/v1/x402/property/analyze
+POST https://api.rafidsystem.com/api/v1/x402/property/analyze
 ```
 
 with this fixed example payload:
@@ -94,7 +94,7 @@ project's README for the API-key route.
 
 - **`Expected HTTP 402, got ...`** — the server isn't currently gating that route with x402
   (`X402_ENABLED` may be `false`, or the network/config changed). Check
-  `GET https://rafid-agent-api.vercel.app/api/v1/x402/status` for the live, factual state
+  `GET https://api.rafidsystem.com/api/v1/x402/status` for the live, factual state
   before assuming this example is broken.
 - **Payment fails with an insufficient-funds-style message** — your wallet needs a small
   amount of real USDC on Base Mainnet. Double-check you're on the right network; the unpaid

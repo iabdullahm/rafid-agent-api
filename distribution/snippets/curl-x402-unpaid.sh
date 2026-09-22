@@ -4,7 +4,7 @@
 # describing the accepted payment terms — no wallet or payment proof needed
 # for this step.
 
-BASE_URL="https://rafid-agent-api.vercel.app"
+BASE_URL="https://api.rafidsystem.com"
 
 curl -s -i -X POST "$BASE_URL/api/v1/x402/property/analyze" \
   -H "Content-Type: application/json" \

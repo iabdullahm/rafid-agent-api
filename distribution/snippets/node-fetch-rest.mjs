@@ -1,7 +1,7 @@
 // Node fetch client for the API-key REST route. Requires Node 18+ (global fetch) or an
 // equivalent fetch polyfill. See ../OPENAPI.md for the full route family.
 
-const BASE_URL = "https://rafid-agent-api.vercel.app";
+const BASE_URL = "https://api.rafidsystem.com";
 const API_KEY = process.env.RAFID_API_KEY ?? "<your-api-key>";
 
 async function analyzeOmanProperty(input) {

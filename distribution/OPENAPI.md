@@ -1,6 +1,6 @@
 # OpenAPI Guide
 
-`GET /openapi.json` (`https://rafid-agent-api.vercel.app/openapi.json`) is a full OpenAPI 3.1 document generated at request time by `buildOpenapi()` (`src/api/openapi.ts`) from the same capability registry every other discovery surface reads — it can't drift from the live route behavior, the schemas, or the prices in `GET /api/v1/pricing`. A human-browsable Swagger UI over the same document is at `GET /docs`.
+`GET /openapi.json` (`https://api.rafidsystem.com/openapi.json`) is a full OpenAPI 3.1 document generated at request time by `buildOpenapi()` (`src/api/openapi.ts`) from the same capability registry every other discovery surface reads — it can't drift from the live route behavior, the schemas, or the prices in `GET /api/v1/pricing`. A human-browsable Swagger UI over the same document is at `GET /docs`.
 
 ## Operation IDs
 

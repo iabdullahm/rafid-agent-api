@@ -38,11 +38,11 @@ PostgreSQL-backed customers, hashed keys, usage tracking and per-customer limits
 
 The Express entry point exports the app when `VERCEL=1` and keeps the normal port listener for local runs. `vercel.json` pins the function to `iad1` near the current US East Neon database and limits requests to 15 seconds. `.vercelignore` prevents the local `.env`, caches and generated files from being uploaded.
 
-Production API: <https://rafid-agent-api.vercel.app>  
-Landing page: <https://rafid-agent-api.vercel.app/> (browsers) / same URL with `Accept: application/json` (agents)  
-Health: <https://rafid-agent-api.vercel.app/api/v1/health>  
-OpenAPI: <https://rafid-agent-api.vercel.app/openapi.json>  
-Agent metadata: <https://rafid-agent-api.vercel.app/api/v1/agent>
+Production API: <https://api.rafidsystem.com>  
+Landing page: <https://api.rafidsystem.com/> (browsers) / same URL with `Accept: application/json` (agents)  
+Health: <https://api.rafidsystem.com/api/v1/health>  
+OpenAPI: <https://api.rafidsystem.com/openapi.json>  
+Agent metadata: <https://api.rafidsystem.com/api/v1/agent>
 
 Connect the repository directory to a Vercel project, attach the Neon Marketplace database, and configure these Production environment variables:
 
@@ -260,7 +260,7 @@ Responses include `X-Request-ID`. Codes cover 400 validation/malformed JSON, 401
 ### Agent discovery, pricing and tool catalog
 
 ```bash
-curl -s https://rafid-agent-api.vercel.app/api/v1/agent
+curl -s https://api.rafidsystem.com/api/v1/agent
 ```
 
 ```json
@@ -615,7 +615,7 @@ Use your own absolute project path. For remote Streamable HTTP, point an MCP cli
 ```json
 {
   "mcpServers": {
-    "rafid": { "url": "https://rafid-agent-api.vercel.app/mcp" }
+    "rafid": { "url": "https://api.rafidsystem.com/mcp" }
   }
 }
 ```
@@ -623,7 +623,7 @@ Use your own absolute project path. For remote Streamable HTTP, point an MCP cli
 Or drive it directly with JSON-RPC 2.0 over HTTP:
 
 ```bash
-curl -s https://rafid-agent-api.vercel.app/mcp \
+curl -s https://api.rafidsystem.com/mcp \
   -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"analyze_property","arguments":{"propertyValue":85000,"annualRent":7200,"serviceCharge":650,"maintenanceCost":400}}}'
 ```
