@@ -147,8 +147,10 @@ for (const [file, content] of fileContents) {
 const URL_PATTERN = /https?:\/\/[a-zA-Z0-9.-]+(?:\/[^\s"'`)]*)?/g;
 // Legitimate external documentation citations that are not this API's own base URL.
 // github.com: the project's own public source repository (distinct from PRODUCTION_BASE_URL,
-// the deployed API's origin) — linked for `git clone` in MCP.md's stdio fallback section.
-const ALLOWED_EXTERNAL_HOSTS = ["cursor.com", "github.com"];
+// the deployed API's origin) — linked for `git clone` in MCP.md's stdio fallback section, and
+// for a cited upstream issue (x402-foundation/x402#2112) in X402.md.
+// docs.x402.org: the x402 protocol's own Bazaar extension documentation, cited in X402.md.
+const ALLOWED_EXTERNAL_HOSTS = ["cursor.com", "github.com", "docs.x402.org"];
 for (const [file, content] of fileContents) {
   if (!/\.(md|sh|mjs|json)$/.test(file)) continue;
   for (const match of content.matchAll(URL_PATTERN)) {

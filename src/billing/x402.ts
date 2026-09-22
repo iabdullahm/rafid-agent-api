@@ -1,8 +1,10 @@
 import type { RequestHandler } from "express";
+import { z } from "zod";
 import { x402ResourceServer, HTTPFacilitatorClient, type RoutesConfig } from "@x402/core/server";
 import type { Network } from "@x402/core/types";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
 import { paymentMiddleware } from "@x402/express";
+import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
 import { createFacilitatorConfig } from "@coinbase/x402";
 import { capabilities } from "../domain/capabilities.js";
 import type { BillingService } from "./service.js";
@@ -34,12 +36,32 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
   const facilitatorClient = config.cdpConfigured
     ? new HTTPFacilitatorClient(createFacilitatorConfig(config.cdpApiKeyId, config.cdpApiKeySecret))
     : new HTTPFacilitatorClient({ url: config.x402FacilitatorUrl });
-  const resourceServer = new x402ResourceServer(facilitatorClient).register(network, new ExactEvmScheme());
+  // registerExtension(bazaarResourceServerExtension) turns on Bazaar discovery-metadata
+  // enrichment (e.g. filling in the HTTP `method` field at declaration time) and echoing for
+  // every route below that declares a `bazaar` extension via declareDiscoveryExtension() — see
+  // https://docs.x402.org/extensions/bazaar. This makes each route's request/response shape
+  // legible to Bazaar-aware facilitators/clients; it does not itself register Rafid with any
+  // catalog. Cataloging only happens once a facilitator processes a real settled payment whose
+  // PaymentPayload echoes this declaration back (facilitator-side, out of this codebase's
+  // control) — see distribution/X402.md for the current status of that step.
+  const resourceServer = new x402ResourceServer(facilitatorClient)
+    .register(network, new ExactEvmScheme())
+    .registerExtension(bazaarResourceServerExtension);
   const routes: RoutesConfig = {};
   for (const c of capabilities) {
     routes[`POST ${x402BasePath}${c.path}`] = {
       accepts: billing.buildX402PaymentRequirement(c.name, network, config.x402WalletAddress as `0x${string}`),
-      description: `${c.description} Paid per call via x402; no API key required.`
+      description: `${c.description} Paid per call via x402; no API key required.`,
+      // Bazaar discovery declaration: same input/output shape already published via OpenAPI
+      // (z.toJSONSchema(c.input)/(c.output), the same conversion src/api/openapi.ts uses) and
+      // the same hand-verified example/exampleOutput used everywhere else in this registry —
+      // no second copy of a schema or example is maintained here.
+      extensions: declareDiscoveryExtension({
+        bodyType: "json",
+        input: c.example as Record<string, unknown>,
+        inputSchema: z.toJSONSchema(c.input) as Record<string, unknown>,
+        output: { example: c.exampleOutput, schema: z.toJSONSchema(c.output) as Record<string, unknown> }
+      })
     };
   }
   // syncFacilitatorOnStart (default true): the returned handler awaits the facilitator's
