@@ -146,7 +146,9 @@ for (const [file, content] of fileContents) {
 // ============================ (d) Production base URL is centralized ============================
 const URL_PATTERN = /https?:\/\/[a-zA-Z0-9.-]+(?:\/[^\s"'`)]*)?/g;
 // Legitimate external documentation citations that are not this API's own base URL.
-const ALLOWED_EXTERNAL_HOSTS = ["cursor.com"];
+// github.com: the project's own public source repository (distinct from PRODUCTION_BASE_URL,
+// the deployed API's origin) — linked for `git clone` in MCP.md's stdio fallback section.
+const ALLOWED_EXTERNAL_HOSTS = ["cursor.com", "github.com"];
 for (const [file, content] of fileContents) {
   if (!/\.(md|sh|mjs|json)$/.test(file)) continue;
   for (const match of content.matchAll(URL_PATTERN)) {

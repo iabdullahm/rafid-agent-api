@@ -16,7 +16,7 @@ Rafid exposes every capability as an MCP tool — `analyze_property`, `compare_p
 If a deployment has remote MCP disabled, or a client only supports local stdio MCP servers, run:
 
 ```bash
-git clone <this repository>
+git clone https://github.com/iabdullahm/rafid-agent-api.git
 cd rafid-agent-api
 npm install
 npm run build
