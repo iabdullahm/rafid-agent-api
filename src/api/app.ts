@@ -43,6 +43,7 @@ import { PostgresRevenueLedger } from "../db/revenueStore.js";
 import { getRevenueDatabaseUrl, getRevenueInternalApiKey } from "../revenue/config.js";
 import { createRevenueRoutes } from "./revenueRoutes.js";
 import { decodeX402SettlementMetadata, buildSettlementRecord, recordSettlement } from "../revenue/settlementCapture.js";
+import { createDashboardRoutes } from "./dashboardRoutes.js";
 export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger } = {}) {
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
   const store = config.authMode === "postgres" ? options.store : undefined;
@@ -349,6 +350,18 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   const businessRepository = options.businessRepository ?? (businessDatabaseUrl ? new PostgresCompanyRepository(businessDatabaseUrl) : undefined);
   if (config.adminEnabled && businessRepository) {
     app.use(createAdminRoutes({ config, repository: businessRepository }));
+  }
+  // Internal Rafid Property Intelligence dashboard (/internal/dashboard — see dashboardRoutes.ts's
+  // doc comment). Deliberately mounted on config.adminEnabled ALONE, unlike the business admin
+  // dashboard immediately above: this dashboard reads only the analytics and revenue layers
+  // (always constructed, regardless of database configuration), never businessRepository, so it
+  // must not share that router's extra `&& businessRepository` condition. Reuses the exact same
+  // session-cookie authentication as /admin/* (middleware/adminAuth.ts) — see that router's own
+  // doc comment for why this is a separate login page rather than a shared one. Never registered
+  // in the `capabilities` array; never reachable from /agent.json, MCP, the tool catalog,
+  // discovery or the x402 route family; never a public dashboard.
+  if (config.adminEnabled) {
+    app.use(createDashboardRoutes({ config, analyticsRepository, revenueLedger, billingService }));
   }
   // Internal analytics API (discovery/MCP/x402/tool-usage — see analyticsRoutes.ts's doc
   // comment). Always mounted, unlike the Partner Data Feed/Admin routes above: recording itself

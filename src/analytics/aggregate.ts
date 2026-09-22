@@ -65,21 +65,38 @@ export interface SummaryWindow {
   demoManualInvocations: number;
 }
 
+/** The per-window computation `summarize()` runs for each of the 3 fixed windows — extracted to
+ *  its own named function (2026-09-22, internal dashboard "All Time" period support) purely so it
+ *  can also be called ONCE over an unfiltered event array for the "all" period, without a second
+ *  implementation of the same counting logic. Behavior for existing 24h/7d/30d callers is
+ *  unchanged — byWindow() still calls this once per fixed window, exactly as before. */
+function summarizeWindow(windowEvents: readonly AnalyticsEvent[]): SummaryWindow {
+  const tools = windowEvents.filter(e => e.category === "tool");
+  const successfulTools = tools.filter(e => e.success === true);
+  return {
+    totalEvents: windowEvents.length,
+    discoveryHits: windowEvents.filter(e => e.category === "discovery").length,
+    mcpCalls: windowEvents.filter(e => e.category === "mcp").length,
+    x402Events: windowEvents.filter(e => e.category === "x402").length,
+    toolInvocations: tools.length,
+    toolSuccessRate: successRate(successfulTools.length, tools.length),
+    partnerFeedInvocations: tools.filter(e => e.dataSource === "partner_feed" || e.dataSource === "mixed").length,
+    demoManualInvocations: tools.filter(e => e.dataSource === "demo_manual" || e.dataSource === "mixed").length
+  };
+}
+
 export function summarize(events: readonly AnalyticsEvent[], now: Date): Record<WindowKey, SummaryWindow> {
-  return byWindow(events, now, windowEvents => {
-    const tools = windowEvents.filter(e => e.category === "tool");
-    const successfulTools = tools.filter(e => e.success === true);
-    return {
-      totalEvents: windowEvents.length,
-      discoveryHits: windowEvents.filter(e => e.category === "discovery").length,
-      mcpCalls: windowEvents.filter(e => e.category === "mcp").length,
-      x402Events: windowEvents.filter(e => e.category === "x402").length,
-      toolInvocations: tools.length,
-      toolSuccessRate: successRate(successfulTools.length, tools.length),
-      partnerFeedInvocations: tools.filter(e => e.dataSource === "partner_feed" || e.dataSource === "mixed").length,
-      demoManualInvocations: tools.filter(e => e.dataSource === "demo_manual" || e.dataSource === "mixed").length
-    };
-  });
+  return byWindow(events, now, summarizeWindow);
+}
+
+/** "All Time" variant for the internal dashboard's period selector (spec section 1: 24h/7d/30d/
+ *  All Time) — NOT a fourth entry in WINDOW_MS/WINDOW_KEYS, since every other consumer of
+ *  summarize()'s Record<WindowKey,...> shape (GET /api/v1/internal/analytics/summary and its
+ *  tests) is specified against exactly those 3 fixed windows. Callers pass an event array already
+ *  fetched with no lower bound (queryEvents(new Date(0))) — this applies the identical counting
+ *  logic with no time filter, rather than a parallel/duplicate analytics implementation. */
+export function summarizeAllTime(events: readonly AnalyticsEvent[]): SummaryWindow {
+  return summarizeWindow(events);
 }
 
 // -----------------------------------------------------------------------------------------------
@@ -92,13 +109,21 @@ export interface DiscoveryWindow {
   uniqueClients: number;
 }
 
+function summarizeDiscoveryWindow(windowEvents: readonly AnalyticsEvent[]): DiscoveryWindow {
+  const hits = windowEvents.filter(e => e.category === "discovery");
+  const byPath: Record<string, number> = {};
+  for (const hit of hits) if (hit.path) byPath[hit.path] = (byPath[hit.path] ?? 0) + 1;
+  return { totalHits: hits.length, byPath, uniqueClients: new Set(hits.map(h => h.clientHash).filter((h): h is string => Boolean(h))).size };
+}
+
 export function summarizeDiscovery(events: readonly AnalyticsEvent[], now: Date): Record<WindowKey, DiscoveryWindow> {
-  return byWindow(events, now, windowEvents => {
-    const hits = windowEvents.filter(e => e.category === "discovery");
-    const byPath: Record<string, number> = {};
-    for (const hit of hits) if (hit.path) byPath[hit.path] = (byPath[hit.path] ?? 0) + 1;
-    return { totalHits: hits.length, byPath, uniqueClients: new Set(hits.map(h => h.clientHash).filter((h): h is string => Boolean(h))).size };
-  });
+  return byWindow(events, now, summarizeDiscoveryWindow);
+}
+
+/** "All Time" variant — see summarizeAllTime()'s doc comment for why this exists and why it is
+ *  not a fourth WINDOW_MS entry. */
+export function summarizeDiscoveryAllTime(events: readonly AnalyticsEvent[]): DiscoveryWindow {
+  return summarizeDiscoveryWindow(events);
 }
 
 // -----------------------------------------------------------------------------------------------
@@ -124,41 +149,49 @@ export interface ToolsWindow {
   mcp: { initialize: number; toolsList: number; toolsCall: number };
 }
 
+function summarizeToolsWindow(windowEvents: readonly AnalyticsEvent[]): ToolsWindow {
+  const invocations = windowEvents.filter(e => e.category === "tool");
+  const byTool: Record<string, ToolStats> = {};
+  for (const invocation of invocations) {
+    const name = invocation.toolName ?? "unknown";
+    const stats = (byTool[name] ??= {
+      calls: 0, successCount: 0, failureCount: 0, successRate: null, p50LatencyMs: null, p95LatencyMs: null,
+      partnerFeedCalls: 0, demoManualCalls: 0, mixedCalls: 0, unknownDataSourceCalls: 0
+    });
+    stats.calls++;
+    if (invocation.success === true) stats.successCount++;
+    else if (invocation.success === false) stats.failureCount++;
+    if (invocation.dataSource === "partner_feed") stats.partnerFeedCalls++;
+    else if (invocation.dataSource === "demo_manual") stats.demoManualCalls++;
+    else if (invocation.dataSource === "mixed") stats.mixedCalls++;
+    else if (invocation.dataSource === "unknown") stats.unknownDataSourceCalls++;
+  }
+  for (const [name, stats] of Object.entries(byTool)) {
+    const durations = invocations.filter(e => (e.toolName ?? "unknown") === name && typeof e.durationMs === "number").map(e => e.durationMs!);
+    stats.successRate = successRate(stats.successCount, stats.calls);
+    stats.p50LatencyMs = percentile(durations, 50);
+    stats.p95LatencyMs = percentile(durations, 95);
+  }
+  const mcpEvents = windowEvents.filter(e => e.category === "mcp");
+  return {
+    totalInvocations: invocations.length,
+    byTool,
+    mcp: {
+      initialize: mcpEvents.filter(e => e.eventType === "initialize").length,
+      toolsList: mcpEvents.filter(e => e.eventType === "tools_list").length,
+      toolsCall: mcpEvents.filter(e => e.eventType === "tools_call").length
+    }
+  };
+}
+
 export function summarizeTools(events: readonly AnalyticsEvent[], now: Date): Record<WindowKey, ToolsWindow> {
-  return byWindow(events, now, windowEvents => {
-    const invocations = windowEvents.filter(e => e.category === "tool");
-    const byTool: Record<string, ToolStats> = {};
-    for (const invocation of invocations) {
-      const name = invocation.toolName ?? "unknown";
-      const stats = (byTool[name] ??= {
-        calls: 0, successCount: 0, failureCount: 0, successRate: null, p50LatencyMs: null, p95LatencyMs: null,
-        partnerFeedCalls: 0, demoManualCalls: 0, mixedCalls: 0, unknownDataSourceCalls: 0
-      });
-      stats.calls++;
-      if (invocation.success === true) stats.successCount++;
-      else if (invocation.success === false) stats.failureCount++;
-      if (invocation.dataSource === "partner_feed") stats.partnerFeedCalls++;
-      else if (invocation.dataSource === "demo_manual") stats.demoManualCalls++;
-      else if (invocation.dataSource === "mixed") stats.mixedCalls++;
-      else if (invocation.dataSource === "unknown") stats.unknownDataSourceCalls++;
-    }
-    for (const [name, stats] of Object.entries(byTool)) {
-      const durations = invocations.filter(e => (e.toolName ?? "unknown") === name && typeof e.durationMs === "number").map(e => e.durationMs!);
-      stats.successRate = successRate(stats.successCount, stats.calls);
-      stats.p50LatencyMs = percentile(durations, 50);
-      stats.p95LatencyMs = percentile(durations, 95);
-    }
-    const mcpEvents = windowEvents.filter(e => e.category === "mcp");
-    return {
-      totalInvocations: invocations.length,
-      byTool,
-      mcp: {
-        initialize: mcpEvents.filter(e => e.eventType === "initialize").length,
-        toolsList: mcpEvents.filter(e => e.eventType === "tools_list").length,
-        toolsCall: mcpEvents.filter(e => e.eventType === "tools_call").length
-      }
-    };
-  });
+  return byWindow(events, now, summarizeToolsWindow);
+}
+
+/** "All Time" variant — see summarizeAllTime()'s doc comment for why this exists and why it is
+ *  not a fourth WINDOW_MS entry. */
+export function summarizeToolsAllTime(events: readonly AnalyticsEvent[]): ToolsWindow {
+  return summarizeToolsWindow(events);
 }
 
 // -----------------------------------------------------------------------------------------------
@@ -181,33 +214,41 @@ export interface X402Window {
 
 const MAX_RECENT_SETTLEMENTS = 20;
 
-export function summarizeX402(events: readonly AnalyticsEvent[], now: Date): Record<WindowKey, X402Window> {
-  return byWindow(events, now, windowEvents => {
-    const x402Events = windowEvents.filter(e => e.category === "x402");
-    const settledAmountByCurrency: Record<string, number> = {};
-    const byTool: Record<string, { challenges: number; settlementSuccess: number; settlementFailure: number }> = {};
-    for (const event of x402Events) {
-      const tool = event.toolName ?? "unknown";
-      const bucket = (byTool[tool] ??= { challenges: 0, settlementSuccess: 0, settlementFailure: 0 });
-      if (event.eventType === "challenge") bucket.challenges++;
-      if (event.eventType === "settlement_success") {
-        bucket.settlementSuccess++;
-        if (event.amount !== null && event.currency) settledAmountByCurrency[event.currency] = Math.round(((settledAmountByCurrency[event.currency] ?? 0) + event.amount) * 10000) / 10000;
-      }
-      if (event.eventType === "settlement_failure") bucket.settlementFailure++;
+function summarizeX402Window(windowEvents: readonly AnalyticsEvent[]): X402Window {
+  const x402Events = windowEvents.filter(e => e.category === "x402");
+  const settledAmountByCurrency: Record<string, number> = {};
+  const byTool: Record<string, { challenges: number; settlementSuccess: number; settlementFailure: number }> = {};
+  for (const event of x402Events) {
+    const tool = event.toolName ?? "unknown";
+    const bucket = (byTool[tool] ??= { challenges: 0, settlementSuccess: 0, settlementFailure: 0 });
+    if (event.eventType === "challenge") bucket.challenges++;
+    if (event.eventType === "settlement_success") {
+      bucket.settlementSuccess++;
+      if (event.amount !== null && event.currency) settledAmountByCurrency[event.currency] = Math.round(((settledAmountByCurrency[event.currency] ?? 0) + event.amount) * 10000) / 10000;
     }
-    const recentSettlements = x402Events
-      .filter(e => e.eventType === "settlement_success" && e.txHash)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-      .slice(0, MAX_RECENT_SETTLEMENTS)
-      .map(e => ({ toolName: e.toolName, amount: e.amount, currency: e.currency, txHash: e.txHash!, at: e.createdAt }));
-    return {
-      challenges: x402Events.filter(e => e.eventType === "challenge").length,
-      paymentVerified: x402Events.filter(e => e.eventType === "payment_verified").length,
-      paymentFailed: x402Events.filter(e => e.eventType === "payment_failed").length,
-      settlementSuccess: x402Events.filter(e => e.eventType === "settlement_success").length,
-      settlementFailure: x402Events.filter(e => e.eventType === "settlement_failure").length,
-      settledAmountByCurrency, byTool, recentSettlements
-    };
-  });
+    if (event.eventType === "settlement_failure") bucket.settlementFailure++;
+  }
+  const recentSettlements = x402Events
+    .filter(e => e.eventType === "settlement_success" && e.txHash)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, MAX_RECENT_SETTLEMENTS)
+    .map(e => ({ toolName: e.toolName, amount: e.amount, currency: e.currency, txHash: e.txHash!, at: e.createdAt }));
+  return {
+    challenges: x402Events.filter(e => e.eventType === "challenge").length,
+    paymentVerified: x402Events.filter(e => e.eventType === "payment_verified").length,
+    paymentFailed: x402Events.filter(e => e.eventType === "payment_failed").length,
+    settlementSuccess: x402Events.filter(e => e.eventType === "settlement_success").length,
+    settlementFailure: x402Events.filter(e => e.eventType === "settlement_failure").length,
+    settledAmountByCurrency, byTool, recentSettlements
+  };
+}
+
+export function summarizeX402(events: readonly AnalyticsEvent[], now: Date): Record<WindowKey, X402Window> {
+  return byWindow(events, now, summarizeX402Window);
+}
+
+/** "All Time" variant — see summarizeAllTime()'s doc comment for why this exists and why it is
+ *  not a fourth WINDOW_MS entry. */
+export function summarizeX402AllTime(events: readonly AnalyticsEvent[]): X402Window {
+  return summarizeX402Window(events);
 }
