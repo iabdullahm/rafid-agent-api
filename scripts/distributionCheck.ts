@@ -150,7 +150,12 @@ const URL_PATTERN = /https?:\/\/[a-zA-Z0-9.-]+(?:\/[^\s"'`)]*)?/g;
 // the deployed API's origin) — linked for `git clone` in MCP.md's stdio fallback section, and
 // for a cited upstream issue (x402-foundation/x402#2112) in X402.md.
 // docs.x402.org: the x402 protocol's own Bazaar extension documentation, cited in X402.md.
-const ALLOWED_EXTERNAL_HOSTS = ["cursor.com", "github.com", "docs.x402.org"];
+// modelcontextprotocol.io / registry.modelcontextprotocol.io / static.modelcontextprotocol.io:
+// the MCP protocol's own docs, official registry and schema host, cited in MCP-REGISTRY.md.
+const ALLOWED_EXTERNAL_HOSTS = [
+  "cursor.com", "github.com", "docs.x402.org",
+  "modelcontextprotocol.io", "registry.modelcontextprotocol.io", "static.modelcontextprotocol.io"
+];
 for (const [file, content] of fileContents) {
   if (!/\.(md|sh|mjs|json)$/.test(file)) continue;
   for (const match of content.matchAll(URL_PATTERN)) {

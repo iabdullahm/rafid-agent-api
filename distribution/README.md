@@ -22,6 +22,7 @@ This directory packages Rafid for distribution to AI agents, agent frameworks, a
 | [`A2A.md`](A2A.md) | The A2A-style Agent Card and OpenAI-plugin-style manifest. |
 | [`AGENT-DISCOVERY.md`](AGENT-DISCOVERY.md) | Every discovery surface (`/agent.json`, `/llms.txt`, `/api/v1/capabilities`, …) and what each is for. |
 | [`MARKETPLACE-LISTING.md`](MARKETPLACE-LISTING.md) | A reusable listing template for agent marketplaces/directories. |
+| [`MCP-REGISTRY.md`](MCP-REGISTRY.md) | Publishing Rafid's remote MCP endpoint to the official MCP Registry: the prepared `server.json` and the exact `mcp-publisher` commands to run yourself. |
 | [`INTEGRATION-EXAMPLES.md`](INTEGRATION-EXAMPLES.md) | Index of the worked integration examples in `examples/`. |
 | [`SECURITY.md`](SECURITY.md) | What is and isn't exposed: accounts, tokens, partner data, wallet/facilitator secrets, rate limiting, SSRF protection. |
 | [`BRANDING.md`](BRANDING.md) | Name, tagline, description, keywords — for listings and marketplace pages. |
