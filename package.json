@@ -1,0 +1,46 @@
+{
+  "name": "rafid-agent-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --import tsx --watch src/server.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "start": "node --env-file-if-exists=.env dist/server.js",
+    "mcp": "node --env-file-if-exists=.env dist/mcp.js",
+    "admin": "node --env-file-if-exists=.env --import tsx src/admin.ts",
+    "market:import": "node --env-file-if-exists=.env --import tsx src/marketImportCli.ts",
+    "ncsi:discover": "node --env-file-if-exists=.env --import tsx src/ncsiDiscoverCli.ts",
+    "partner:feeds": "node --env-file-if-exists=.env --import tsx src/partnerFeedsCli.ts",
+    "test:ncsi-live": "node --env-file-if-exists=.env --import tsx --test tests/ncsi-live.test.ts",
+    "test:db": "node --env-file-if-exists=.env --import tsx scripts/test-db.ts",
+    "test:partner-e2e": "node --env-file-if-exists=.env --import tsx scripts/partner-e2e.ts",
+    "distribution:manifest": "node --import tsx scripts/generateDistributionManifest.ts",
+    "predistribution:check": "npm run distribution:manifest",
+    "distribution:check": "node --import tsx scripts/distributionCheck.ts",
+    "pretest": "npm run build",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@coinbase/x402": "^2.1.0",
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@x402/core": "^2.26.0",
+    "@x402/evm": "^2.26.0",
+    "@x402/express": "^2.26.0",
+    "express": "^5.1.0",
+    "pg": "^8.23.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.20.0",
+    "typescript": "^6.0.0"
+  }
+}

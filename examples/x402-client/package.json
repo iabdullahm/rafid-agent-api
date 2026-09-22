@@ -1,0 +1,21 @@
+{
+  "name": "rafid-x402-client-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone example client for Rafid Agent API's pay-per-call x402 endpoints. Demonstrates the unpaid 402 quote, then (optionally) a real x402 payment using the official x402 client SDK. Not part of the Rafid Agent API server itself.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test:x402-unpaid": "node src/unpaid.js",
+    "test:x402-payment": "node src/pay.js"
+  },
+  "dependencies": {
+    "@x402/core": "^2.26.0",
+    "@x402/evm": "^2.26.0",
+    "@x402/fetch": "^2.26.0",
+    "dotenv": "^16.4.5",
+    "viem": "^2.21.0"
+  }
+}

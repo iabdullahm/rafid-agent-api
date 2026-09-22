@@ -1,0 +1,21 @@
+node_modules/
+dist/
+.npm-cache/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+.postgres-test/
+.vercel/
+
+.vercel
+.env*
+partner-packages/
+
+# Real partner/business data and scratch exports — never publish to a public repo.
+# (See distribution/SECURITY.md for what Rafid's discovery/docs surfaces deliberately omit;
+# this covers local files that were never meant to be in version control at all.)
+data/
+_to_delete/
+Claude outputs/

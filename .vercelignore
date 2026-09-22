@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example
+.npm-cache/
+.postgres-test/
+dist/
+node_modules/
+coverage/
+*.log

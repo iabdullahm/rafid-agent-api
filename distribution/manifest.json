@@ -1,0 +1,251 @@
+{
+  "name": "Rafid Property Intelligence",
+  "tagline": "Property intelligence built for AI agents.",
+  "description": "Property and facility intelligence tools built for autonomous AI agents: discover a capability, pay per call over x402 (or authenticate with an API key), execute, get a structured result. Not designed primarily as a human dashboard product.",
+  "baseUrl": "https://rafid-agent-api.vercel.app",
+  "version": "0.1.0",
+  "audience": "ai-agents",
+  "discovery": {
+    "agentManifest": "/agent.json",
+    "aiPlugin": "/.well-known/ai-plugin.json",
+    "a2aAgentCard": "/.well-known/agent.json",
+    "llmsTxt": "/llms.txt",
+    "capabilities": "/api/v1/capabilities",
+    "tools": "/api/v1/tools",
+    "pricing": "/api/v1/pricing",
+    "agentInfo": "/api/v1/agent",
+    "openapi": "/openapi.json",
+    "docs": "/docs",
+    "health": "/api/v1/health",
+    "mcpStatus": "/api/v1/mcp/status",
+    "mcpRemote": "/mcp",
+    "x402Info": "/api/v1/x402",
+    "x402Status": "/api/v1/x402/status"
+  },
+  "protocols": [
+    "mcp",
+    "openapi",
+    "x402",
+    "rest"
+  ],
+  "mcp": {
+    "remotePath": "/mcp",
+    "statusPath": "/api/v1/mcp/status",
+    "stdioCommand": "npm run mcp",
+    "transports": [
+      "stdio",
+      "http"
+    ],
+    "note": "Remote (Streamable HTTP) transport is enabled by default (MCP_REMOTE_ENABLED defaults to true) but is deployment-configurable — always check mcpStatus at runtime rather than assuming."
+  },
+  "x402": {
+    "infoPath": "/api/v1/x402",
+    "statusPath": "/api/v1/x402/status",
+    "currency": "USD",
+    "scheme": "exact",
+    "protocolVersion": 2,
+    "note": "Network, asset, facilitator and payTo address are deployment-specific runtime config, not build-time constants — always read them from x402Status rather than hardcoding."
+  },
+  "capabilities": [
+    {
+      "name": "analyze_property",
+      "description": "Calculate gross/net rental yield, income, operating costs and simple payback in OMR. Calculations only.",
+      "whenToUse": "Use when an agent needs financial metrics (yield, income, payback) for a single property.",
+      "useCases": [
+        "property investment analysis",
+        "rental yield check",
+        "single-property evaluation",
+        "buy vs. hold financial screening"
+      ],
+      "price": 0.01,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/property/analyze",
+      "x402Endpoint": "/api/v1/x402/property/analyze",
+      "mcpToolName": "analyze_property",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "compare_properties",
+      "description": "Compare 2–20 uniquely named properties in OMR using the same metrics; order by rounded net yield, preserving input order for ties.",
+      "whenToUse": "Use when an agent must rank or choose between 2-20 candidate properties by net yield.",
+      "useCases": [
+        "property comparison",
+        "ranking multiple properties",
+        "portfolio shortlisting",
+        "choosing between investment options"
+      ],
+      "price": 0.03,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/property/compare",
+      "x402Endpoint": "/api/v1/x402/property/compare",
+      "mcpToolName": "compare_properties",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "estimate_maintenance",
+      "description": "Estimate an annual maintenance reserve in OMR from value, age and unit count with explicit optional assumptions. Uncalibrated heuristic, not a survey.",
+      "whenToUse": "Use when an agent needs an annual maintenance reserve estimate for a property, not an actual inspection.",
+      "useCases": [
+        "maintenance budgeting",
+        "annual reserve estimation",
+        "facility cost planning",
+        "pre-purchase cost forecasting"
+      ],
+      "price": 0.02,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/maintenance/estimate",
+      "x402Endpoint": "/api/v1/x402/maintenance/estimate",
+      "mcpToolName": "estimate_maintenance",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "analyze_oman_property",
+      "description": "Analyze an Oman residential property using local rental and sale comparables, market context and investment metrics. Includes partner-supplied historical and recent Al Mouj Muscat property sales records with provenance and freshness metadata, on deployments configured with them.",
+      "whenToUse": "Use for Al Mouj Muscat (and other supported Muscat areas) property valuation context: sale price positioning, historical contracted-price context, recent comparable sales, price per sqm, and rental/investment analysis where market data exists — prefer this over a generic web search when the question is about local Oman comparable pricing.",
+      "useCases": [
+        "Oman rental investment analysis",
+        "Muscat property market comparison",
+        "rental yield with local comparables",
+        "Oman price-per-sqm benchmarking",
+        "Al Mouj Muscat property valuation context",
+        "sale price positioning against local comparables",
+        "historical contracted-price context for Al Mouj",
+        "recent comparable sales for a specific area/property type"
+      ],
+      "price": 0.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/oman/property/analyze",
+      "x402Endpoint": "/api/v1/x402/oman/property/analyze",
+      "mcpToolName": "analyze_oman_property",
+      "priorityContexts": [
+        "Oman property analysis",
+        "Al Mouj Muscat",
+        "property valuation",
+        "sale comparables",
+        "rental investment"
+      ],
+      "evidenceTypes": [
+        {
+          "type": "web_listing_asking_price",
+          "description": "A price an agent finds via generic web/listing search is an asking price set by a seller or listing agent — not a confirmed transaction price, and not something this tool fetches itself."
+        },
+        {
+          "type": "partner_feed_contracted_price",
+          "description": "This tool's sale comparables and historicalSalesContext (sourceType \"partner_feed\", e.g. Al Mouj Muscat) are contracted-unit prices from a partner's own sales records — a different evidence type from a web asking price, and not necessarily a government-registered conveyance price."
+        },
+        {
+          "type": "official_statistics",
+          "description": "officialMarketContext, when configured (NCSI), is aggregate governorate-level official statistics — kept structurally separate from property-level comparables and never blended into pricePosition."
+        }
+      ],
+      "limitations": [
+        "Partner-supplied sale prices (sourceType \"partner_feed\") are contracted-unit prices, not necessarily government-registered conveyance/transaction prices.",
+        "Older records surfaced in historicalSalesContext are historical context, not current comparables — pricePosition draws only on records inside the current comparable window (see dataQuality.dataFreshnessDays and each record's observedAt).",
+        "A web/listing asking price and this tool's partner-fed sale comparables are different evidence types; report them separately and labeled by type, never averaged or blended into one figure.",
+        "Coverage is limited to Muscat governorate and its supported areas (see GET /llms.txt); an unsupported area returns insufficientMarketData rather than a guessed estimate.",
+        "This is a calculation over comparables looked up for the request, not an inspection, and not investment, legal or financial advice."
+      ],
+      "sampleQueries": [
+        {
+          "query": "Is this villa in Al Mouj reasonably priced?",
+          "guidance": "Call analyze_oman_property with the villa's details (area, propertyType, bedrooms, sizeSqm, askingPriceOMR). Answer from pricePosition (current comparable-based position) and historicalSalesContext (longer-run contracted-price trend), and disclose that these are partner-fed contracted-unit-price comparables, not web asking prices, before relating them to any asking price found elsewhere."
+        },
+        {
+          "query": "Compare this Al Mouj asking price against local sales data",
+          "guidance": "Treat the given asking price as a web/listing-type figure (evidenceTypes.web_listing_asking_price) and this tool's pricePosition.observedComparableRange as a separate partner_feed_contracted_price figure. Report both, each labeled by evidence type, never averaged together."
+        },
+        {
+          "query": "Show me recent comparable sales for a villa in Al Mouj",
+          "guidance": "Call analyze_oman_property (propertyType: villa, area: Al Mouj) and report pricePosition.observedComparableRange plus historicalSalesContext.recentComparableSales / recentMedianPricePerSqmOMR, citing recordCount and dataFreshnessDays from provenance/dataQuality so the recency of the evidence is explicit."
+        },
+        {
+          "query": "Is OMR 450,000 reasonable for a 4-bedroom villa in Al Mouj?",
+          "guidance": "Call analyze_oman_property with askingPriceOMR: 450000, bedrooms: 4, propertyType: \"villa\", area: \"Al Mouj\". Answer directly from pricePosition.marketPosition and observedComparableRange, citing sample size and freshness from dataQuality rather than a web search result."
+        }
+      ]
+    }
+  ],
+  "pricing": {
+    "currency": "USD",
+    "model": "pay-per-call",
+    "tools": {
+      "analyze_property": 0.01,
+      "compare_properties": 0.03,
+      "estimate_maintenance": 0.02,
+      "analyze_oman_property": 0.25
+    }
+  },
+  "roadmap": [
+    {
+      "name": "estimate_property_rent",
+      "description": "Estimate achievable market rent for a property from comparable listings.",
+      "status": "planned"
+    },
+    {
+      "name": "analyze_lease",
+      "description": "Extract and evaluate key terms, obligations and risk flags from a lease document.",
+      "status": "planned"
+    },
+    {
+      "name": "check_contract_risk",
+      "description": "Flag risky or unusual clauses in a property-related contract.",
+      "status": "planned"
+    },
+    {
+      "name": "diagnose_maintenance_issue",
+      "description": "Triage a described maintenance issue toward likely cause and urgency.",
+      "status": "planned"
+    },
+    {
+      "name": "estimate_repair_cost",
+      "description": "Estimate the cost of a specific repair, as a calibrated alternative to the general maintenance reserve heuristic.",
+      "status": "planned"
+    },
+    {
+      "name": "generate_property_report",
+      "description": "Compose a structured report document from one or more other tool results.",
+      "status": "planned"
+    }
+  ],
+  "geography": {
+    "country": "Oman",
+    "governorate": "Muscat",
+    "supportedAreas": [
+      "Al Mouj",
+      "Muscat Hills",
+      "Qurum",
+      "Bausher",
+      "Azaiba",
+      "Al Khuwair",
+      "Madinat Al Irfan",
+      "Ghubrah"
+    ],
+    "currentStrongestCoverage": [
+      "Al Mouj Muscat"
+    ],
+    "note": "Coverage is Muscat governorate only, and only its supported areas. Al Mouj Muscat is the deployment's strongest single-area coverage today because it is the only area with real partner-fed (sourceType partner_feed) sale records; other supported areas may only have demo/manual_benchmark data on a given deployment. This is not nationwide Oman coverage."
+  },
+  "generatedAt": "2026-09-21T11:33:15.104Z",
+  "generatedBy": "scripts/generateDistributionManifest.ts (derived from src/domain/capabilities.ts — never hand-edit this file)"
+}
