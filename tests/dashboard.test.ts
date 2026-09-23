@@ -10,7 +10,7 @@ import { buildSettlementDedupeKey } from "../src/revenue/idempotency.js";
 import {
   abbreviateTxHash, explorerUrlFor, buildRevenueTrend, sortToolConversionRows,
   buildAgentStatuses, buildActivityFeed, buildSystemHealthScore, buildCountSparkline, buildSettlementCountSparkline,
-  buildCapabilityOverview, sortCapabilityOverviewRows
+  buildCapabilityOverview, sortCapabilityOverviewRows, AGENT_GROUPS
 } from "../src/api/dashboard/service.js";
 import type { RevenueSettlement, RevenueSettlementInput, RevenueLedger } from "../src/revenue/types.js";
 import type { AnalyticsEvent, AnalyticsEventInput } from "../src/analytics/types.js";
@@ -1034,6 +1034,38 @@ test("buildAgentStatuses: the Reconciliation agent is 'All clear' with zero anom
   assert.equal(anomalous.metricLabel, "2 anomaly(ies) this period");
 });
 
+// AGENT_GROUPS is a hand-curated editorial partition (unlike buildCapabilityOverview's pure
+// registry iteration), so it can't be made structurally impossible to go stale the same way — but
+// this test guards the one invariant that matters: every registered capability appears in exactly
+// one tool-owning group's toolNames, so a newly-added capability is caught here (as a failing
+// test) rather than silently missing from the "Active Agents" panel, as oman_supplier_check,
+// company_reputation_check, business_risk_score and document_facts_extract once were.
+test("AGENT_GROUPS: every registered capability belongs to exactly one tool-owning group", () => {
+  const CROSS_CUTTING_IDS = new Set(["payment", "reconciliation"]);
+  const toolOwningGroups = AGENT_GROUPS.filter(g => !CROSS_CUTTING_IDS.has(g.id));
+
+  const owners = new Map<string, string[]>();
+  for (const group of toolOwningGroups) {
+    for (const toolName of group.toolNames) {
+      owners.set(toolName, [...(owners.get(toolName) ?? []), group.id]);
+    }
+  }
+
+  for (const capability of capabilities) {
+    const groupsOwningIt = owners.get(capability.name) ?? [];
+    assert.equal(groupsOwningIt.length, 1,
+      `${capability.name} should belong to exactly one tool-owning AGENT_GROUPS entry, found: [${groupsOwningIt.join(", ")}]`);
+  }
+
+  // And no group lists a tool name that isn't actually registered (catches typos/renames).
+  const registryNames = new Set<string>(capabilities.map(c => c.name));
+  for (const group of toolOwningGroups) {
+    for (const toolName of group.toolNames) {
+      assert.ok(registryNames.has(toolName), `${group.id} lists unregistered tool name "${toolName}"`);
+    }
+  }
+});
+
 test("buildActivityFeed: sorts newest-first, produces a human-readable label per event category, and caps the result", () => {
   const events: AnalyticsEvent[] = [
     analyticsEvent({ category: "discovery", eventType: "hit", path: "/agent.json", toolName: null, channel: null, createdAt: "2026-01-01T00:00:00.000Z" }) as AnalyticsEvent,
@@ -1105,7 +1137,7 @@ test("buildSettlementCountSparkline: a 7d period returns 7 daily buckets and cou
   assert.equal(spark.reduce((a, b) => a + b, 0), 1);
 });
 
-test("dashboard command-center fields: agents, activityFeed, systemHealth and sparklines are present in the real payload, cover all six agent groups, and never leak secrets or demo markers", async t => {
+test("dashboard command-center fields: agents, activityFeed, systemHealth and sparklines are present in the real payload, cover every agent group, and never leak secrets or demo markers", async t => {
   const { server, base, analyticsRepository, revenueLedger } = await startDashboardApp();
   t.after(() => { server.closeAllConnections(); server.close(); });
   await analyticsRepository.record(analyticsEvent({ toolName: "analyze_oman_property", channel: "rest", success: true }));
@@ -1117,8 +1149,10 @@ test("dashboard command-center fields: agents, activityFeed, systemHealth and sp
   const body = JSON.parse(json);
   const data = body.data;
 
-  assert.equal(data.agents.length, 6);
-  for (const id of ["research", "property", "supplier", "risk", "payment", "reconciliation"]) {
+  // Derived from AGENT_GROUPS itself, never a hardcoded count/id list here — so this test doesn't
+  // go stale the next time a new agent group is added (as happened with the "document" group).
+  assert.equal(data.agents.length, AGENT_GROUPS.length);
+  for (const id of AGENT_GROUPS.map(g => g.id)) {
     assert.ok(data.agents.some((a: { id: string }) => a.id === id), `expected an agent card for ${id}`);
   }
   assert.ok(data.activityFeed.length >= 2);

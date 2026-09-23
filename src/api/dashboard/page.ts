@@ -417,6 +417,7 @@ const CLIENT_SCRIPT = `
     property: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 21V10l8-6 8 6v11"/><path d="M9 21v-7h6v7"/></svg>',
     supplier: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><line x1="12" y1="13" x2="12" y2="21"/></svg>',
     risk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/></svg>',
+    document: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>',
     payment: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><circle cx="16.5" cy="14.5" r="1.2" fill="currentColor" stroke="none"/></svg>',
     reconciliation: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 6h13M4 12h9M4 18h13"/><path d="M18 15l2 2 4-4" transform="translate(-3 -3)"/></svg>'
   };
@@ -912,7 +913,12 @@ const CLIENT_SCRIPT = `
     compare_properties: [{ name: "Price per sqm", formula: ["Property Value", "\u00f7", "Area (sqm)"] }, { name: "Gross Yield (per property)", formula: ["Annual Rent", "\u00f7", "Property Value"] }],
     estimate_maintenance: [{ name: "Maintenance Allowance", formula: ["Property Value", "\u00d7", "Age / Type Rate"] }]
   };
-  var CAPABILITY_ORDER = ["analyze_oman_property", "analyze_property", "compare_properties", "estimate_maintenance",
+  // Fallback only, used when a server payload somehow has no capabilityOverview (should not
+  // happen in practice). The real, always-current tab order below is derived from
+  // data.capabilityOverview, which lists every registered capability in registry order (see
+  // buildCapabilityOverview() in service.ts) - so a newly-added capability gets a tab here with
+  // no edit to this file required.
+  var CAPABILITY_ORDER_FALLBACK = ["analyze_oman_property", "analyze_property", "compare_properties", "estimate_maintenance",
     "research_company", "find_companies", "analyze_company_risk", "search_oman_company", "get_oman_company_profile", "analyze_oman_company", "due_diligence_oman_company"];
 
   function findToolConversionRow(data, toolName) {
@@ -922,7 +928,9 @@ const CLIENT_SCRIPT = `
   function renderAnalysisPreview(data, selected) {
     var el = document.getElementById("analysis-preview-body");
     var tabsEl = document.getElementById("analysis-preview-tabs");
-    var names = CAPABILITY_ORDER;
+    var names = (data.capabilityOverview && data.capabilityOverview.length)
+      ? data.capabilityOverview.map(function (r) { return r.toolName; })
+      : CAPABILITY_ORDER_FALLBACK;
     var active = selected || (data.activityFeed && data.activityFeed[0] && data.activityFeed[0].toolName && names.indexOf(data.activityFeed[0].toolName) !== -1 ? data.activityFeed[0].toolName : names[0]);
     tabsEl.innerHTML = names.map(function (n) { return '<button type="button" class="tab-btn' + (n === active ? " active" : "") + '" data-tool="' + esc(n) + '">' + esc(n) + "</button>"; }).join("");
     tabsEl.querySelectorAll(".tab-btn").forEach(function (btn) {
