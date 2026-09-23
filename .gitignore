@@ -11,6 +11,7 @@ coverage/
 
 .vercel
 .env*
+!.env.example
 partner-packages/
 
 # Real partner/business data and scratch exports — never publish to a public repo.
