@@ -477,7 +477,7 @@ export const AGENT_GROUPS: readonly AgentGroupDef[] = [
   { id: "research", name: "Research Agent", toolNames: ["research_company", "find_companies"] },
   { id: "property", name: "Property Agent", toolNames: ["analyze_property", "compare_properties", "estimate_maintenance", "analyze_oman_property"] },
   { id: "supplier", name: "Supplier Intelligence Agent", toolNames: ["search_oman_company", "get_oman_company_profile", "analyze_oman_company", "due_diligence_oman_company", "oman_supplier_check"] },
-  { id: "risk", name: "Risk Agent", toolNames: ["analyze_company_risk", "company_reputation_check", "business_risk_score"] },
+  { id: "risk", name: "Risk Agent", toolNames: ["analyze_company_risk", "company_reputation_check", "business_risk_score", "invoice_anomaly_check"] },
   { id: "document", name: "Document Intelligence Agent", toolNames: ["document_facts_extract"] },
   { id: "payment", name: "Payment / Settlement Agent", toolNames: [] },
   { id: "reconciliation", name: "Reconciliation Agent", toolNames: [] }

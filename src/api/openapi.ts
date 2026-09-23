@@ -45,8 +45,16 @@ const documentFactsErrors = Object.fromEntries(([
   [502, "DOCUMENT_FETCH_FAILED", "documentUrl could not be downloaded", { status: "fetch_failed", reason: "the server answered HTTP 404.", upstreamStatus: 404 }],
   [504, "DOCUMENT_TIMEOUT", "Download or extraction exceeded its time budget", { status: "timeout", stage: "download" }]
 ] as const).map(([status, code, message, details]) => [status, { description: `${message}. Not charged.`, content: json(errorSchema, { success: false, error: { code, message, details }, meta: { requestId: "example-request" } }) }]));
+/** invoice_anomaly_check: value-level validation errors (400, each naming the offending path, never
+ *  echoing the value) and the sanitized ANALYSIS_FAILED (500). Not charged. */
+const invoiceAnomalyErrors = {
+  "400": { description: "INVALID_INPUT (schema/unknown fields), INVALID_JSON, INVALID_MONETARY_VALUE, INVALID_DATE or UNSUPPORTED_CURRENCY_FORMAT. Not charged.", content: json(errorSchema, { success: false, error: { code: "INVALID_DATE", message: "invoice.invoiceDate must be a valid ISO 8601 date (YYYY-MM-DD) or date-time. No payment was taken.", details: { path: "invoice.invoiceDate" } }, meta: { requestId: "example-request" } }) },
+  "413": { description: "Request body exceeds 1mb", content: json(errorSchema, { success: false, error: { code: "PAYLOAD_TOO_LARGE", message: "Request body exceeds 1mb" }, meta: { requestId: "example-request" } }) },
+  "500": { description: "ANALYSIS_FAILED — the engine failed unexpectedly (no internal detail exposed). Not charged.", content: json(errorSchema, { success: false, error: { code: "ANALYSIS_FAILED", message: "The invoice could not be analyzed due to an internal error. No payment was taken.", details: { status: "analysis_failed" } }, meta: { requestId: "example-request" } }) }
+};
 const capabilityErrors: Partial<Record<string, Record<string, unknown>>> = {
   document_facts_extract: documentFactsErrors,
+  invoice_anomaly_check: invoiceAnomalyErrors,
   business_risk_score: Object.fromEntries(([
     [404, "ENTITY_NOT_FOUND", "No such company in the jurisdiction's registry and no other evidence the business exists", { status: "entity_not_found", registriesChecked: ["UK Companies House"], identifiersUsed: { companyName: "Example Trading Ltd", country: "GB", registrationNumber: null, lei: null, domain: null } }],
     [409, "AMBIGUOUS_ENTITY", "Several registered companies match; retry with a candidate's registrationNumber", { status: "ambiguous_entity", candidates: [{ legalName: "EXAMPLE TRADING LIMITED", country: "GB", city: "London", registrationNumber: "09876543", lei: null, registrationStatus: "active", incorporationDate: "2015-11-03", registry: "UK Companies House", matchScore: 0.9, matchedOn: ["name", "country"] }], suggestedIdentifiers: ["registrationNumber", "city", "website"] }],
@@ -69,6 +77,7 @@ for (const c of capabilities) {
       c.name === "oman_supplier_check" ? "Procurement" :
       c.name === "company_reputation_check" || c.name === "business_risk_score" ? "Risk Intelligence" :
       c.name === "document_facts_extract" ? "Document Intelligence" :
+      c.name === "invoice_anomaly_check" ? "Finance" :
       "Property"
     ],
     summary: c.description,
@@ -250,6 +259,7 @@ return {
     { name: "Oman", description: "Oman/Muscat-specific property analysis using local rental/sale comparables, normalization, confidence scoring and provenance. Muscat governorate only; see GET /llms.txt for supported areas and data limitations." },
     { name: "Intelligence", description: "Rafid Agent Intelligence: company research, discovery and evidence-tiered risk signals from public web sources. Inert (no external calls) until an operator configures the relevant provider — see GET /llms.txt." },
     { name: "Risk Intelligence", description: "Global, evidence-first company risk intelligence for AI agents: company_reputation_check investigates a company in any country (registry identity, sanctions-list name screening, adverse media with legal stage, customer reputation, online presence, stability, domain signals) and returns evidence-linked scores with a separate confidence score. business_risk_score ($0.50) answers \"is it risky to do business with this company?\": a deterministic 0–100 risk score (100 = highest detected risk) across corporate, financial, compliance, reputation, operational and digital risk, a separate confidence, evidence-backed risk flags and a machine-readable due-diligence action. Screening only — not a legal or compliance determination." },
+    { name: "Finance", description: "invoice_anomaly_check ($0.25): deterministic pre-payment invoice anomaly detection for accounts-payable agents in any country — arithmetic (quantity × unit price, subtotal, tax, total, decimal-safe with rounding tolerance), duplicate and near-duplicate invoices, supplier-history deviations (amount, currency, payment terms, invoice-number format, frequency), changed or unknown bank accounts (masked), purchase-order / contract / approval-limit issues, split-invoice patterns, date anomalies and repeated line items. Returns a transparent 0–100 risk score, risk level, advisory decision (continue / review / hold) and evidence-backed anomalies. Risk indicators only — not a fraud determination." },
     { name: "Document Intelligence", description: "document_facts_extract ($0.25): converts business documents from any country (contracts, invoices, purchase orders, quotations, tenders/RFPs, leases, policies, financial reports, legal documents, CVs, company profiles) into structured, evidence-backed facts — each with a 0–1 extraction confidence and source evidence (excerpt, offsets, section, page when real). Accepts an https documentUrl (PDF with a text layer, DOCX, HTML, text; max 25 pages) or extracted text. Document content is untrusted data: embedded instructions are never followed. Unusable documents return structured errors and are not charged." },
     { name: "Procurement", description: "Procurement supplier screening for AI procurement agents: oman_supplier_check screens an Oman supplier (identity, activity, website/contact/address consistency, sanctions and public-risk indicators) before an RFQ. Screening only — not KYC/AML or vendor approval." },
     { name: "Agent", description: "Public discovery, pricing and tool-catalog endpoints for AI agents and agent marketplaces." },

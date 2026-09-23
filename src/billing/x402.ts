@@ -73,21 +73,35 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
 export const MAX_DISCOVERY_DECLARATION_CHARS = 10_000;
 
 /** Full declaration (input + output schema + output example) when it fits; otherwise degrade
- *  gracefully — drop the output example, then the output entirely. The complete schemas and
- *  examples always remain available from /openapi.json and /api/v1/capabilities. */
+ *  gracefully — drop the output example, then the output entirely, then (for capabilities whose
+ *  input schema alone is large, e.g. invoice_anomaly_check) the human-readable descriptions inside
+ *  the input schema, then the example input. The complete schemas and examples always remain
+ *  available from /openapi.json and /api/v1/capabilities. Capabilities that already fit are
+ *  unaffected by the later steps. */
 export function discoveryDeclaration(c: (typeof capabilities)[number]): ReturnType<typeof declareDiscoveryExtension> {
-  const base = { bodyType: "json" as const, input: c.example as Record<string, unknown>, inputSchema: z.toJSONSchema(c.input) as Record<string, unknown> };
+  const inputSchema = z.toJSONSchema(c.input) as Record<string, unknown>;
+  const base = { bodyType: "json" as const, input: c.example as Record<string, unknown>, inputSchema };
   const outputSchema = z.toJSONSchema(c.output) as Record<string, unknown>;
+  const compactInputSchema = stripDescriptions(inputSchema) as Record<string, unknown>;
   const candidates = [
     { ...base, output: { example: c.exampleOutput, schema: outputSchema } },
     { ...base, output: { schema: outputSchema } },
-    base
+    base,
+    { ...base, inputSchema: compactInputSchema },
+    { bodyType: "json" as const, inputSchema: compactInputSchema }
   ];
   for (const candidate of candidates) {
     const declaration = declareDiscoveryExtension(candidate);
     if (JSON.stringify(declaration).length <= MAX_DISCOVERY_DECLARATION_CHARS) return declaration;
   }
-  return declareDiscoveryExtension(base);
+  return declareDiscoveryExtension({ bodyType: "json" as const, inputSchema: compactInputSchema });
+}
+
+/** A JSON Schema without its `description` annotations (validation keywords unchanged). */
+function stripDescriptions(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(stripDescriptions);
+  if (!node || typeof node !== "object") return node;
+  return Object.fromEntries(Object.entries(node as Record<string, unknown>).filter(([k, v]) => !(k === "description" && typeof v === "string")).map(([k, v]) => [k, stripDescriptions(v)]));
 }
 
 /**

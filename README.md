@@ -216,6 +216,7 @@ REST base: `http://localhost:8787`.
 | POST | /api/v1/risk/company-reputation-check | X-API-Key (x402: /api/v1/x402/risk/company-reputation-check; L402: /api/v1/l402/risk/company-reputation-check) |
 | POST | /api/v1/risk/business-risk-score | X-API-Key (x402: /api/v1/x402/risk/business-risk-score; L402: /api/v1/l402/risk/business-risk-score; MPP: /api/v1/mpp/charge/business_risk_score) |
 | POST | /api/v1/documents/facts-extract | X-API-Key (x402: /api/v1/x402/documents/facts-extract; L402: /api/v1/l402/documents/facts-extract; MPP: /api/v1/mpp/charge/document_facts_extract) — 1 MB JSON body limit |
+| POST | /api/v1/finance/invoice-anomaly-check | X-API-Key (x402: /api/v1/x402/finance/invoice-anomaly-check; L402: /api/v1/l402/finance/invoice-anomaly-check; MPP: /api/v1/mpp/charge/invoice_anomaly_check) — 1 MB JSON body limit |
 | POST | /api/v1/intelligence/research-company | X-API-Key |
 | POST | /api/v1/intelligence/find-companies | X-API-Key |
 | POST | /api/v1/intelligence/analyze-company-risk | X-API-Key |
@@ -562,6 +563,72 @@ curl -X POST http://localhost:8787/api/v1/documents/facts-extract \
 **Structured errors (no charge on x402/L402/MPP):** `MISSING_DOCUMENT` / `CONFLICTING_DOCUMENT_SOURCES` / `EMPTY_DOCUMENT` / `INVALID_URL` 400, `DOCUMENT_TOO_LARGE` 413, `UNSUPPORTED_FORMAT` 415, `UNREADABLE_DOCUMENT` 422 (corrupt, password-protected, scanned without a text layer), `DOCUMENT_FETCH_FAILED` 502, `DOCUMENT_TIMEOUT` 504, `EXTRACTION_FAILED` 500, plus the shared `INVALID_INPUT` / `INVALID_JSON`.
 
 **Example output** in OpenAPI / `/api/v1/capabilities` is the real pipeline over a synthetic agreement — regenerate with `node --import tsx scripts/generateDocumentFactsExample.ts` (a test fails if it drifts). **Unit economics:** deterministic extraction has no per-call provider cost; LLM assist (when enabled and needed) ≈ ≤ $0.02.
+
+### Finance: invoice anomaly check (`invoice_anomaly_check`, $0.25/call)
+
+```text
+invoice_anomaly_check
+$0.25 / successful call
+Pre-payment invoice anomaly and risk-indicator detection (any country, any currency)
+```
+
+`POST /api/v1/finance/invoice-anomaly-check` (API key) · `POST /api/v1/x402/finance/invoice-anomaly-check` (x402, $0.25 = 250000 USDC atomic units) · `POST /api/v1/l402/finance/invoice-anomaly-check` (L402, when enabled) · `POST /api/v1/mpp/charge/invoice_anomaly_check` and MPP sessions (when enabled) · MCP tool `invoice_anomaly_check`. Category `finance_risk`, OpenAPI tag "Finance", idempotent, no side effects. **Use before approving, paying, booking, reconciling or auditing an invoice, especially when an agent needs to determine whether the invoice requires human review.**
+
+The engine (`src/invoice-anomaly/`) is deterministic and in-process: no LLM, no external API, no credentials, nothing stored or logged. Money is parsed from its decimal text into scaled BigInts (never compared as binary floating point) and every arithmetic comparison has an explicit rounding tolerance of one currency minor unit per rounding step (0.01 USD, 0.001 OMR, 1 JPY; overridable with `options.roundingTolerance`).
+
+**Two modes.** *Standalone* — only `invoice` (the only required field is `invoice.total`): arithmetic, dates/terms, repeated lines, invoice-number sanity, currency-code validity, missing business fields. *Context-aware* — add any of `historicalInvoices` (≤ 1,000, any supplier), `supplierProfile` (ids, aliases, `bankAccounts` with `verified`/`addedDate`, currencies, terms, status, `createdDate`), `purchaseOrder` (supplier, currency, `totalAmount`, `invoicedToDate` / `remainingAmount`, `amountsIncludeTax`, `issueDate`, status, line items), `contract` (supplier, currency, `maxAmount`, `maxInvoiceAmount`, `invoicedToDate`, period, terms), `approvalContext` (`approvalThreshold`, currency, `splitWindowDays`) and `paymentHistory` (≤ 1,000). `options.asOfDate` pins the reference date (default: today, UTC) for fully reproducible output.
+
+```bash
+curl -X POST http://localhost:8787/api/v1/finance/invoice-anomaly-check \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"invoice":{"invoiceNumber":"INV-2026-1043","supplierName":"ABC Trading LLC","supplierId":"SUP-291","invoiceDate":"2026-09-20","dueDate":"2026-10-20","currency":"USD","subtotal":9200,"tax":460,"total":9660,"bankAccount":"US123456789","paymentTermsDays":30,"poNumber":"PO-2026-818","lineItems":[{"description":"Consulting services","quantity":10,"unitPrice":920,"taxRate":5,"total":9200}]},
+       "historicalInvoices":[{"invoiceNumber":"INV-2026-1021","supplierId":"SUP-291","invoiceDate":"2026-08-20","currency":"USD","total":8694,"bankAccount":"US987654321"}],
+       "options":{"asOfDate":"2026-09-23"}}'
+```
+
+Response (abridged):
+
+```json
+{
+  "riskScore": 44, "riskLevel": "high", "decision": "review", "anomalyCount": 1,
+  "anomalies": [{
+    "code": "BANK_ACCOUNT_CHANGED", "severity": "high", "confidence": 0.8, "field": "bankAccount",
+    "explanation": "The payment account on the invoice differs from the 1 account(s) previously recorded for this supplier; payment details should be verified with the supplier through a known contact before payment.",
+    "evidence": { "reason": "account_differs_from_supplier_records", "invoiceAccountMasked": "****6789", "knownAccountsMasked": ["****4321"], "lastUsedDate": "2026-08-20", "accountSeenForOtherSuppliers": false }
+  }],
+  "financialChecks": { "subtotalValid": true, "taxValid": true, "totalValid": true, "lineTotalsValid": true, "computed": { "lineItemsSum": 9200, "expectedTax": 460, "expectedTotal": 9660, "tolerance": 0.01 } },
+  "recommendedAction": "Verify the payment details directly with the supplier using contact details already on file (not those on the invoice) before paying.",
+  "summary": "1 anomaly detected (BANK_ACCOUNT_CHANGED); risk high (44/100). Advisory decision: review — …",
+  "mode": "context_aware", "contextUsed": { "historicalInvoices": 1, "supplierHistoryMatched": 1, "…": "…" },
+  "invoiceSummary": { "invoiceNumber": "INV-2026-1043", "total": 9660, "bankAccountMasked": "****6789", "…": "…" },
+  "dataCompleteness": { "missingRequiredFields": [], "missingRecommendedFields": [] },
+  "scoring": { "model": "iac-1.0.0", "components": [{ "code": "BANK_ACCOUNT_CHANGED", "severity": "high", "confidence": 0.8, "basePoints": 55, "points": 44 }], "escalationBonus": 0, "…": "…" },
+  "limitations": ["The capability identifies invoice anomalies and risk indicators. It does not independently establish fraud or replace accounting, audit, compliance, or payment-authorization controls.", "…"],
+  "asOfDate": "2026-09-23", "checkedAt": "2026-09-23T00:00:00.000Z"
+}
+```
+
+(The full, generated example — a near-duplicate with a changed bank account billed against another supplier's PO, `critical` / `hold` — is in OpenAPI and `/api/v1/capabilities`; regenerate it with `node --import tsx scripts/generateInvoiceAnomalyExample.ts`, a test fails if it drifts.)
+
+**Anomaly codes** (one record per code; sub-findings in `evidence.issues`):
+
+| Family | Codes | What triggers it |
+|---|---|---|
+| Arithmetic | `LINE_TOTAL_MISMATCH`, `SUBTOTAL_MISMATCH`, `TAX_MISMATCH`, `TOTAL_MISMATCH` | quantity × unitPrice − discount ≠ line total; Σ lines ≠ subtotal; stated tax ≠ line/invoice rate × base; subtotal − discount + tax + shipping ≠ total (beyond tolerance). ≤ 0.5% of the total → low, else medium |
+| Duplicates | `DUPLICATE_INVOICE`, `POSSIBLE_DUPLICATE` | confirmed only for same supplier + same (or same-digit) invoice number + same amount, or an already-recorded payment; *possible* for a number variant (suffix/typo), same amount within `duplicateWindowDays` (14) plus a corroborating signal (similar number, same line items, same PO), same amount within 3 days, a reused number with a different amount, a resubmitted cancelled/rejected invoice, or the same number and amount under another supplier record. Sequential numbering and recurring same-amount billing are not treated as corroboration. The matched record is returned |
+| Supplier behavior (≥ 3 prior invoices) | `UNUSUAL_AMOUNT`, `UNUSUAL_CURRENCY`, `UNUSUAL_PAYMENT_TERMS`, `INVOICE_NUMBER_ANOMALY`, `SUPPLIER_PATTERN_DEVIATION` | above the historical max AND ≥ 2× the median AND robust z (median/MAD) ≥ 3.5 (≥ 5× → high); currency new for the supplier / outside the profile / differs from the contract / not ISO 4217; terms ≤ 50% and ≥ 10 days shorter than contract, profile or history; placeholder numbers, a format deviating from the supplier's ≥ 80%-dominant format, out-of-sequence numbers; blocked/suspended/inactive/unverified supplier, supplier id/name differing from the profile, a supplier record created ≤ 30 days before the invoice, ≥ 3 invoices in 30 days at ≥ 3× the prior monthly rate |
+| Payment details | `BANK_ACCOUNT_CHANGED`, `UNKNOWN_BANK_ACCOUNT` | account not among the supplier's profile/history/payment accounts (high), or on the profile but added ≤ 30 days ago and never paid (medium); a profile without the account, or the account only on file unverified (high); critical when the account also appears on another supplier's records. Always masked |
+| PO / contract / approval | `PO_MISMATCH`, `PO_AMOUNT_EXCEEDED`, `CONTRACT_LIMIT_EXCEEDED`, `APPROVAL_THRESHOLD_EXCEEDED` (info) | PO reference, supplier, currency, closed/cancelled status, quantity above ordered, unit price above PO, unmatched lines; amount above the remaining PO balance (> 10% of the PO → high); cumulative invoicing (caller-supplied or summed from history in the contract period) above the contract cap, or above the per-invoice maximum; above the approval threshold (routing info, 0 points) |
+| Split invoices | `SPLIT_INVOICE_PATTERN` | same-supplier invoices within `splitWindowDays` (7) each ≤ the approval threshold but together above it (confidence rises with same-day dates, similar lines/same PO, all ≥ 85% of the limit), or ≥ 3 invoices within 90 days at 90–100% of the threshold. A risk indicator, never an allegation |
+| Dates | `DATE_ANOMALY`, `DUE_DATE_ANOMALY` | dated > 1 day in the future, > 365 days old, before the PO issue date or outside the contract period; due before the invoice date, due date > 3 days off the stated terms, terms > 1 year. Same-day due dates, past due dates and next-day invoice dates are not flagged |
+| Line items | `DUPLICATE_LINE_ITEM` | the same description/SKU at the same price and quantity twice (medium), or near-identical descriptions at the same price (low) |
+| Data quality | `MISSING_REQUIRED_FIELD` | business fields missing (invoice number, supplier, invoice date, currency): low, medium when ≥ 3. Recommended fields (due date/terms, lines, subtotal, tax, bank account) are listed in `dataCompleteness` only |
+
+**Risk score (model `iac-1.0.0`, `src/invoice-anomaly/scoring.ts` + `config.ts`):** each anomaly contributes base points × confidence — info 0, low 5, medium 20, high 35, critical 50, with overrides `DUPLICATE_INVOICE` 50/60, `POSSIBLE_DUPLICATE` 20/40, `BANK_ACCOUNT_CHANGED` 25/55/70, `UNKNOWN_BANK_ACCOUNT` 20/40/60, `SPLIT_INVOICE_PATTERN` 20/40, `MISSING_REQUIRED_FIELD` 3/8. Low/info contributions are capped at 10 in total and medium ones at 45. Correlation bonus: +8 per additional risk family with a ≥ medium anomaly (max +24) and +10 when a ≥ high payment-detail anomaly coincides with a duplicate, PO/contract or split anomaly. Severity ceiling: only-low findings score ≤ 14, a maximum of medium ≤ 64 — so trivial warnings can never produce a critical result. **Levels / advisory decision:** 0–14 `low` → `continue`; 15–39 `medium` → `review`; 40–64 `high` → `review`; 65–100 `critical` → `hold`. The `scoring` object returns every component, cap, bonus and the raw score.
+
+**Errors (not charged on x402 / L402 / MPP):** `INVALID_INPUT` (schema / unknown fields) and `INVALID_JSON` 400, `INVALID_MONETARY_VALUE` 400, `INVALID_DATE` 400, `UNSUPPORTED_CURRENCY_FORMAT` 400 (each with `details.path`, never the value), `ANALYSIS_FAILED` 500 (sanitized). **Unit economics:** no upstream provider or LLM cost.
+
+**Limitations.** The capability identifies invoice anomalies and risk indicators. It does not independently establish fraud or replace accounting, audit, compliance, or payment-authorization controls. `decision` is advisory, not a payment approval or rejection. Findings are limited to the data supplied (no ERP, bank, registry or third-party fraud source is consulted; connectors are a future phase). Supplier baselines need ≥ 3 prior invoices from the supplier; amounts in different currencies are never converted or compared; `checkedAt` is day-granular (the as-of date) so identical inputs give identical output.
 
 ### Production Oman market data (database mode, import, caching)
 

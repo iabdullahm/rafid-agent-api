@@ -59,6 +59,10 @@ export const ESTIMATED_UPSTREAM_COST_USD: Partial<Record<CapabilityKey, { provid
     providerCostUSD: 0, llmCostUSD: 0.02,
     assumptions: "Deterministic extraction runs in-process (no per-call provider fee; the documentUrl download is the caller's own document). When LLM assist is enabled (DOCUMENT_FACTS_LLM=auto with the intelligence synthesizer configured) it is called only for requested/priority facts the deterministic pass could not establish, over at most 40,000 characters of relevance-selected excerpts (~10k input + ≤2.5k output tokens) — estimated ≤ $0.02 with a small/mid-size model, $0 when not needed or not configured."
   },
+  invoice_anomaly_check: {
+    providerCostUSD: 0, llmCostUSD: 0,
+    assumptions: "Fully deterministic, in-process analysis of caller-supplied invoice and context data: no web search, no registry or bank lookup, no LLM. Compute is milliseconds for typical requests (one invoice, hundreds of historical invoices), so the upstream cost per call is effectively zero."
+  },
   business_risk_score: {
     providerCostUSD: 0.032, llmCostUSD: 0,
     assumptions: "Uncached worst case: 4 web searches (2 news/adverse-media + 1 review-platform + 1 regulator/enforcement) at an estimated $0.008/search (Tavily pay-as-you-go class pricing, rounded up). GLEIF, RDAP, the company website, the UN list and the US CSL are free public sources; UK Companies House and Google Safe Browsing are free with a key. Evidence is shared with company_reputation_check through the same evidence cache (news 1d, reviews 3d, registry/domain 7d, sanctions 12h), so repeat or cross-capability checks cost less. Ambiguous/not-found entities stop before any paid search. OpenSanctions (optional, paid licence) is excluded. No LLM synthesis."

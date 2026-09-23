@@ -114,6 +114,9 @@ export function classifyDataSource(toolName: string, data: unknown): DataSource 
   // (like the pure calculators) — explicitly null rather than "unknown".
   if (toolName === "document_facts_extract") return null;
 
+  // invoice_anomaly_check: analyzes only caller-supplied invoice/context data — no data source applies.
+  if (toolName === "invoice_anomaly_check") return null;
+
   return null;
 }
 

@@ -27,6 +27,11 @@ import { documentFactsExtractOutput } from "../schemas/documentFactsOutputs.js";
 import { documentFactsExtract } from "../services/documentFactsExtract.js";
 import { DOCUMENT_FACTS_EXAMPLE_INPUT, DOCUMENT_FACTS_EXAMPLE_OUTPUT } from "./examples/documentFactsExtractExample.js";
 import { DOCUMENT_FACTS_LIMITS } from "../document-facts/config.js";
+import { invoiceAnomalyCheckInput } from "../schemas/invoiceAnomalyInputs.js";
+import { invoiceAnomalyCheckOutput } from "../schemas/invoiceAnomalyOutputs.js";
+import { invoiceAnomalyCheck } from "../services/invoiceAnomalyCheck.js";
+import { INVOICE_ANOMALY_EXAMPLE_INPUT, INVOICE_ANOMALY_EXAMPLE_OUTPUT } from "./examples/invoiceAnomalyCheckExample.js";
+import { INVOICE_ANOMALY_LIMITS } from "../invoice-anomaly/config.js";
 import type { z } from "zod";
 
 /** The one currency every capability is priced in today. A single constant, not a literal
@@ -1087,6 +1092,62 @@ export const capabilities = [
         { query: "What do we need to submit for this tender and by when?", guidance: "Call document_facts_extract; report submission_deadline, mandatory_documents, eligibility_requirements, bid_bond and evaluation_criteria from facts, with deadlines." },
         { query: "Summarize the key terms of this lease.", guidance: "Call document_facts_extract; report landlord, tenant, property, effective_date, expiry_date, rent (with frequency), security_deposit and notice_period — do not compute annual rent unless the document states it." },
         { query: "Does this agreement auto-renew or have unlimited liability?", guidance: "Call document_facts_extract and check riskFlags for automatic_renewal and unlimited_liability_language, quoting their sourceEvidence." }
+      ]
+    }
+  } satisfies AgentCapability,
+  // Finance / accounts payable: invoice_anomaly_check — GLOBAL, deterministic pre-payment invoice
+  // anomaly detection (src/invoice-anomaly/). No LLM, no external calls: arithmetic, duplicate,
+  // supplier-behavior, payment-detail, PO/contract, split-invoice, date and line-item checks over
+  // the invoice and whatever context the caller supplies, with a transparent 0–100 risk score.
+  {
+    name: "invoice_anomaly_check" as const, path: "/finance/invoice-anomaly-check",
+    description: "Detect duplicate, inconsistent, unusual or potentially fraudulent invoices before payment using arithmetic, supplier-history, purchase-order and payment-detail checks. Returns a 0–100 risk score, a risk level, an advisory decision (continue / review / hold) and machine-readable anomalies (e.g. DUPLICATE_INVOICE, POSSIBLE_DUPLICATE, BANK_ACCOUNT_CHANGED, PO_AMOUNT_EXCEEDED, SPLIT_INVOICE_PATTERN, SUBTOTAL_MISMATCH), each with severity, confidence and structured evidence. Works on a single invoice (standalone) or with optional historical invoices, supplier profile, purchase order, contract, approval threshold and payment history (context-aware). Deterministic, decimal-safe, any country and currency.",
+    whenToUse: "Use before approving, paying, booking, reconciling or auditing an invoice, especially when an agent needs to determine whether the invoice requires human review.",
+    useCases: [
+      "Check this invoice before I pay it", "Is this invoice a duplicate of one we already received or paid?", "Did the supplier's bank account change?",
+      "Does the invoice exceed the purchase order or contract?", "Are these invoices split to stay under the approval limit?",
+      "Verify invoice arithmetic (quantity × unit price, subtotal, tax, total)", "Accounts-payable automation guardrail", "Pre-payment fraud prevention (invoice redirection / BEC)",
+      "Three-way-match pre-check (invoice vs purchase order)", "Audit sampling and reconciliation", "finance", "accounts-payable", "procurement"
+    ],
+    category: "finance_risk",
+    requestBodyLimit: INVOICE_ANOMALY_LIMITS.requestBodyLimit,
+    input: invoiceAnomalyCheckInput, output: invoiceAnomalyCheckOutput,
+    example: INVOICE_ANOMALY_EXAMPLE_INPUT,
+    exampleOutput: INVOICE_ANOMALY_EXAMPLE_OUTPUT,
+    execute: (input: unknown) => invoiceAnomalyCheck(input),
+    price: 0.25, currency: CURRENCY, paymentProtocol: "x402",
+    // Pure function of the input (plus the as-of day when options.asOfDate is omitted): no state, no
+    // external calls, nothing stored or logged.
+    idempotent: true, sideEffects: false,
+    limitations: [
+      "Identifies invoice anomalies and risk indicators only. It does not independently establish fraud or replace accounting, audit, compliance, or payment-authorization controls.",
+      "decision (continue / review / hold) is advisory; it is not an approval or rejection of a payment.",
+      "Findings are limited to the data in the request: no accounting system, bank, registry or third-party fraud source is consulted. Supplier-behavior baselines need at least 3 prior invoices from the supplier.",
+      `Up to ${INVOICE_ANOMALY_LIMITS.maxLineItems} line items, ${INVOICE_ANOMALY_LIMITS.maxHistoricalInvoices} historical invoices and ${INVOICE_ANOMALY_LIMITS.maxPayments} payment records per call (1 MB JSON body).`,
+      "Amounts in different currencies are never converted or compared; bank accounts are returned masked (last 4 characters).",
+      "Invalid amounts, dates or currency codes return structured 400 errors (INVALID_MONETARY_VALUE, INVALID_DATE, UNSUPPORTED_CURRENCY_FORMAT) and are not charged."
+    ],
+    agentGuidance: {
+      priorityContexts: ["accounts payable / invoice approval", "pre-payment control", "payment-run screening", "procurement three-way match", "audit and reconciliation", "finance operations agents", "invoice-redirection (BEC) fraud prevention"],
+      evidenceTypes: [
+        { type: "arithmetic", description: "Recomputed quantity × unit price, subtotal, tax and total with decimal-safe arithmetic and explicit rounding tolerance." },
+        { type: "historical_invoice_match", description: "A caller-supplied historical invoice matched on supplier, invoice number, amount, date, line items or PO." },
+        { type: "supplier_baseline", description: "Statistics over the supplier's supplied history (median/MAD amount, currencies, payment terms, number format, frequency)." },
+        { type: "payment_record", description: "Supplier profile accounts, historical invoice accounts and payment history — reported masked." },
+        { type: "purchase_order_or_contract", description: "Caller-supplied PO / contract values: supplier, currency, remaining balance, caps, quantities, prices, dates." },
+        { type: "approval_threshold", description: "Caller-supplied single-invoice approval threshold used for split-invoice detection." }
+      ],
+      limitations: [
+        "Relay riskScore with riskLevel, decision and each anomaly's code, severity, confidence and explanation; never describe an anomaly as proven fraud.",
+        "When decision is review or hold, route the invoice to a human before paying and include recommendedAction.",
+        "Supply as much context as available (historicalInvoices with supplierId, supplierProfile.bankAccounts, purchaseOrder, approvalContext) — standalone mode only checks the invoice itself."
+      ],
+      sampleQueries: [
+        { query: "Check this invoice before I pay it.", guidance: "Call invoice_anomaly_check with the invoice plus the supplier's recent historicalInvoices and supplierProfile; follow decision and recommendedAction." },
+        { query: "Is this a duplicate invoice?", guidance: "Call invoice_anomaly_check with historicalInvoices (and paymentHistory); report DUPLICATE_INVOICE / POSSIBLE_DUPLICATE with evidence.matchedInvoice." },
+        { query: "The supplier sent new bank details — is that a problem?", guidance: "Call invoice_anomaly_check with supplierProfile.bankAccounts and history; BANK_ACCOUNT_CHANGED means verify with the supplier via a known contact before paying." },
+        { query: "Does this invoice fit the purchase order?", guidance: "Call invoice_anomaly_check with purchaseOrder (totalAmount, invoicedToDate, lineItems); report PO_MISMATCH / PO_AMOUNT_EXCEEDED." },
+        { query: "Are these invoices being split to avoid approval?", guidance: "Call invoice_anomaly_check with approvalContext.approvalThreshold and the supplier's recent historicalInvoices; SPLIT_INVOICE_PATTERN is a risk indicator, not an accusation." }
       ]
     }
   } satisfies AgentCapability
