@@ -53,6 +53,7 @@ import { MemoryL402RedemptionStore, PostgresL402RedemptionStore, type L402Redemp
 import { buildL402SettlementRecord } from "../billing/l402/settlement.js";
 import { recordL402Event } from "../analytics/recorder.js";
 import { createMppMcpHandler, mppMcpPath } from "../billing/mpp/mcp.js";
+import { BillingEngine, MemoryBillingStore, PostgresBillingStore, BILLING_RESPONSE_HEADERS, buildPaymentMethods, createAccountRoutes, createBillingAdminRoutes, createCreditsMcpHandler, createPaymentDispatcher, disabledBillingConfig, mcpCreditsPath, paymentMethodsPath, type BillingStore } from "../billing/unified/index.js";
 import { buildMppService, buildMppInfo, buildMppStatus, createMppDisabledRoutes, createMppRoutes, createMppSessionCreateLimiter, mppBasePath, type MppAuditSink, type MppProvider, type MppSessionRepository, type MppChargeRedemptionStore, type MppKv, type MppService } from "../billing/mpp/index.js";
 /** The largest per-capability JSON body limit (bytes → body-parser string), for shared endpoints. */
 function maxCapabilityBodyLimit(): string {
@@ -62,7 +63,7 @@ function maxCapabilityBodyLimit(): string {
 }
 function formatBytes(n: number): string { return n >= 1024 * 1024 ? `${Math.round(n / 1024 / 1024 * 10) / 10}mb` : `${Math.round(n / 1024)}kb`; }
 
-export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number; mppProvider?: MppProvider; mppSessions?: MppSessionRepository; mppRedemptions?: MppChargeRedemptionStore; mppKv?: MppKv; mppAudit?: MppAuditSink; mppNow?: () => Date } = {}) {
+export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number; mppProvider?: MppProvider; mppSessions?: MppSessionRepository; mppRedemptions?: MppChargeRedemptionStore; mppKv?: MppKv; mppAudit?: MppAuditSink; mppNow?: () => Date; billingStore?: BillingStore; billingNow?: () => Date } = {}) {
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
   const store = config.authMode === "postgres" ? options.store : undefined;
   const app = express();
@@ -90,6 +91,19 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   const revenueDatabaseUrl = getRevenueDatabaseUrl();
   const revenueLedger: RevenueLedger = options.revenueLedger
     ?? (revenueDatabaseUrl ? new PostgresRevenueLedger(revenueDatabaseUrl) : new MemoryRevenueLedger());
+  // Unified billing (src/billing/unified/): Rafid API keys, prepaid API credits and subscription
+  // allowances, alongside — never instead of — x402 / L402 / MPP. Inert unless
+  // API_CREDITS_ENABLED or SUBSCRIPTIONS_ENABLED is set; `config.billing` may be absent on
+  // hand-built test configs, which then behave exactly like a disabled deployment.
+  const billingConfig = config.billing ?? disabledBillingConfig;
+  const billingEngine = billingConfig.enabled
+    ? new BillingEngine({
+        config: billingConfig,
+        store: options.billingStore ?? (billingConfig.databaseUrl ? new PostgresBillingStore(billingConfig.databaseUrl) : new MemoryBillingStore()),
+        priceUsd: tool => billingService.getToolPrice(tool as CapabilityName),
+        now: options.billingNow
+      })
+    : null;
   const openapiDoc = buildOpenapi(config);
   app.disable("x-powered-by");
   app.use((req, res, next) => {
@@ -114,10 +128,12 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     // credential, never an ambient cookie, so the permissive origin above stays safe.
     // Payment-Authorization / Idempotency-Key: MPP credentials (alternative header) and session
     // call idempotency keys — per-request values, never ambient browser state.
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-PAYMENT, Authorization, Payment-Authorization, Idempotency-Key, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID");
+    // X-Rafid-Payment-Method / X-Rafid-Api-Key: unified-billing rail selection and an alternative
+    // header for a Rafid billing key — per-request values, never ambient browser state.
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-PAYMENT, PAYMENT-SIGNATURE, Authorization, Payment-Authorization, Idempotency-Key, X-Rafid-Payment-Method, X-Rafid-Api-Key, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID");
     // WWW-Authenticate carries the L402 challenge (macaroon + invoice); a browser client must be
     // able to read it back.
-    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate, X-L402-Error, PAYMENT-REQUIRED, X-PAYMENT-RESPONSE, Payment-Receipt, Idempotent-Replay");
+    res.setHeader("Access-Control-Expose-Headers", `Mcp-Session-Id, WWW-Authenticate, X-L402-Error, PAYMENT-REQUIRED, X-PAYMENT-RESPONSE, PAYMENT-RESPONSE, Payment-Receipt, Idempotent-Replay, ${BILLING_RESPONSE_HEADERS.join(", ")}, X-Rafid-Refunded-Transaction-Id`);
     res.setHeader("Access-Control-Max-Age", "600");
     res.on("finish", () => {
       const durationMs = Math.round((performance.now() - start) * 100) / 100;
@@ -132,14 +148,16 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       const toolName = res.locals.toolName as CapabilityName | undefined;
       if (toolName) {
         const channel = res.locals.channel as string | undefined;
-        const accessMode = channel === "x402" || channel === "l402" || channel === "mpp" || channel === "mpp-session" ? channel : "api-key";
+        const accessMode = channel === "x402" || channel === "l402" || channel === "mpp" || channel === "mpp-session" || channel === "api_credits" || channel === "subscription" || channel === "free" ? channel : "api-key";
         const keyIdentifier = accessMode === "x402" ? `x402:${config.x402Network}`
           : accessMode === "l402" ? `l402:lightning:${config.l402Network}`
           : accessMode === "mpp" || accessMode === "mpp-session" ? `${accessMode}:${config.mpp.tempo.network}`
           : (res.locals.customerId as string | undefined) ?? "anonymous";
         void billingService.recordUsage({
           requestId: res.locals.requestId, keyIdentifier, toolName, accessMode, status: res.statusCode, durationMs,
-          billableAmount: billingService.isBillable(toolName) ? billingService.getToolPrice(toolName) : 0, currency: "USD"
+          // Unified billing: an idempotent replay, a refunded failure or a declined (402/409) call
+          // moved no money, so it is recorded with a zero billable amount.
+          billableAmount: billingService.isBillable(toolName) && !res.locals.billingNotCharged ? billingService.getToolPrice(toolName) : 0, currency: "USD"
         });
         // Internal analytics (TOOL USAGE domain): one row per REST/x402 capability invocation —
         // remote MCP invocations are recorded separately (mcp/remote.ts), since they never reach
@@ -147,7 +165,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         // itself right after execute() (see below) — classifyDataSource() reads it straight off
         // the already-computed response, never a second execute() call.
         recordToolInvocation(analyticsRepository, {
-          toolName, channel: accessMode === "api-key" ? "rest" : accessMode, success: res.statusCode < 400, durationMs,
+          toolName, channel: accessMode === "api-key" || accessMode === "api_credits" || accessMode === "subscription" || accessMode === "free" ? "rest" : accessMode, success: res.statusCode < 400, durationMs,
           dataSource: (res.locals.dataSource as DataSource | undefined) ?? null,
           client: extractClientContext(req)
         });
@@ -207,8 +225,12 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // Section A/B/C: public, unauthenticated agent-marketplace discovery. Always available
   // regardless of X402_ENABLED so an agent can learn how to pay before it decides to.
   app.get(agentBasePath, discoveryLimiter, (_req, res) => send(res, buildAgentInfo(config)));
-  app.get(pricingBasePath, discoveryLimiter, (_req, res) => send(res, buildPricingInfo()));
+  app.get(pricingBasePath, discoveryLimiter, (_req, res) => send(res, buildPricingInfo(config)));
   app.get(toolsBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, toolsBasePath); send(res, buildToolCatalog()); });
+  // Unified payment discovery: every ENABLED rail, how to select it (X-Rafid-Payment-Method) and
+  // how to authenticate. Always mounted, like /api/v1/x402 — even when billing is disabled it
+  // still truthfully lists whichever of x402 / L402 / MPP are live.
+  app.get(paymentMethodsPath, discoveryLimiter, (_req, res) => send(res, buildPaymentMethods(config)));
   // Machine-first capability registry (Section 8/13): the same data /agent.json's `tools`
   // field carries, exposed on its own path so a caller that only wants tool metadata doesn't
   // have to fetch the full manifest.
@@ -270,6 +292,17 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     return jsonParsers.get(limit)!;
   };
   const markTool = (toolName: CapabilityName): RequestHandler => (_req, res, next) => { res.locals.toolName = toolName; next(); };
+  // Unified payment dispatcher (billing/unified/http.ts): runs before the canonical REST routes
+  // below and picks exactly one rail per paid call. Requests carrying only a legacy X-API-Key (or
+  // nothing, while unified billing is disabled) fall straight through to those routes unchanged.
+  app.use(createPaymentDispatcher({
+    engine: billingEngine, config, capabilities,
+    priceUsd: tool => billingService.getToolPrice(tool as CapabilityName),
+    bodyParserFor: parseJsonFor, rateLimiter: options.rateLimiter,
+    externalLimiters: { x402: x402Limiter, l402: l402Limiter, mpp: mppLimiter },
+    externalPath: (rail, c) => rail === "x402" ? x402BasePath + c.path : rail === "l402" ? l402BasePath + c.path : `${mppBasePath}/charge/${c.name}`,
+    classifyResult: (tool, data) => classifyDataSource(tool as CapabilityName, data)
+  }));
   for (const c of capabilities) for (const prefix of ["/api/v1", "/v1"]) {
     app.post(prefix + c.path, markTool(c.name), authenticate, async (_req,res,next) => {
       if (!store) return next();
@@ -446,6 +479,22 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     }
   } else {
     app.use(createMppDisabledRoutes());
+  }
+  // Unified billing: the caller's own account endpoints (API key), the internal admin API
+  // (BILLING_ADMIN_SECRET; 503 until configured) and MCP + API-key billing at /mcp/credits.
+  const billingLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
+  if (billingEngine) app.use(createAccountRoutes({ engine: billingEngine, limiter: billingLimiter }));
+  app.use(createBillingAdminRoutes({ engine: billingEngine, adminSecret: billingConfig.adminSecret, limiter: billingLimiter }));
+  if (billingEngine && config.mcpRemoteEnabled) {
+    app.post(mcpCreditsPath, mcpLimiter, express.json({ limit: maxCapabilityBodyLimit() }), createCreditsMcpHandler({
+      engine: billingEngine, config, capabilities,
+      priceUsd: tool => billingService.getToolPrice(tool as CapabilityName),
+      delegate: createRemoteMcpHandler(billingService, logger, analyticsRepository),
+      onToolCall: (event, req) => {
+        void billingService.recordUsage({ requestId: randomUUID(), keyIdentifier: "mcp-credits", toolName: event.toolName as CapabilityName, accessMode: "mcp-credits", status: event.status, durationMs: event.durationMs, billableAmount: event.status < 400 ? billingService.getToolPrice(event.toolName as CapabilityName) : 0, currency: "USD" });
+        recordToolInvocation(analyticsRepository, { toolName: event.toolName, channel: "mcp-remote", success: event.status < 400, durationMs: event.durationMs, dataSource: event.data === undefined ? null : classifyDataSource(event.toolName as CapabilityName, event.data), client: extractClientContext(req) });
+      }
+    }));
   }
   // Remote MCP (Section 1): a Streamable HTTP transport at /mcp, mounted only when
   // MCP_REMOTE_ENABLED=true; otherwise this path simply 404s via the catch-all below, exactly

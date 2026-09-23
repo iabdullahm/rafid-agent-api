@@ -6,7 +6,13 @@ import { publicError } from "../utils/errors.js";
 import type { Logger } from "../utils/logging.js";
 import { classifyDataSource } from "../analytics/dataSource.js";
 import { runCapabilityPreview } from "../preview/service.js";
-export function createMcpServer(logger: Logger = () => {}) {
+/** Optional execution override (hosted mode — see mcp/hosted.ts): instead of running a
+ *  capability in-process, run it somewhere else (e.g. the hosted REST API, billed to a Rafid API
+ *  key) and optionally attach result `_meta`. Tool names, schemas and descriptions are unchanged. */
+export interface McpServerOptions {
+  execute?: (capability: (typeof capabilities)[number], input: unknown) => Promise<{ data: unknown; meta?: Record<string, unknown> }>;
+}
+export function createMcpServer(logger: Logger = () => {}, options: McpServerOptions = {}) {
   const server = new McpServer({ name: "rafid-agent-api", version: "0.1.0" });
   for (const c of capabilities) {
     server.registerTool(c.name, {
@@ -21,12 +27,13 @@ export function createMcpServer(logger: Logger = () => {}) {
       let status = 200;
       let dataSource: string | null = null;
       try {
-        const data = await c.execute(input);
+        const executed = options.execute ? await options.execute(c, input) : { data: await c.execute(input), meta: undefined };
+        const data = executed.data;
         // Analytics only (never changes the response): the same real-vs-demo classification
         // every REST/x402 call site also computes — see analytics/dataSource.ts's doc comment.
         // Read-only over the already-computed result; never a second execute() call.
         dataSource = classifyDataSource(c.name, data);
-        return { content: [{ type: "text" as const, text: JSON.stringify(data) }], structuredContent: data };
+        return { content: [{ type: "text" as const, text: JSON.stringify(data) }], structuredContent: data, ...(executed.meta ? { _meta: executed.meta } : {}) };
       } catch (error) {
         const result = publicError(error);
         status = result.status;

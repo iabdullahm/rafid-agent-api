@@ -1,14 +1,16 @@
 import { capabilities, CURRENCY } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
-import { buildCapabilitiesRegistry, buildPaymentsSummary } from "./agent.js";
+import { buildAccountBillingSummary, buildCapabilitiesRegistry, buildPaymentsSummary } from "./agent.js";
+import { accountPaymentMethodIds, paymentMethodsPath, railAvailability } from "../billing/unified/discovery.js";
+import { mcpCreditsPath } from "../billing/unified/mcp.js";
 import { mppBasePath } from "../billing/mpp/routes.js";
 import { x402BasePath } from "../billing/x402.js";
 import { l402BasePath } from "../billing/l402/gate.js";
 import { mcpRemotePath } from "../mcp/remote.js";
 import type { Config } from "../config/env.js";
 
-type ManifestConfig = Pick<Config, "x402Enabled" | "x402Network" | "x402WalletAddress" | "cdpConfigured" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp">>;
-type PluginManifestConfig = Pick<Config, "logoUrl" | "contactEmail" | "legalInfoUrl">;
+type ManifestConfig = Pick<Config, "x402Enabled" | "x402Network" | "x402WalletAddress" | "cdpConfigured" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp" | "billing">>;
+type PluginManifestConfig = Pick<Config, "logoUrl" | "contactEmail" | "legalInfoUrl"> & Partial<Pick<Config, "x402Enabled" | "x402Network" | "billing">>;
 
 const PRODUCT_NAME = "Rafid Property Intelligence";
 const PRODUCT_DESCRIPTION =
@@ -21,7 +23,7 @@ const PRODUCT_DESCRIPTION =
  *  mentioned when MCP_REMOTE_ENABLED=true (config.mcpRemoteEnabled) — otherwise every manifest
  *  and llms.txt describe stdio only, so a manifest can never advertise an endpoint app.ts
  *  didn't actually mount (see api/app.ts). */
-function protocolList(config: Pick<Config, "x402Enabled" | "x402Network" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp">>) {
+function protocolList(config: Pick<Config, "x402Enabled" | "x402Network" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp" | "billing">>) {
   return [
     {
       protocol: "mcp", role: "primary" as const,
@@ -35,6 +37,9 @@ function protocolList(config: Pick<Config, "x402Enabled" | "x402Network" | "mcpR
     { protocol: "x402", role: "primary" as const, enabled: config.x402Enabled, network: config.x402Enabled ? config.x402Network : null, description: "Pay-per-call, no account or API key required." },
     ...(config.l402Enabled ? [{ protocol: "l402", role: "primary" as const, enabled: true, network: `lightning:${config.l402Network}`, endpoint: l402BasePath, description: "Pay-per-call over Lightning (L402: macaroon + BOLT11 invoice), no account or API key required." }] : []),
     ...(config.mpp?.enabled ? [{ protocol: "mpp", role: "primary" as const, enabled: true, modes: [...config.mpp.modes], network: config.mpp.tempo.network, endpoint: mppBasePath, description: "Machine Payments Protocol (HTTP 'Payment' auth scheme): one-time charges per call, or budgeted metered sessions (TIP-1034 payment channels) for high-frequency agents. No account or API key required." }] : []),
+    // Unified billing (additive, only when enabled): no wallet needed — a Rafid API key pays from
+    // a subscription allowance and/or prepaid USD credits at the same per-tool prices.
+    ...(railAvailability(config).billing ? [{ protocol: "api-key-billing", role: "primary" as const, enabled: true, authentication: "Authorization: Bearer raf_live_…", paymentMethods: accountPaymentMethodIds(config), endpoint: "/api/v1/<tool-path>", ...(config.mcpRemoteEnabled ? { mcpEndpoint: mcpCreditsPath } : {}), description: "No wallet required: create a Rafid API key, preload USD credit or hold a subscription, and every paid tool call is deducted automatically at its listed price." }] : []),
     { protocol: "rest", role: "compatibility" as const, description: "X-API-Key authenticated HTTP routes; the underlying transport MCP and the informational endpoints share, and a fallback for callers that can't do x402 yet." }
   ];
 }
@@ -71,6 +76,8 @@ export function buildAgentManifest(config: ManifestConfig) {
     },
     // Additive (MPP rollout): which payment rails are live, in one place.
     payments: buildPaymentsSummary(config),
+    paymentMethods: paymentMethodsPath,
+    ...(railAvailability(config).billing ? { billing: buildAccountBillingSummary(config) } : {}),
     currency: CURRENCY,
     tools: buildCapabilitiesRegistry(config),
     roadmap: plannedCapabilities,
@@ -106,7 +113,9 @@ export function buildAiPluginManifest(config: PluginManifestConfig, origin: stri
       "All monetary property inputs and outputs are in OMR. Call GET /api/v1/capabilities first for exact " +
       "input/output JSON Schemas, pricing, priorityContexts, evidenceTypes and usage guidance per tool. " +
       "Authenticate with an X-API-Key header, or call the unauthenticated /api/v1/x402/... twin of any route " +
-      "and pay per call on-chain via the x402 protocol (see GET /api/v1/x402 for current terms). These are " +
+      "and pay per call on-chain via the x402 protocol (see GET /api/v1/x402 for current terms). " +
+      (config.billing?.enabled ? "Agents without a wallet can instead send Authorization: Bearer raf_live_<key> and pay from prepaid API credits or a subscription allowance. " : "") +
+      "GET " + paymentMethodsPath + " lists every enabled payment method. These are " +
       "calculations over the numbers/comparables supplied or looked up, not an inspection. Depending on " +
       "deployment configuration, Oman comparable data is either a curated MVP benchmark dataset or real " +
       "partner-supplied records (e.g. Al Mouj Muscat contracted-unit-price sales) — each response's own " +
@@ -126,7 +135,7 @@ export function buildAiPluginManifest(config: PluginManifestConfig, origin: stri
  * self-describing agent/service discovery document at this URL. `origin` is the request's own
  * scheme+host, same reasoning as buildAiPluginManifest above.
  */
-export function buildAgentCard(config: Pick<Config, "x402Enabled"> & Partial<Pick<Config, "x402Network" | "l402Enabled" | "l402Network" | "mpp">>, origin: string) {
+export function buildAgentCard(config: Pick<Config, "x402Enabled"> & Partial<Pick<Config, "x402Network" | "l402Enabled" | "l402Network" | "mpp" | "billing">>, origin: string) {
   return {
     name: PRODUCT_NAME,
     description: PRODUCT_DESCRIPTION,
@@ -134,9 +143,10 @@ export function buildAgentCard(config: Pick<Config, "x402Enabled"> & Partial<Pic
     provider: { organization: "Rafid" },
     version: "0.1.0",
     capabilities: { streaming: false, pushNotifications: false },
-    authentication: { schemes: [...(config.x402Enabled ? ["x402"] : []), ...(config.l402Enabled ? ["l402"] : []), ...(config.mpp?.enabled ? ["mpp"] : []), "apiKey"] },
+    authentication: { schemes: [...(config.x402Enabled ? ["x402"] : []), ...(config.l402Enabled ? ["l402"] : []), ...(config.mpp?.enabled ? ["mpp"] : []), "apiKey", ...(config.billing?.enabled ? ["bearer"] : [])] },
     // Additive (MPP rollout): same payments summary as /agent.json.
-    payments: buildPaymentsSummary({ x402Enabled: config.x402Enabled, x402Network: config.x402Network ?? "", l402Enabled: config.l402Enabled, l402Network: config.l402Network, mpp: config.mpp }),
+    payments: buildPaymentsSummary({ x402Enabled: config.x402Enabled, x402Network: config.x402Network ?? "", l402Enabled: config.l402Enabled, l402Network: config.l402Network, mpp: config.mpp, billing: config.billing }),
+    paymentMethods: paymentMethodsPath,
     defaultInputModes: ["application/json"],
     defaultOutputModes: ["application/json"],
     skills: capabilities.map(c => ({

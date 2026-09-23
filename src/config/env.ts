@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { privateKeyToAccount } from "viem/accounts";
 import { loadMppConfig, MppConfigError } from "../billing/mpp/config.js";
+import { loadBillingConfig } from "../billing/unified/config.js";
 const evmAddress = /^0x[0-9a-fA-F]{40}$/;
 const caip2Network = /^[-a-z0-9]{3,8}:[-a-zA-Z0-9]{1,32}$/;
 const envSchema = z.object({
@@ -159,6 +160,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options = { req
     if (error instanceof MppConfigError) throw new Error(error.message);
     throw error;
   }
+  // Unified billing (API keys, prepaid API credits, subscriptions) — inert by default; parsed and
+  // validated in billing/unified/config.ts, failing closed like every rail above.
+  const billing = loadBillingConfig(env, { nodeEnv: e.NODE_ENV, databaseUrl: e.DATABASE_URL });
   return { port: e.PORT, nodeEnv: e.NODE_ENV, apiKeys, authMode: e.AUTH_MODE, databaseUrl: e.DATABASE_URL, logLevel: e.LOG_LEVEL,
     x402Enabled, x402Network: e.X402_NETWORK, x402WalletAddress: e.X402_WALLET_ADDRESS, x402FacilitatorUrl: e.X402_FACILITATOR_URL,
     cdpApiKeyId: e.CDP_API_KEY_ID, cdpApiKeySecret: e.CDP_API_KEY_SECRET, cdpConfigured,
@@ -174,6 +178,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options = { req
     adminEnabled, adminUsername: e.ADMIN_USERNAME, adminPasswordHash: e.ADMIN_PASSWORD_HASH, adminSessionSecret: e.ADMIN_SESSION_SECRET,
     adminSessionTtlMinutes: e.ADMIN_SESSION_TTL_MINUTES,
     adminLoginRateLimitMax: e.ADMIN_LOGIN_RATE_LIMIT_MAX, adminLoginRateLimitWindowMs: e.ADMIN_LOGIN_RATE_LIMIT_WINDOW_MS,
-    mpp };
+    mpp, billing };
 }
 export type Config = ReturnType<typeof loadConfig>;

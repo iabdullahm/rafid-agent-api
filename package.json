@@ -17,6 +17,7 @@
     "start": "node --env-file-if-exists=.env dist/server.js",
     "mcp": "node --env-file-if-exists=.env dist/mcp.js",
     "admin": "node --env-file-if-exists=.env --import tsx src/admin.ts",
+    "billing": "node --env-file-if-exists=.env --import tsx src/billingCli.ts",
     "market:import": "node --env-file-if-exists=.env --import tsx src/marketImportCli.ts",
     "ncsi:discover": "node --env-file-if-exists=.env --import tsx src/ncsiDiscoverCli.ts",
     "partner:feeds": "node --env-file-if-exists=.env --import tsx src/partnerFeedsCli.ts",

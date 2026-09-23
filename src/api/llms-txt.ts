@@ -7,6 +7,9 @@ import { mppBasePath } from "../billing/mpp/routes.js";
 import { previewBasePath } from "./previewRoutes.js";
 import { MUSCAT_GOVERNORATE, SUPPORTED_MUSCAT_AREAS } from "../domain/oman/locations.js";
 import type { Config } from "../config/env.js";
+import { paymentMethodsPath, railAvailability } from "../billing/unified/discovery.js";
+import { accountBasePath } from "../billing/unified/http.js";
+import { mcpCreditsPath } from "../billing/unified/mcp.js";
 
 /**
  * GET /llms.txt — a plain-text briefing for an LLM-based agent that lands here without ever
@@ -16,7 +19,8 @@ import type { Config } from "../config/env.js";
  * registry every other endpoint uses — this file adds no tool metadata of its own, only prose
  * around it.
  */
-export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp">>): string {
+export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp" | "billing" | "mcpRemoteEnabled">>): string {
+  const billing = railAvailability(config);
   const mppCharge = Boolean(config.mpp?.enabled && config.mpp.modes.includes("charge"));
   const mppSession = Boolean(config.mpp?.enabled && config.mpp.modes.includes("session"));
   const toolLines = capabilities.map(c => {
@@ -27,6 +31,7 @@ export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network">
       `When to use: ${c.whenToUse}`,
       `Price: $${price} ${c.currency} per call.`,
       `API key route: POST /api/v1${c.path}  (header: X-API-Key)`,
+      ...(billing.billing ? [`Credits route: POST /api/v1${c.path}  (header: Authorization: Bearer raf_live_… — paid from ${[billing.subscription ? "subscription allowance" : "", billing.apiCredits ? "prepaid API credits" : ""].filter(Boolean).join(" / ")})`] : []),
       `x402 route:    POST ${x402BasePath}${c.path}  (no account — pay per call on-chain)`,
       ...(config.l402Enabled ? [`L402 route:    POST ${l402BasePath}${c.path}  (no account — pay per call over Lightning)`] : []),
       ...(mppCharge ? [`MPP charge:    POST ${mppBasePath}/charge/${c.name}  (no account — one-time Machine Payments Protocol payment)`] : []),
@@ -94,7 +99,20 @@ ${config.mpp?.enabled
   ? `MPP is enabled on this deployment (modes: ${config.mpp.modes.join(", ")}; Tempo network: ${config.mpp.tempo.network}). It uses the HTTP "Payment" authentication scheme: an unpaid request returns HTTP 402 with WWW-Authenticate: Payment challenges; pay one with an MPP client (e.g. the mppx SDK) and retry with Authorization: Payment <credential>. Successful responses carry a Payment-Receipt header.${mppCharge ? ` Charge mode — POST ${mppBasePath}/charge/{tool}: one payment buys one successful call (methods: ${config.mpp.chargeMethods.map(m => m + "/charge").join(", ")}); invalid input is rejected before any payment, and a payment is only settled after the call succeeds.` : ""}${mppSession ? ` Session mode — POST ${mppBasePath}/sessions with {"maxBudget": <USD>, "currency": "USD", "allowedTools": [...]} returns a 402 to open a Tempo payment channel whose deposit is the budget; then POST ${mppBasePath}/sessions/{sessionId}/tools/{tool} with an Idempotency-Key header and a voucher credential per call. Each successful call is metered at the tool's catalog price; the server refuses (before executing) any call that would exceed the remaining budget; GET ${mppBasePath}/sessions/{sessionId} returns spend and per-tool usage; POST ${mppBasePath}/sessions/{sessionId}/close stops the session and settles exactly the metered spend on-chain (the rest of the deposit returns to the payer).` : ""} See GET ${mppBasePath} for terms and GET ${mppBasePath}/status for live status.`
   : `MPP (Machine Payments Protocol) is not enabled on this deployment. See GET ${mppBasePath}/status for current status.`}
 
-No account, signup or dashboard is required for any access model.
+${billing.billing
+  ? `## Payment (Rafid API key: ${[billing.apiCredits ? "prepaid API credits" : "", billing.subscription ? "subscription allowance" : ""].filter(Boolean).join(" + ")})
+
+For agents without a crypto wallet. Send Authorization: Bearer raf_live_<key> to POST /api/v1/<tool-path>;
+the tool's listed USD price is deducted automatically${billing.subscription ? " — first from the account's monthly subscription allowance" : ""}${billing.apiCredits ? (billing.subscription ? ", then from its prepaid credit balance" : " from the account's prepaid credit balance") : ""}.
+Send an Idempotency-Key header so a retried call is never charged twice. X-Rafid-Payment-Method
+(auto | credits | subscription | x402 | l402 | mpp) forces one rail; naming any other rail never
+charges the API key. Insufficient balance returns HTTP 402 insufficient_credits with the price, the
+balance and the other enabled payment options. Balance: GET ${accountBasePath}/balance, usage: GET ${accountBasePath}/usage,
+transactions: GET ${accountBasePath}/transactions (same Bearer key).${config.mcpRemoteEnabled ? ` MCP clients: connect to ${mcpCreditsPath} with the same
+Authorization header — paid tools/call requests are billed to the account; /mcp itself is unchanged.` : ""}
+
+No account or signup is required for x402 / L402 / MPP; API-key billing needs an account.`
+  : "No account, signup or dashboard is required for any access model."}
 
 ## Free Preview
 
@@ -112,6 +130,7 @@ above for which capabilities support it, or GET /api/v1/capabilities' \`preview\
 - GET /.well-known/ai-plugin.json — OpenAI-plugin-style manifest
 - GET /.well-known/agent.json — A2A-style Agent Card
 - GET /api/v1/capabilities — machine-first capability registry (schemas, pricing, when to use)
+- GET ${paymentMethodsPath} — every enabled payment method and how to select it
 - GET /openapi.json — full OpenAPI 3.1 document
 
 ## Planned tools (not yet implemented — do not call these)

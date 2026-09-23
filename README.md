@@ -823,6 +823,26 @@ Until both are set, `officialMarketContext.available` is always `false` with `re
 
 **Known limitation:** because the live catalog could not be queried successfully during development, this integration has not yet been exercised against a single real NCSI record — everything above is verified against the *documented contract* and mocked responses, not a live payload. Re-running `npm run ncsi:discover` and `npm run test:ncsi-live` once NCSI's backend is healthy (or once you have a dataset id/field list from NCSI directly) is the remaining step before this integration is proven end-to-end against real data.
 
+### Unified billing: API credits, subscriptions and every payment rail
+
+Paid capabilities can be bought through any enabled rail, and the capability never knows which
+one paid: **x402** (USDC, no account), **prepaid API credits** and **subscription allowances** on a
+Rafid API key (`Authorization: Bearer raf_live_…` — no wallet needed), **L402** and **MPP** when
+enabled. Every rail charges the same canonical `capability.price`. The canonical route
+`POST /api/v1/<tool-path>` picks the rail deterministically (`X-Rafid-Payment-Method: auto |
+credits | subscription | x402 | l402 | mpp`), re-dispatching x402/L402/MPP credentials to their
+unchanged, protocol-correct gates. `GET /api/v1/payment-methods` lists the enabled rails; a caller
+without a usable credential gets `402 payment_required` with that discovery instead of an
+x402-only answer. API-credit calls are atomic and concurrency-safe (PostgreSQL row locks +
+conditional updates, BIGINT micro-USD), idempotent (`Idempotency-Key`), fully ledgered, and
+refunded when the capability fails. Accounts, keys, credits and plans are managed with
+`npm run billing -- …` or the `BILLING_ADMIN_SECRET`-protected internal API; customers read
+`GET /api/v1/account/{balance,usage,transactions}`. MCP clients can pay with API credits via
+`POST /mcp/credits`, or run local stdio with `RAFID_API_KEY` set. Everything is inert until
+`API_CREDITS_ENABLED` / `SUBSCRIPTIONS_ENABLED` is set.
+
+Full reference: [docs/billing.md](docs/billing.md). Example client: [examples/api-credits-client](examples/api-credits-client).
+
 ### Pay-per-call via x402 (no API key)
 
 `GET /api/v1/x402` is always available, regardless of `X402_ENABLED`, and returns the protocol, scheme, whether payments are currently accepted, the network/receiving address (only when enabled — never a secret, just the public address), the facilitator in use, and per-tool price/endpoint. An agent can read this before deciding whether to pay, with no side effects.
@@ -1099,6 +1119,8 @@ curl -s https://api.rafidsystem.com/mcp \
 Tools on both transports: `analyze_property`, `compare_properties`, `estimate_maintenance`, `analyze_oman_property`. Tool results include JSON text and `structuredContent`, with strict input/output schemas, validation errors and read-only annotations; each tool's MCP `description` is its registry `description` plus its `whenToUse` recommendation sentence, verbatim — never a second copy of that prose. Custom cross-field constraints (alias exclusivity, unique names) are enforced at runtime, and every error on either transport goes through the same `publicError()` sanitizer as REST, so an internal failure never leaks internals remotely any more than it does locally.
 
 MCP and REST are not two implementations that happen to agree: all three (stdio, remote MCP, REST) call the exact same `capabilities` catalog (`src/domain/capabilities.ts`) and the exact same `services/property.ts` functions, so a formula or price change made in one place is correct everywhere, and there is nothing to keep in sync by hand.
+
+**Paying with API credits over MCP** (unified billing, see [docs/billing.md](docs/billing.md#mcp)): point a remote MCP client at `POST /mcp/credits` with `Authorization: Bearer raf_live_…` — `initialize`/`tools/list` behave exactly like `/mcp`, and each paid `tools/call` is billed to the key's account (subscription allowance, then prepaid credits; `result._meta["com.rafidsystem/billing"]` carries the charge). Or run local stdio in hosted mode — `RAFID_API_KEY=raf_live_… node dist/mcp.js` forwards every tool call to the hosted API (`RAFID_API_URL`) where it is billed. MPP over MCP stays at `/mcp/mpp`; x402 and L402 are HTTP-only rails. `/mcp` itself is unchanged.
 
 Stdio is local to the launching OS user; REST API keys are not an authentication mechanism for stdio, and stdio calls remain deliberately unmetered — an MCP client's own OS user launched that process directly, with no shared server resource to protect. Remote MCP is different: it is a shared, public server resource, so every remote tool call is recorded through the same `UsageRepository` as REST/x402 calls (`accessMode: "mcp-remote"`, `billableAmount: 0` — remote MCP is not a paid channel in this phase) and is protected by the same rate limiting as the other public agent endpoints (see "Security, observability and billing boundary" below). Logs go to stderr on both transports; stdout is reserved for MCP stdio framing. Remote auth (beyond rate limiting) is not implemented yet — see "Next five production priorities" below.
 
