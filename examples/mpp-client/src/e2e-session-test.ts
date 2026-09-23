@@ -166,6 +166,10 @@ console.log("ALL CHECKS PASSED");
 }
 
 await main().catch(error => {
-  if (!(error instanceof Stop)) console.error(error instanceof Error ? error.message : error);
+  if (!(error instanceof Stop)) {
+    // Undici reports network errors as "fetch failed"; the real reason is in error.cause.
+    const cause = error instanceof Error ? (error.cause as { code?: string; message?: string } | undefined) : undefined;
+    console.error(error instanceof Error ? error.message : error, cause ? `(${cause.code ?? ""} ${cause.message ?? ""})`.replace("( ", "(") : "");
+  }
   process.exitCode = 1;
 });
