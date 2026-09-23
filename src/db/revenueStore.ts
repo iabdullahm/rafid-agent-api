@@ -57,6 +57,15 @@ export class PostgresRevenueLedger implements RevenueLedger {
       `CREATE INDEX IF NOT EXISTS rafid_x402_settlements_tx_hash_idx ON rafid_x402_settlements (transaction_hash) WHERE transaction_hash IS NOT NULL`
     )).then(() => this.pool.query(
       `CREATE INDEX IF NOT EXISTS rafid_x402_settlements_tool_name_idx ON rafid_x402_settlements (tool_name)`
+    )).then(() => this.pool.query(
+      // L402 rows carry BTC amounts (sats / 1e8), which numeric(18,6) would round away. Widening
+      // precision and scale is lossless for every existing USDC row; a no-op once applied.
+      `DO $$ BEGIN
+         IF (SELECT numeric_scale FROM information_schema.columns
+             WHERE table_name = 'rafid_x402_settlements' AND column_name = 'amount_decimal') < 10 THEN
+           ALTER TABLE rafid_x402_settlements ALTER COLUMN amount_decimal TYPE numeric(24,10);
+         END IF;
+       END $$`
     )).then(() => undefined);
   }
 

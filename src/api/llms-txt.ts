@@ -2,6 +2,7 @@ import { capabilities } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
 import { prices } from "../billing/catalog.js";
 import { x402BasePath } from "../billing/x402.js";
+import { l402BasePath } from "../billing/l402/gate.js";
 import { MUSCAT_GOVERNORATE, SUPPORTED_MUSCAT_AREAS } from "../domain/oman/locations.js";
 import type { Config } from "../config/env.js";
 
@@ -13,7 +14,7 @@ import type { Config } from "../config/env.js";
  * registry every other endpoint uses — this file adds no tool metadata of its own, only prose
  * around it.
  */
-export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network">): string {
+export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network"> & Partial<Pick<Config, "l402Enabled" | "l402Network">>): string {
   const toolLines = capabilities.map(c => {
     const price = prices[c.name].toFixed(2);
     const lines = [
@@ -23,6 +24,7 @@ export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network">
       `Price: $${price} ${c.currency} per call.`,
       `API key route: POST /api/v1${c.path}  (header: X-API-Key)`,
       `x402 route:    POST ${x402BasePath}${c.path}  (no account — pay per call on-chain)`,
+      ...(config.l402Enabled ? [`L402 route:    POST ${l402BasePath}${c.path}  (no account — pay per call over Lightning)`] : []),
       `MCP tool name: ${c.name}`,
       `Example request: ${JSON.stringify(c.example)}`
     ];
@@ -71,7 +73,13 @@ ${config.x402Enabled
   ? `x402 pay-per-call is enabled on this deployment (network: ${config.x402Network}). Call any ${x402BasePath}/... route without payment first to receive an HTTP 402 with machine-readable payment requirements (price, network, asset, receiving address), then retry with a valid X-PAYMENT header. See GET ${x402BasePath} for terms and GET ${x402BasePath}/status for live, factual enforcement status.`
   : `x402 pay-per-call is not enabled on this deployment. Use the X-API-Key routes under /api/v1 instead. See GET ${x402BasePath} for current status.`}
 
-No account, signup or dashboard is required for either access model.
+## Payment (L402 / Lightning)
+
+${config.l402Enabled
+  ? `L402 pay-per-call is enabled on this deployment (network: lightning:${config.l402Network}). Call any ${l402BasePath}/... route without an Authorization header to receive an HTTP 402 with a WWW-Authenticate: L402 macaroon="...", invoice="..." challenge. Pay the BOLT11 invoice (priced at the tool's USD price converted to sats at the live BTC/USD rate), then retry with Authorization: L402 <macaroon>:<preimage-hex>. One token buys one successful call; a failed call does not consume it. See GET ${l402BasePath} for terms and GET ${l402BasePath}/status for live status.`
+  : `L402 (Lightning) pay-per-call is not enabled on this deployment. See GET ${l402BasePath}/status for current status.`}
+
+No account, signup or dashboard is required for any access model.
 
 ## Other machine-readable endpoints
 

@@ -2,7 +2,7 @@ import express, { type Router } from "express";
 import { requireInternalAuth } from "../middleware/partnerAuth.js";
 import { ApiError } from "../utils/errors.js";
 import type { RevenueLedger } from "../revenue/types.js";
-import { REVENUE_PERIODS, periodSince, summarizeRevenue, summarizeRevenueByTool, buildReconciliation, type RevenuePeriod } from "../revenue/aggregate.js";
+import { REVENUE_PERIODS, periodSince, summarizeRevenue, summarizeRevenueByTool, buildReconciliation, isPaidToolExecution, type RevenuePeriod } from "../revenue/aggregate.js";
 import { DEFAULT_TRANSACTIONS_PAGE_SIZE, MAX_TRANSACTIONS_PAGE_SIZE } from "../revenue/types.js";
 import type { AnalyticsRepository } from "../analytics/types.js";
 import type { BillingService } from "../billing/service.js";
@@ -102,7 +102,7 @@ export function createRevenueRoutes(options: RevenueRoutesOptions): Router {
       // read (never revenue itself — see aggregate.ts's SOURCE_OF_TRUTH_RULE).
       const x402ToolExecutionCounts: Record<string, number> = {};
       for (const event of analyticsEvents) {
-        if (event.category === "tool" && event.channel === "x402" && event.success === true && event.toolName) {
+        if (isPaidToolExecution(event) && event.toolName) {
           x402ToolExecutionCounts[event.toolName] = (x402ToolExecutionCounts[event.toolName] ?? 0) + 1;
         }
       }

@@ -1,4 +1,12 @@
 import type { RevenueSettlement } from "./types.js";
+import type { AnalyticsEvent } from "../analytics/types.js";
+
+/** A successful PAID tool execution — over either payment rail (x402 or L402). Every settled
+ *  ledger row, from either rail, corresponds to exactly one of these, so reconciliation compares
+ *  the two rails' combined executions against the combined ledger. */
+export function isPaidToolExecution(event: Pick<AnalyticsEvent, "category" | "channel" | "success" | "toolName">): boolean {
+  return event.category === "tool" && (event.channel === "x402" || event.channel === "l402") && event.success === true && Boolean(event.toolName);
+}
 
 /**
  * Pure aggregation over an already-fetched, already-window-filtered settlement array — the same
@@ -40,7 +48,8 @@ function revenueByCurrency(settled: readonly RevenueSettlement[]): Record<string
   const totals: Record<string, number> = {};
   for (const row of settled) {
     if (row.currency === null || row.amountDecimal === null) continue;
-    totals[row.currency] = round((totals[row.currency] ?? 0) + row.amountDecimal);
+    // 8 decimals: BTC (L402) amounts are satoshi-precise; USDC amounts are unaffected.
+    totals[row.currency] = round((totals[row.currency] ?? 0) + row.amountDecimal, 8);
   }
   return totals;
 }
@@ -211,6 +220,9 @@ export function buildReconciliation(args: {
   for (const row of settled) {
     const expected = catalogPriceByTool[row.toolName];
     if (expected === undefined || row.amountDecimal === null) continue;
+    // L402 rows are denominated in BTC (sats converted at the challenge-time rate), so they can't
+    // be compared against a USD catalog price here.
+    if (row.network.startsWith("lightning:")) continue;
     if (Math.abs(row.amountDecimal - expected) > EPSILON) {
       anomalies.push({
         kind: "amount_mismatch", toolName: row.toolName,

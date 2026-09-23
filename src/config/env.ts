@@ -12,6 +12,19 @@ const envSchema = z.object({
   X402_NETWORK: z.string().default("eip155:84532"), X402_WALLET_ADDRESS: z.string().default(""),
   X402_FACILITATOR_URL: z.string().default("https://x402.org/facilitator"),
   CDP_API_KEY_ID: z.string().optional(), CDP_API_KEY_SECRET: z.string().optional(),
+  // L402 (Lightning HTTP 402) pay-per-call — a second, independent payment rail alongside x402.
+  // Inert by default: nothing under /api/v1/l402/<tool> is mounted until L402_ENABLED=true, and
+  // loadConfig() refuses to start with L402 enabled but its LND backend/root key misconfigured.
+  // See src/billing/l402/ for the full design.
+  L402_ENABLED: z.enum(["true", "false"]).default("false"),
+  L402_NETWORK: z.enum(["mainnet", "testnet", "signet", "regtest"]).default("mainnet"),
+  LND_REST_URL: z.string().default(""),
+  LND_INVOICE_MACAROON: z.string().default(""),
+  LND_TLS_CERT: z.string().default(""),
+  L402_ROOT_KEY: z.string().default(""),
+  L402_INVOICE_EXPIRY_SECONDS: z.coerce.number().int().min(60).max(86400).default(600),
+  L402_RATE_CACHE_MS: z.coerce.number().int().min(5000).max(3600000).default(60000),
+  L402_BTC_USD_FALLBACK: z.string().default(""),
   // Remote MCP: a Streamable HTTP transport at /mcp, mounted only when this is true, sharing
   // the exact same capability registry/service layer/tool schemas as local stdio (src/mcp.ts).
   MCP_REMOTE_ENABLED: z.enum(["true", "false"]).default("true"),
@@ -46,7 +59,7 @@ const envSchema = z.object({
 const PUBLIC_FACILITATOR_EVM_NETWORKS = new Set(["eip155:84532"]);
 export function loadConfig(env: NodeJS.ProcessEnv = process.env, options = { requireApiKeys: true }) {
   const parsed = envSchema.safeParse(env);
-  if (!parsed.success) throw new Error("Invalid environment configuration; check PORT, NODE_ENV, LOG_LEVEL and X402_ENABLED");
+  if (!parsed.success) throw new Error("Invalid environment configuration; check PORT, NODE_ENV, LOG_LEVEL, X402_ENABLED and L402_* settings");
   const e = parsed.data;
   const apiKeys = (e.RAFID_API_KEYS || e.API_KEY || "").split(",").map(k => k.trim()).filter(Boolean);
   if (options.requireApiKeys && e.AUTH_MODE === "env" && e.NODE_ENV === "production") throw new Error("Production REST requires AUTH_MODE=postgres");
@@ -76,6 +89,28 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options = { req
       `set CDP_API_KEY_ID and CDP_API_KEY_SECRET (from a Coinbase Developer Platform account) to use X402_NETWORK=${e.X402_NETWORK}`
     );
   }
+  // L402: fail closed at startup on any misconfiguration, exactly like the x402 checks above —
+  // there must never be a state where L402 is "enabled" but can't create a real invoice or
+  // verify a real token.
+  const l402Enabled = e.L402_ENABLED === "true";
+  let l402BtcUsdFallback: number | null = null;
+  if (e.L402_BTC_USD_FALLBACK) {
+    const n = Number(e.L402_BTC_USD_FALLBACK);
+    if (!Number.isFinite(n) || n <= 0) throw new Error("L402_BTC_USD_FALLBACK must be a positive number (USD per 1 BTC) when set");
+    l402BtcUsdFallback = n;
+  }
+  if (l402Enabled) {
+    let lndUrl: URL;
+    try { lndUrl = new URL(e.LND_REST_URL); } catch { throw new Error("LND_REST_URL must be a valid URL (e.g. https://your-node.m.voltageapp.io:8080) when L402_ENABLED=true"); }
+    if (lndUrl.protocol !== "https:") throw new Error("LND_REST_URL must use https");
+    if (!/^[0-9a-fA-F]{20,}$/.test(e.LND_INVOICE_MACAROON)) throw new Error("LND_INVOICE_MACAROON must be the hex-encoded invoice macaroon (invoice.macaroon) when L402_ENABLED=true");
+    if (!/^[0-9a-fA-F]{64,}$/.test(e.L402_ROOT_KEY)) throw new Error("L402_ROOT_KEY must be at least 32 random bytes, hex-encoded (openssl rand -hex 32), when L402_ENABLED=true");
+    // Single-use token enforcement must be shared across serverless instances in production — an
+    // in-process redemption set would let the same paid token be replayed on another instance.
+    if (e.NODE_ENV === "production" && !e.DATABASE_URL && !env.L402_DATABASE_URL) {
+      throw new Error("L402_ENABLED=true in production requires DATABASE_URL (or L402_DATABASE_URL) for single-use token enforcement");
+    }
+  }
   if (e.USAGE_REPOSITORY === "postgres" && !e.DATABASE_URL) {
     throw new Error("DATABASE_URL is required when USAGE_REPOSITORY=postgres");
   }
@@ -96,6 +131,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options = { req
   return { port: e.PORT, nodeEnv: e.NODE_ENV, apiKeys, authMode: e.AUTH_MODE, databaseUrl: e.DATABASE_URL, logLevel: e.LOG_LEVEL,
     x402Enabled, x402Network: e.X402_NETWORK, x402WalletAddress: e.X402_WALLET_ADDRESS, x402FacilitatorUrl: e.X402_FACILITATOR_URL,
     cdpApiKeyId: e.CDP_API_KEY_ID, cdpApiKeySecret: e.CDP_API_KEY_SECRET, cdpConfigured,
+    l402Enabled, l402Network: e.L402_NETWORK, lndRestUrl: e.LND_REST_URL, lndInvoiceMacaroon: e.LND_INVOICE_MACAROON,
+    lndTlsCert: e.LND_TLS_CERT, l402RootKey: e.L402_ROOT_KEY, l402InvoiceExpirySeconds: e.L402_INVOICE_EXPIRY_SECONDS,
+    l402RateCacheMs: e.L402_RATE_CACHE_MS, l402BtcUsdFallback,
     mcpRemoteEnabled: e.MCP_REMOTE_ENABLED === "true",
     logoUrl: e.RAFID_LOGO_URL, contactEmail: e.RAFID_CONTACT_EMAIL, legalInfoUrl: e.RAFID_LEGAL_INFO_URL,
     usageRepository: e.USAGE_REPOSITORY,

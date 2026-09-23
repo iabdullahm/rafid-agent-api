@@ -89,7 +89,8 @@ const CLIENT_SCRIPT = `
   var fmtNum = function (n) { return (n === null || n === undefined) ? "\u2014" : Number(n).toLocaleString(); };
   var fmtPct = function (n) { return (n === null || n === undefined) ? "\u2014" : n + "%"; };
   var fmtMs = function (n) { return (n === null || n === undefined) ? "\u2014" : Math.round(n) + " ms"; };
-  var fmtAmount = function (n) { return (n === null || n === undefined) ? "\u2014" : Number(n).toFixed(2); };
+  // BTC (L402) amounts are fractions of a cent-sized BTC figure, so they get 8 decimals; everything else keeps 2.
+  var fmtAmount = function (n, currency) { return (n === null || n === undefined) ? "\u2014" : Number(n).toFixed(currency === "BTC" ? 8 : 2); };
 
   var CHIP_CLASS = {
     settlement_succeeded: "chip-green", settlement_failed: "chip-red", payment_verified: "chip-blue",
@@ -125,13 +126,13 @@ const CLIENT_SCRIPT = `
     if (r.settledPayments === 0 || currencies.length === 0) {
       cards.push(kpiCard("Gross Revenue", "0.00 USDC"));
     } else if (currencies.length === 1) {
-      cards.push(kpiCard("Gross Revenue", fmtAmount(r.revenueByCurrency[currencies[0]]) + " " + currencies[0]));
+      cards.push(kpiCard("Gross Revenue", fmtAmount(r.revenueByCurrency[currencies[0]], currencies[0]) + " " + currencies[0]));
     } else {
-      currencies.forEach(function (c) { cards.push(kpiCard("Gross Revenue (" + c + ")", fmtAmount(r.revenueByCurrency[c]) + " " + c)); });
+      currencies.forEach(function (c) { cards.push(kpiCard("Gross Revenue (" + c + ")", fmtAmount(r.revenueByCurrency[c], c) + " " + c)); });
     }
     cards.push(kpiCard("Settled Payments", fmtNum(r.settledPayments)));
     cards.push(kpiCard("Paid Calls", fmtNum(data.paidCalls), "successful x402 tool executions"));
-    cards.push(kpiCard("Avg Revenue / Paid Call", r.averageRevenuePerPaidCall !== null ? fmtAmount(r.averageRevenuePerPaidCall) + " " + (r.currency || "") : "\u2014"));
+    cards.push(kpiCard("Avg Revenue / Paid Call", r.averageRevenuePerPaidCall !== null ? fmtAmount(r.averageRevenuePerPaidCall, r.currency) + " " + (r.currency || "") : "\u2014"));
     cards.push(kpiCard("Failed Settlements", fmtNum(r.failedSettlements)));
     cards.push(kpiCard("Reconciliation Anomalies", fmtNum(data.reconciliation.anomalyCount)));
     el.innerHTML = cards.join("");
@@ -187,7 +188,7 @@ const CLIENT_SCRIPT = `
       [
         { header: "Capability", render: function (r) { return esc(r.toolName); } },
         { header: "Settled Calls", right: true, render: function (r) { return fmtNum(r.settledCalls); } },
-        { header: "Revenue", right: true, render: function (r) { return r.revenue !== null ? fmtAmount(r.revenue) + " " + esc(r.currency) : "\u2014"; } },
+        { header: "Revenue", right: true, render: function (r) { return r.revenue !== null ? fmtAmount(r.revenue, r.currency) + " " + esc(r.currency) : "\u2014"; } },
         { header: "Share of Revenue", right: true, render: function (r) { return fmtPct(r.sharePct); } },
         { header: "Failed Settlements", right: true, render: function (r) { return fmtNum(r.failedSettlements); } }
       ],
@@ -217,15 +218,15 @@ const CLIENT_SCRIPT = `
   function renderRevenueCell(r) {
     var currencies = Object.keys(r.revenueByCurrency || {});
     if (r.settledCalls === 0 || currencies.length === 0) return "0.00 USDC";
-    if (currencies.length === 1) return fmtAmount(r.revenueByCurrency[currencies[0]]) + " " + currencies[0];
-    return currencies.map(function (c) { return fmtAmount(r.revenueByCurrency[c]) + " " + c; }).join(", ");
+    if (currencies.length === 1) return fmtAmount(r.revenueByCurrency[currencies[0]], currencies[0]) + " " + currencies[0];
+    return currencies.map(function (c) { return fmtAmount(r.revenueByCurrency[c], c) + " " + c; }).join(", ");
   }
 
   function renderAvgCell(r) {
     if (r.settledCalls === 0) return "—";
     var currencies = Object.keys(r.revenueByCurrency || {});
-    if (currencies.length === 1) return fmtAmount(r.averageRevenuePerSettledCall) + " " + currencies[0];
-    return currencies.map(function (c) { return fmtAmount(r.revenueByCurrency[c] / r.settledCalls) + " " + c; }).join(", ");
+    if (currencies.length === 1) return fmtAmount(r.averageRevenuePerSettledCall, currencies[0]) + " " + currencies[0];
+    return currencies.map(function (c) { return fmtAmount(r.revenueByCurrency[c] / r.settledCalls, c) + " " + c; }).join(", ");
   }
 
   function renderToolConversion(data) {
@@ -298,7 +299,7 @@ const CLIENT_SCRIPT = `
       [
         { header: "Time", render: function (r) { return fmtDate(r.time); } },
         { header: "Capability", render: function (r) { return esc(r.capability); } },
-        { header: "Amount", right: true, render: function (r) { return r.amount !== null ? fmtAmount(r.amount) : "\u2014"; } },
+        { header: "Amount", right: true, render: function (r) { return r.amount !== null ? fmtAmount(r.amount, r.currency) : "\u2014"; } },
         { header: "Currency", render: function (r) { return esc(r.currency || "\u2014"); } },
         { header: "Network", render: function (r) { return esc(r.network); } },
         { header: "Status", render: function (r) { return chip(r.status); } },
@@ -336,6 +337,7 @@ const CLIENT_SCRIPT = `
       '<dl class="fieldlist">' +
       "<dt>MCP</dt><dd>" + chip(s.mcp) + "</dd>" +
       "<dt>x402</dt><dd>" + chip(s.x402) + "</dd>" +
+      "<dt>L402 (Lightning)</dt><dd>" + chip(s.l402) + "</dd>" +
       "<dt>Analytics</dt><dd>" + chip(s.analytics) + "</dd>" +
       "<dt>Revenue Ledger</dt><dd>" + chip(s.revenueLedger) + "</dd>" +
       "<dt>Partner Data</dt><dd>" + esc(s.partnerData) + "</dd>" +

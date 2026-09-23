@@ -2,10 +2,11 @@ import { capabilities, CURRENCY } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
 import { buildCapabilitiesRegistry } from "./agent.js";
 import { x402BasePath } from "../billing/x402.js";
+import { l402BasePath } from "../billing/l402/gate.js";
 import { mcpRemotePath } from "../mcp/remote.js";
 import type { Config } from "../config/env.js";
 
-type ManifestConfig = Pick<Config, "x402Enabled" | "x402Network" | "x402WalletAddress" | "cdpConfigured" | "mcpRemoteEnabled">;
+type ManifestConfig = Pick<Config, "x402Enabled" | "x402Network" | "x402WalletAddress" | "cdpConfigured" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network">>;
 type PluginManifestConfig = Pick<Config, "logoUrl" | "contactEmail" | "legalInfoUrl">;
 
 const PRODUCT_NAME = "Rafid Property Intelligence";
@@ -19,7 +20,7 @@ const PRODUCT_DESCRIPTION =
  *  mentioned when MCP_REMOTE_ENABLED=true (config.mcpRemoteEnabled) — otherwise every manifest
  *  and llms.txt describe stdio only, so a manifest can never advertise an endpoint app.ts
  *  didn't actually mount (see api/app.ts). */
-function protocolList(config: Pick<Config, "x402Enabled" | "x402Network" | "mcpRemoteEnabled">) {
+function protocolList(config: Pick<Config, "x402Enabled" | "x402Network" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network">>) {
   return [
     {
       protocol: "mcp", role: "primary" as const,
@@ -31,6 +32,7 @@ function protocolList(config: Pick<Config, "x402Enabled" | "x402Network" | "mcpR
         : "Every capability exposed as an MCP tool with strict input/output schemas. Not remotely hosted in this environment — run `npm run mcp` after cloning."
     },
     { protocol: "x402", role: "primary" as const, enabled: config.x402Enabled, network: config.x402Enabled ? config.x402Network : null, description: "Pay-per-call, no account or API key required." },
+    ...(config.l402Enabled ? [{ protocol: "l402", role: "primary" as const, enabled: true, network: `lightning:${config.l402Network}`, endpoint: l402BasePath, description: "Pay-per-call over Lightning (L402: macaroon + BOLT11 invoice), no account or API key required." }] : []),
     { protocol: "rest", role: "compatibility" as const, description: "X-API-Key authenticated HTTP routes; the underlying transport MCP and the informational endpoints share, and a fallback for callers that can't do x402 yet." }
   ];
 }

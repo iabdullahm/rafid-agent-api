@@ -158,6 +158,23 @@ export function recordX402Event(
   });
 }
 
+/** L402 funnel events (see billing/l402/gate.ts): "challenge" per 402 issued, "payment_failed"
+ *  per rejected token, "settlement_success" per redeemed token. amount is the USD catalog price
+ *  (same convention as x402 rows); txHash is the public Lightning payment hash, never the
+ *  preimage. */
+export function recordL402Event(
+  repository: AnalyticsRepository,
+  req: Request,
+  args: { eventType: Extract<X402EventType, "challenge" | "payment_failed" | "settlement_success">; toolName: string; amount: number | null; txHash: string | null }
+): void {
+  const client = extractClientContext(req);
+  fireAndForget(repository, {
+    category: "l402", eventType: args.eventType, path: null, toolName: args.toolName, channel: null,
+    success: X402_SUCCESS_BY_EVENT_TYPE[args.eventType],
+    durationMs: null, amount: args.amount, currency: args.amount === null ? null : "USD", txHash: args.txHash, dataSource: null, ...client
+  });
+}
+
 /** One row per capability invocation, across every access mode (REST X-API-Key, x402, remote
  *  MCP) — the "TOOL USAGE" domain (analyze_oman_property calls, partner_feed vs. demo/manual
  *  fallback usage, success rate, p50/p95 latency). `client` is a full RequestClientContext for

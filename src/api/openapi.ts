@@ -6,6 +6,7 @@ import { agentBasePath, buildAgentInfo, buildCapabilitiesRegistry, buildPricingI
 import { buildAgentCard, buildAgentManifest, buildAiPluginManifest } from "./manifest.js";
 import { buildLlmsTxt } from "./llms-txt.js";
 import { buildX402Status } from "../billing/x402.js";
+import { l402BasePath } from "../billing/l402/gate.js";
 import { buildMcpStatus, mcpStatusBasePath } from "../mcp/remote.js";
 const json = (schema: unknown, example?: unknown, summary = "Example") => ({ "application/json": {
   schema, ...(example === undefined ? {} : { examples: { default: { summary, value: example } } })
@@ -30,7 +31,7 @@ const x402Errors = Object.fromEntries(Object.entries(errors).filter(([status]) =
 const toolMeta = { type: "object", required: ["requestId", "tool", "price", "currency"], properties: { requestId: { type: "string" }, tool: { type: "string" }, price: { type: "number" }, currency: { type: "string" } } };
 const toolSuccess = (data: unknown) => ({ type: "object", required: ["success", "data", "meta"], properties: { success: { const: true }, data, meta: toolMeta } });
 
-export function buildOpenapi(config: { x402Enabled: boolean; x402Network: string; x402WalletAddress: string; cdpConfigured: boolean; mcpRemoteEnabled: boolean; logoUrl: string; contactEmail: string; legalInfoUrl: string } = { x402Enabled: false, x402Network: "", x402WalletAddress: "", cdpConfigured: false, mcpRemoteEnabled: false, logoUrl: "", contactEmail: "", legalInfoUrl: "" }) {
+export function buildOpenapi(config: { x402Enabled: boolean; x402Network: string; x402WalletAddress: string; cdpConfigured: boolean; mcpRemoteEnabled: boolean; logoUrl: string; contactEmail: string; legalInfoUrl: string; l402Enabled?: boolean; l402Network?: "mainnet" | "testnet" | "signet" | "regtest" } = { x402Enabled: false, x402Network: "", x402WalletAddress: "", cdpConfigured: false, mcpRemoteEnabled: false, logoUrl: "", contactEmail: "", legalInfoUrl: "" }) {
 const paths: Record<string, unknown> = {};
 for (const c of capabilities) {
   const operation = {
@@ -39,6 +40,7 @@ for (const c of capabilities) {
       c.name === "estimate_maintenance" ? "Maintenance" :
       c.name === "analyze_oman_property" ? "Oman" :
       c.name === "research_company" || c.name === "find_companies" || c.name === "analyze_company_risk" ? "Intelligence" :
+      c.name === "oman_supplier_check" ? "Procurement" :
       "Property"
     ],
     summary: c.description,
@@ -65,6 +67,24 @@ if (config.x402Enabled) {
       responses: {
         "200": { description: "Calculated metrics", content: json(toolSuccess(z.toJSONSchema(c.output)), { success: true, data: c.exampleOutput, meta: { requestId: "example-request", tool: c.name, price: prices[c.name], currency: "USD" } }, `${c.name} response`) },
         "402": { description: `Payment required — ${prices[c.name].toFixed(2)} USD in USDC on ${config.x402Network}. Response body lists accepted payment options per the x402 protocol.` },
+        ...x402Errors
+      }
+    } };
+  }
+}
+if (config.l402Enabled) {
+  for (const c of capabilities) {
+    paths[l402BasePath + c.path] = { post: {
+      operationId: c.name + "_l402",
+      tags: ["L402"],
+      summary: `${c.description} (pay-per-call via L402 / Lightning, no API key)`,
+      description: "Requires `Authorization: L402 <macaroon>:<preimage-hex>` instead of X-API-Key. Send the request without an Authorization header first to receive a 402 whose WWW-Authenticate header carries an L402 macaroon and a BOLT11 invoice (the tool's USD price converted to sats at the live BTC/USD rate). Pay the invoice, then retry with the macaroon and the payment preimage. One token buys one successful call.",
+      security: [],
+      requestBody: { required: true, description: "Strict JSON input; unknown fields are rejected.", content: json(z.toJSONSchema(c.input), c.example, `${c.name} request`) },
+      responses: {
+        "200": { description: "Calculated metrics", content: json(toolSuccess(z.toJSONSchema(c.output)), { success: true, data: c.exampleOutput, meta: { requestId: "example-request", tool: c.name, price: prices[c.name], currency: "USD" } }, `${c.name} response`) },
+        "402": { description: `Payment required — ${prices[c.name].toFixed(2)} USD, payable in BTC over Lightning (lightning:${config.l402Network ?? "mainnet"}). See the WWW-Authenticate header (L402 macaroon + invoice).` },
+        "503": { description: "No BTC/USD rate or Lightning invoice could be produced right now; retry or use x402/API-key access." },
         ...x402Errors
       }
     } };
@@ -132,6 +152,21 @@ paths[x402BasePath + "/status"] = { get: { operationId: "x402_status", tags: ["x
     walletConfigured: { type: "boolean" }, paymentEnforcement: { type: "boolean" }
   } }), { success: true, data: buildX402Status(config), meta: { requestId: "example-request" } }) } }
 } };
+// L402 (Lightning) info + status — always available, independent of L402_ENABLED.
+paths[l402BasePath] = { get: { operationId: "l402_info", tags: ["L402"], summary: "L402 (Lightning) protocol and pricing information", description: "Always available, independent of L402_ENABLED. USD prices per tool; the sats amount is quoted per 402 challenge at the live BTC/USD rate. No secret is ever included.", security: [],
+  responses: { "200": { description: "L402 protocol info", content: json(success({ type: "object", required: ["protocol", "enabled", "tools"], properties: {
+    protocol: { type: "string" }, spec: { type: "string" }, enabled: { type: "boolean" }, network: { type: ["string", "null"] }, currency: { type: "string" },
+    pricing: { type: "string" }, tokenPolicy: { type: "string" }, authorization: { type: "string" },
+    tools: { type: "array", items: { type: "object", required: ["name", "endpoint", "priceUsd"], properties: { name: { type: "string" }, endpoint: { type: "string" }, priceUsd: { type: "number" } } } }
+  } })) } }
+} };
+paths[l402BasePath + "/status"] = { get: { operationId: "l402_status", tags: ["L402"], summary: "Factual L402 runtime status", description: "Always-on status read directly from validated configuration. Never includes the root key, LND macaroon or any other secret.", security: [],
+  responses: { "200": { description: "L402 runtime status", content: json(success({ type: "object", required: ["enabled", "mode", "paymentEnforcement"], properties: {
+    enabled: { type: "boolean" }, mode: { type: "string", enum: ["disabled", "testnet", "production"] }, network: { type: ["string", "null"] },
+    asset: { type: ["string", "null"] }, backend: { type: ["string", "null"] }, lightningBackendConfigured: { type: "boolean" },
+    rootKeyConfigured: { type: "boolean" }, paymentEnforcement: { type: "boolean" }
+  } })) } }
+} };
 // Section 3/4/5/8: top-level agent discovery. All four reuse the exact builder functions
 // app.ts calls at request time, so this document can never drift from the live responses.
 const exampleOrigin = "https://api.rafidsystem.com";
@@ -181,9 +216,11 @@ return {
     { name: "Maintenance", description: "Annual maintenance reserve estimation." },
     { name: "Oman", description: "Oman/Muscat-specific property analysis using local rental/sale comparables, normalization, confidence scoring and provenance. Muscat governorate only; see GET /llms.txt for supported areas and data limitations." },
     { name: "Intelligence", description: "Rafid Agent Intelligence: company research, discovery and evidence-tiered risk signals from public web sources. Inert (no external calls) until an operator configures the relevant provider — see GET /llms.txt." },
+    { name: "Procurement", description: "Procurement supplier screening for AI procurement agents: oman_supplier_check screens an Oman supplier (identity, activity, website/contact/address consistency, sanctions and public-risk indicators) before an RFQ. Screening only — not KYC/AML or vendor approval." },
     { name: "Agent", description: "Public discovery, pricing and tool-catalog endpoints for AI agents and agent marketplaces." },
     { name: "System", description: "Public discovery, health and documentation endpoints." },
-    { name: "x402", description: "Pay-per-call protocol information, always available; payment-gated endpoints are settled on-chain via the x402 protocol and require no account or API key." }
+    { name: "x402", description: "Pay-per-call protocol information, always available; payment-gated endpoints are settled on-chain via the x402 protocol and require no account or API key." },
+    { name: "L402", description: "Pay-per-call over the Bitcoin Lightning Network via the L402 protocol (macaroon + BOLT11 invoice); no account or API key. Payment-gated endpoints exist only when L402_ENABLED=true." }
   ],
   servers: [{ url: "/" }], paths,
   components: { securitySchemes: { ApiKeyAuth: { type: "apiKey", in: "header", name: "X-API-Key", description: "Enter an active Rafid API key. Swagger UI sends it in the X-API-Key request header." } } }

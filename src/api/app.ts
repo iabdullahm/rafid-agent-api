@@ -44,7 +44,13 @@ import { getRevenueDatabaseUrl, getRevenueInternalApiKey } from "../revenue/conf
 import { createRevenueRoutes } from "./revenueRoutes.js";
 import { decodeX402SettlementMetadata, buildSettlementRecord, recordSettlement } from "../revenue/settlementCapture.js";
 import { createDashboardRoutes } from "./dashboardRoutes.js";
-export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger } = {}) {
+import { buildL402Info, buildL402Status, createL402Gate, l402BasePath } from "../billing/l402/gate.js";
+import { LndRestBackend, type LightningBackend } from "../billing/l402/lightning.js";
+import { PublicBtcUsdRateProvider, type BtcUsdRateProvider } from "../billing/l402/rates.js";
+import { MemoryL402RedemptionStore, PostgresL402RedemptionStore, type L402RedemptionStore } from "../billing/l402/redemptions.js";
+import { buildL402SettlementRecord } from "../billing/l402/settlement.js";
+import { recordL402Event } from "../analytics/recorder.js";
+export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number } = {}) {
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
   const store = config.authMode === "postgres" ? options.store : undefined;
   const app = express();
@@ -92,8 +98,12 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     // (see mcp/remote.ts); Last-Event-ID supports SSE resumption. Mcp-Session-Id is exposed so a
     // browser-based MCP client can read it back (this deployment runs stateless, so the header
     // is normally absent, but a client should not have to special-case that).
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-PAYMENT, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID");
-    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+    // Authorization carries an L402 token (macaroon:preimage) — like X-PAYMENT, a per-request
+    // credential, never an ambient cookie, so the permissive origin above stays safe.
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-PAYMENT, Authorization, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID");
+    // WWW-Authenticate carries the L402 challenge (macaroon + invoice); a browser client must be
+    // able to read it back.
+    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate, X-L402-Error, PAYMENT-REQUIRED, X-PAYMENT-RESPONSE");
     res.setHeader("Access-Control-Max-Age", "600");
     res.on("finish", () => {
       const durationMs = Math.round((performance.now() - start) * 100) / 100;
@@ -107,8 +117,10 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       // secret: it is either the existing redacted customerId, or an x402 channel/network tag.
       const toolName = res.locals.toolName as CapabilityName | undefined;
       if (toolName) {
-        const accessMode = res.locals.channel === "x402" ? "x402" : "api-key";
-        const keyIdentifier = accessMode === "x402" ? `x402:${config.x402Network}` : (res.locals.customerId as string | undefined) ?? "anonymous";
+        const accessMode = res.locals.channel === "x402" ? "x402" : res.locals.channel === "l402" ? "l402" : "api-key";
+        const keyIdentifier = accessMode === "x402" ? `x402:${config.x402Network}`
+          : accessMode === "l402" ? `l402:lightning:${config.l402Network}`
+          : (res.locals.customerId as string | undefined) ?? "anonymous";
         void billingService.recordUsage({
           requestId: res.locals.requestId, keyIdentifier, toolName, accessMode, status: res.statusCode, durationMs,
           billableAmount: billingService.isBillable(toolName) ? billingService.getToolPrice(toolName) : 0, currency: "USD"
@@ -119,7 +131,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         // itself right after execute() (see below) — classifyDataSource() reads it straight off
         // the already-computed response, never a second execute() call.
         recordToolInvocation(analyticsRepository, {
-          toolName, channel: accessMode === "x402" ? "x402" : "rest", success: res.statusCode < 400, durationMs,
+          toolName, channel: accessMode === "api-key" ? "rest" : accessMode, success: res.statusCode < 400, durationMs,
           dataSource: (res.locals.dataSource as DataSource | undefined) ?? null,
           client: extractClientContext(req)
         });
@@ -137,6 +149,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   const discoveryLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   const x402Limiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   const mcpLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
+  const l402Limiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   const ingestionLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   // Vercel's Node runtime does not set Express's "trust proxy", so req.protocol stays "http"
   // behind TLS termination; read X-Forwarded-Proto directly instead so /agent.json and the
@@ -149,6 +162,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     openapi: "/openapi.json", health: "/api/v1/health",
     agent: agentBasePath, pricing: pricingBasePath, tools: toolsBasePath,
     ...(config.x402Enabled ? { x402: x402BasePath } : {}),
+    ...(config.l402Enabled ? { l402: l402BasePath } : {}),
     endpoints: capabilities.map(c => "/api/v1" + c.path)
   };
   // Section I: browsers get a landing page; machine/agent clients that ask for JSON (the
@@ -196,6 +210,11 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // and registered before the payment gate below so it is never mistaken for one of the
   // payment-gated POST routes it reports on. See buildX402Status()'s doc comment.
   app.get(x402BasePath + "/status", (_req, res) => send(res, buildX402Status(config)));
+  // L402 (Lightning) info + status: always mounted, independent of L402_ENABLED, exactly like the
+  // two x402 routes above. Only the payment-gated POST routes further down are conditional.
+  app.use(l402BasePath, l402Limiter);
+  app.get(l402BasePath, (_req, res) => send(res, buildL402Info(config, t => billingService.getToolPrice(t))));
+  app.get(l402BasePath + "/status", (_req, res) => send(res, buildL402Status(config)));
   const authenticate: RequestHandler = store ? async (req, res, next) => {
     try {
       const principal = await store.authenticate(req.header("x-api-key") ?? "");
@@ -296,6 +315,48 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         (_req, res, next) => { res.locals.toolName = c.name; res.locals.channel = "x402"; next(); },
         (req, _res, next) => req.is("application/json") ? next() : next(new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Use application/json")),
         parseJsonX402, async (req, res) => {
+          const input = c.input.parse(req.body);
+          const data = await c.execute(input);
+          res.locals.dataSource = classifyDataSource(c.name, data);
+          sendToolResult(res, data, c.name);
+        });
+    }
+  }
+  // Pay-per-call via L402 (Lightning): a third route family, parallel to x402 and equally
+  // unauthenticated — a paid L402 token (Authorization: L402 <macaroon>:<preimage>) is the sole
+  // authorization. Mounted only when L402_ENABLED=true (404 otherwise). See billing/l402/gate.ts.
+  if (config.l402Enabled) {
+    const l402DatabaseUrl = process.env.L402_DATABASE_URL || config.databaseUrl;
+    const l402Redemptions = options.l402Redemptions
+      ?? (l402DatabaseUrl ? new PostgresL402RedemptionStore(l402DatabaseUrl) : new MemoryL402RedemptionStore());
+    const l402Backend = options.l402Backend
+      ?? new LndRestBackend({ restUrl: config.lndRestUrl, invoiceMacaroonHex: config.lndInvoiceMacaroon, tlsCert: config.lndTlsCert });
+    const l402Rates = options.l402Rates
+      ?? new PublicBtcUsdRateProvider({ cacheMs: config.l402RateCacheMs, fallbackBtcUsd: config.l402BtcUsdFallback });
+    // The receiving side, for the ledger's pay_to column: the node's host (public), never a credential.
+    const l402PayTo = `lnd:${(() => { try { return new URL(config.lndRestUrl).hostname; } catch { return "unknown"; } })()}`;
+    const l402Gate = createL402Gate({
+      config, backend: l402Backend, rates: l402Rates, redemptions: l402Redemptions, now: options.l402Now,
+      priceUsd: t => billingService.getToolPrice(t),
+      onChallenge: (req, tool) => recordL402Event(analyticsRepository, req, { eventType: "challenge", toolName: tool, amount: billingService.getToolPrice(tool), txHash: null }),
+      onRejected: (req, tool) => recordL402Event(analyticsRepository, req, { eventType: "payment_failed", toolName: tool, amount: billingService.getToolPrice(tool), txHash: null }),
+      onRedeemed: (req, res, ctx) => {
+        recordL402Event(analyticsRepository, req, { eventType: "settlement_success", toolName: ctx.toolName, amount: ctx.priceUsd, txHash: ctx.paymentHashHex });
+        recordSettlement(revenueLedger, buildL402SettlementRecord({
+          ctx, network: config.l402Network, payTo: l402PayTo,
+          requestId: typeof res.locals.requestId === "string" ? res.locals.requestId : randomUUID()
+        }));
+      }
+    });
+    const parseJsonL402 = express.json({ limit: "32kb" });
+    for (const c of capabilities) {
+      app.post(l402BasePath + c.path,
+        // Gate first, then mark: like x402, an unpaid 402 challenge is not a tool invocation and
+        // must not be recorded as a (failed) call in usage/analytics.
+        l402Gate(c.name),
+        (_req, res, next) => { res.locals.toolName = c.name; res.locals.channel = "l402"; next(); },
+        (req, _res, next) => req.is("application/json") ? next() : next(new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Use application/json")),
+        parseJsonL402, async (req, res) => {
           const input = c.input.parse(req.body);
           const data = await c.execute(input);
           res.locals.dataSource = classifyDataSource(c.name, data);

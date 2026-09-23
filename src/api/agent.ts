@@ -3,6 +3,7 @@ import { capabilities } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
 import { prices } from "../billing/catalog.js";
 import { x402BasePath } from "../billing/x402.js";
+import { l402BasePath } from "../billing/l402/gate.js";
 import type { Config } from "../config/env.js";
 
 /** Section A/B/C route paths, defined once so app.ts and openapi.ts never disagree. */
@@ -26,7 +27,7 @@ function summarizeOutput(schema: z.ZodType): string {
  *  result, no account). The REST `X-API-Key` routes exist as an underlying transport and a
  *  compatibility layer for callers that can't do x402 yet — `protocols` below states that
  *  ordering explicitly rather than leaving it to be inferred. */
-export function buildAgentInfo(config: Pick<Config, "x402Enabled" | "x402Network">) {
+export function buildAgentInfo(config: Pick<Config, "x402Enabled" | "x402Network"> & Partial<Pick<Config, "l402Enabled" | "l402Network">>) {
   return {
     name: "Rafid Property Intelligence",
     description: "Property and facility intelligence tools built for autonomous AI agents: discover a capability, pay per call over x402 (or authenticate with an API key), execute, get a structured result.",
@@ -35,6 +36,7 @@ export function buildAgentInfo(config: Pick<Config, "x402Enabled" | "x402Network
     protocols: [
       { protocol: "mcp", role: "primary", description: "Local stdio MCP server exposing every capability as a tool with strict input/output schemas.", transport: "stdio", remote: false },
       { protocol: "x402", role: "primary", enabled: config.x402Enabled, description: "Pay-per-call, no account or API key: discover price via GET " + x402BasePath + ", pay, call.", network: config.x402Enabled ? config.x402Network : null },
+      ...(config.l402Enabled ? [{ protocol: "l402", role: "primary", enabled: true, description: "Pay-per-call over Lightning, no account or API key: POST " + l402BasePath + "/<tool> returns a 402 with an L402 macaroon + invoice; pay, retry with Authorization: L402 <macaroon>:<preimage>.", network: `lightning:${config.l402Network}` }] : []),
       { protocol: "rest", role: "compatibility", description: "X-API-Key authenticated REST routes. Underlying transport shared by MCP and the informational endpoints below; not the primary integration path for agents." }
     ],
     mcp: true,
@@ -49,6 +51,7 @@ export function buildAgentInfo(config: Pick<Config, "x402Enabled" | "x402Network
     capabilities: capabilitiesBasePath,
     x402: x402BasePath,
     x402Enabled: config.x402Enabled,
+    ...(config.l402Enabled ? { l402: l402BasePath, l402Enabled: true } : {}),
     endpoints: capabilities.map(c => "/api/v1" + c.path),
     roadmap: plannedCapabilities
   };

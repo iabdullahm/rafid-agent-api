@@ -6,7 +6,7 @@ import {
 } from "../../analytics/aggregate.js";
 import type { RevenueLedger, RevenueSettlement } from "../../revenue/types.js";
 import {
-  REVENUE_PERIODS, periodSince, summarizeRevenue, summarizeRevenueByTool, buildReconciliation,
+  REVENUE_PERIODS, periodSince, summarizeRevenue, summarizeRevenueByTool, buildReconciliation, isPaidToolExecution,
   type RevenuePeriod, type RevenueSummary, type RevenueToolStats, type ReconciliationAnomaly
 } from "../../revenue/aggregate.js";
 import { PostgresRevenueLedger } from "../../db/revenueStore.js";
@@ -80,7 +80,7 @@ function makeBucket(start: Date, end: Date, label: string, succeeded: readonly R
   const revenueByCurrency: Record<string, number> = {};
   for (const row of inBucket) {
     if (row.currency === null || row.amountDecimal === null) continue;
-    revenueByCurrency[row.currency] = round((revenueByCurrency[row.currency] ?? 0) + row.amountDecimal, 6);
+    revenueByCurrency[row.currency] = round((revenueByCurrency[row.currency] ?? 0) + row.amountDecimal, 8);
   }
   return { label, startIso: start.toISOString(), endIso: end.toISOString(), revenueByCurrency };
 }
@@ -170,6 +170,7 @@ export function explorerUrlFor(network: string, txHash: string): string | null {
 export interface SystemStatusReport {
   mcp: "Enabled" | "Disabled";
   x402: "Enabled" | "Disabled";
+  l402: "Enabled" | "Disabled";
   analytics: "Active" | "Unknown";
   revenueLedger: "Active" | "Unknown";
   partnerData: "Active" | "No partner-fed calls observed in this period" | "Unknown";
@@ -224,6 +225,7 @@ async function gatherSystemStatus(args: {
   return {
     mcp: config.mcpRemoteEnabled ? "Enabled" : "Disabled",
     x402: config.x402Enabled ? "Enabled" : "Disabled",
+    l402: config.l402Enabled ? "Enabled" : "Disabled",
     analytics: analyticsOk ? "Active" : "Unknown",
     revenueLedger: revenueOk ? "Active" : "Unknown",
     partnerData: !anyToolCallsInPeriod ? "Unknown" : partnerFeedInPeriod ? "Active" : "No partner-fed calls observed in this period",
@@ -511,7 +513,7 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   // reconciliation (revenueRoutes.ts), computed in-process here rather than proxied over HTTP. ----
   const x402ToolExecutionCounts: Record<string, number> = {};
   for (const event of events) {
-    if (event.category === "tool" && event.channel === "x402" && event.success === true && event.toolName) {
+    if (isPaidToolExecution(event) && event.toolName) {
       x402ToolExecutionCounts[event.toolName] = (x402ToolExecutionCounts[event.toolName] ?? 0) + 1;
     }
   }

@@ -17,7 +17,7 @@ import { MemoryRevenueLedger } from "./revenue/memoryLedger.js";
 import { PostgresRevenueLedger } from "./db/revenueStore.js";
 import { MemoryAnalyticsRepository } from "./analytics/memoryRepository.js";
 import { PostgresAnalyticsRepository } from "./db/analyticsStore.js";
-import { REVENUE_PERIODS, periodSince, summarizeRevenue, summarizeRevenueByTool, buildReconciliation, type RevenuePeriod } from "./revenue/aggregate.js";
+import { REVENUE_PERIODS, periodSince, summarizeRevenue, summarizeRevenueByTool, buildReconciliation, isPaidToolExecution, type RevenuePeriod } from "./revenue/aggregate.js";
 import type { RevenueLedger } from "./revenue/types.js";
 import type { AnalyticsRepository } from "./analytics/types.js";
 import { prices, type CapabilityName } from "./billing/catalog.js";
@@ -55,7 +55,7 @@ async function main() {
     const analyticsEvents = await analyticsRepository.queryEvents(since ?? new Date(0));
     const x402ToolExecutionCounts: Record<string, number> = {};
     for (const event of analyticsEvents) {
-      if (event.category === "tool" && event.channel === "x402" && event.success === true && event.toolName) {
+      if (isPaidToolExecution(event) && event.toolName) {
         x402ToolExecutionCounts[event.toolName] = (x402ToolExecutionCounts[event.toolName] ?? 0) + 1;
       }
     }

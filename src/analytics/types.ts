@@ -22,7 +22,10 @@
  * asks to capture "if safely available".
  */
 
-export type AnalyticsCategory = "discovery" | "mcp" | "x402" | "tool";
+/** "l402" rows use the same funnel vocabulary as x402 (challenge / payment_failed /
+ *  settlement_success) but a separate category, so the x402 funnel and every x402 aggregate stay
+ *  exactly as they were. */
+export type AnalyticsCategory = "discovery" | "mcp" | "x402" | "l402" | "tool";
 
 /** Discovery: always "hit" — which surface was hit is carried in `path`. */
 export type DiscoveryEventType = "hit";
@@ -67,7 +70,7 @@ export type DataSource = "partner_feed" | "demo_manual" | "mixed" | "unknown" | 
  *  isn't a meaningful concept (a discovery hit and an x402 funnel event aren't tool invocations at
  *  all). This is purely additive to an already-shipped table — PostgresAnalyticsRepository adds it
  *  via ALTER TABLE ... ADD COLUMN IF NOT EXISTS, so existing rows simply read back as null. */
-export type AnalyticsChannel = "rest" | "x402" | "mcp-remote";
+export type AnalyticsChannel = "rest" | "x402" | "l402" | "mcp-remote";
 
 export interface AnalyticsEvent {
   category: AnalyticsCategory;
