@@ -35,16 +35,21 @@ const toMicros = (n: number) => Math.round(n * MICROS);
 const failures: string[] = [];
 const check = (ok: boolean, label: string) => { if (!ok) failures.push(label); return ok; };
 const step = (n: number, text: string) => console.log(`\n[${n}] ${text}`);
+class Stop extends Error {}
+/** Ends the run with exit code 1 WITHOUT process.exit(): calling process.exit() right after
+ *  fetch() trips a libuv assertion on Windows (UV_HANDLE_CLOSING). */
+const stop = (...parts: unknown[]): never => { console.error(...parts); throw new Stop(); };
+
+async function main() {
 
 // ---- 0. Safety: testnet only -------------------------------------------------------------------
 const status = (await json(await fetch(`${BASE_URL}/api/v1/mpp/status`))).data;
 if (!status?.enabled || !status.modes?.includes("session")) {
-  console.error(`MPP session mode is not enabled on ${BASE_URL}.`); process.exit(1);
+  stop(`MPP session mode is not enabled on ${BASE_URL} (GET /api/v1/mpp/status → enabled=${status?.enabled}, modes=${JSON.stringify(status?.modes)}). Point RAFID_BASE_URL at a deployment with MPP_ENABLED=true, MPP_MODES=charge,session and MPP_NETWORK=tempo-testnet.`);
 }
 const chainId = status.network?.chainId ?? (status.testnet ? TESTNET_CHAIN_ID : null);
 if (status.testnet !== true || chainId !== TESTNET_CHAIN_ID) {
-  console.error(`Refusing to run: ${BASE_URL} is not on Tempo testnet (testnet=${status.testnet}, chainId=${chainId}). This script never uses mainnet.`);
-  process.exit(1);
+  stop(`Refusing to run: ${BASE_URL} is not on Tempo testnet (testnet=${status.testnet}, chainId=${chainId}). This script never uses mainnet.`);
 }
 const account = privateKeyToAccount(requireKey());
 const rpcUrl = process.env.TEMPO_TESTNET_RPC_URL || undefined;
@@ -64,7 +69,7 @@ step(1, `Create a ${BUDGET_USD} USD session and open the channel`);
 const allowedTools = [CHEAP.tool, MID.tool, EXPENSIVE.tool];
 const createdRes = await postWith(managerFetch, "/api/v1/mpp/sessions", { maxBudget: BUDGET_USD, currency: "USD", allowedTools });
 const created = await json(createdRes);
-if (createdRes.status !== 201 || !created.success) { console.error("Session open failed:", createdRes.status, JSON.stringify(created.error ?? created)); process.exit(1); }
+if (createdRes.status !== 201 || !created.success) stop("Session open failed:", createdRes.status, JSON.stringify(created.error ?? created));
 const sessionId: string = created.data.sessionId;
 const channelId: string = created.data.payment?.channelId ?? manager.channelId;
 console.log(`    session ${sessionId} → ${created.data.status}; channel ${channelId}; open tx ${created.data.payment?.authorizationReference ?? "(n/a)"}`);
@@ -75,7 +80,7 @@ const idem1 = `e2e-${CHEAP.tool}-${crypto.randomUUID()}`;
 const call = async (t: { tool: string; input: unknown }, idem: string) => {
   const res = await postWith(managerFetch, `/api/v1/mpp/sessions/${sessionId}/tools/${t.tool}`, t.input, { "Idempotency-Key": idem });
   const body = await json(res);
-  if (res.status !== 200 || !body.success) { console.error(`${t.tool} failed:`, res.status, JSON.stringify(body.error ?? body)); process.exit(1); }
+  if (res.status !== 200 || !body.success) stop(`${t.tool} failed:`, res.status, JSON.stringify(body.error ?? body));
   console.log(`    ${t.tool}: charged ${body.usage.charge}, spent ${body.usage.spent}, remaining ${body.usage.remaining}`);
   return body.usage as { charge: number; spent: number; remaining: number };
 };
@@ -156,5 +161,11 @@ Open tx:            ${final.payment?.authorizationReference ?? created.data.paym
 Close/settle tx:    ${closeTx ?? final.settlement?.reference ?? "(none)"}
 Close path:         ${closePath}
 ========================================================================`);
-if (failures.length) { console.error("FAILED checks:\n - " + failures.join("\n - ")); process.exit(1); }
+if (failures.length) stop("FAILED checks:\n - " + failures.join("\n - "));
 console.log("ALL CHECKS PASSED");
+}
+
+await main().catch(error => {
+  if (!(error instanceof Stop)) console.error(error instanceof Error ? error.message : error);
+  process.exitCode = 1;
+});

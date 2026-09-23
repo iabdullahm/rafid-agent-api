@@ -7,6 +7,9 @@ import { privateKeyToAccount } from "viem/accounts";
  * (MPP_CLIENT_PRIVATE_KEY) and never leaves this process — mppx signs locally and sends only the
  * resulting credential (Authorization: Payment …).
  */
+// Load examples/mpp-client/.env (Node >= 20.12). Real environment variables take precedence.
+try { (process as { loadEnvFile?: (path?: string) => void }).loadEnvFile?.(".env"); } catch { /* no .env: use the environment */ }
+
 export const BASE_URL = (process.env.RAFID_BASE_URL ?? "https://api.rafidsystem.com").replace(/\/$/, "");
 
 export function requireKey(): `0x${string}` {
