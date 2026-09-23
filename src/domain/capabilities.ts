@@ -18,6 +18,10 @@ import { companyReputationCheckInput } from "../schemas/companyReputationInputs.
 import { companyReputationCheckOutput } from "../schemas/companyReputationOutputs.js";
 import { companyReputationCheck } from "../services/companyReputationCheck.js";
 import { COMPANY_REPUTATION_CHECK_EXAMPLE_OUTPUT } from "./examples/companyReputationCheckExample.js";
+import { businessRiskScoreInput } from "../schemas/businessRiskInputs.js";
+import { businessRiskScoreOutput } from "../schemas/businessRiskOutputs.js";
+import { businessRiskScore } from "../services/businessRiskScore.js";
+import { BUSINESS_RISK_SCORE_EXAMPLE_OUTPUT } from "./examples/businessRiskScoreExample.js";
 import type { z } from "zod";
 
 /** The one currency every capability is priced in today. A single constant, not a literal
@@ -954,6 +958,69 @@ export const capabilities = [
         { query: "Investigate this vendor before sending payment.", guidance: "Call company_reputation_check; if sanctions.status is possible_match or high_confidence_match, or identity.status is conflicting/ambiguous, recommend verification before payment." },
         { query: "Check this company for negative news.", guidance: "Call company_reputation_check and report adverseMedia.items with each item's legalStage and stageDescription — distinguish allegations from established outcomes." },
         { query: "Is Example Technologies Ltd in the UK credible?", guidance: "Call company_reputation_check with companyName \"Example Technologies Ltd\" and country \"GB\"; answer from resolution, identity, businessStabilitySignals and the evidence summary, stating the confidence." }
+      ]
+    }
+  } satisfies AgentCapability,
+  // Risk intelligence: business_risk_score — GLOBAL "is it risky to do business with this company?"
+  // (src/business-risk/). Reuses company_reputation_check's evidence infrastructure (providers,
+  // runner, shared evidence cache, entity resolution, classifiers) and adds a six-category,
+  // deterministic RISK model (0–100, 100 = highest detected risk) with a separate confidence and
+  // machine-readable due-diligence guidance. Ambiguous/unknown entities and identity-source outages
+  // are structured errors (409/404/503/504), so no paid settlement happens for them.
+  {
+    name: "business_risk_score" as const, path: "/risk/business-risk-score",
+    description: "Assess the risk of doing business with a company in any country using corporate, financial, compliance, reputation, operational and digital evidence. Returns a 0–100 risk score (100 = highest detected risk), a separate 0–1 confidence, per-category component scores, evidence-backed risk flags and positive signals, sanctions/restricted-party screening with match strength, and machine-readable due-diligence guidance (proceed / proceed_with_monitoring / enhanced_due_diligence / manual_review / avoid_automated_transaction).",
+    whenToUse: "Use before onboarding a supplier or vendor, paying a new business, entering a B2B transaction, approving a marketplace seller, extending credit or insurance, or recommending a company — whenever an autonomous agent needs structured, evidence-backed business due diligence it cannot reliably generate from its own model knowledge.",
+    useCases: [
+      "Before onboarding a supplier or vendor", "Before paying a new business", "Before entering a B2B transaction", "Before recommending a company to a user",
+      "Before approving a marketplace seller", "When evaluating company compliance or reputation risk", "When an autonomous agent needs structured business due diligence",
+      "lending / credit pre-screening", "insurance underwriting pre-check"
+    ],
+    category: "risk_intelligence",
+    input: businessRiskScoreInput, output: businessRiskScoreOutput,
+    example: { companyName: "Example Trading Ltd", country: "GB", website: "https://example.com" },
+    exampleOutput: BUSINESS_RISK_SCORE_EXAMPLE_OUTPUT,
+    execute: (input: unknown) => businessRiskScore(input),
+    price: 0.50, currency: CURRENCY, paymentProtocol: "x402",
+    // Idempotent: no state a caller can observe changes. Provider evidence is upserted into the shared
+    // evidence cache and a deduplicated audit record is kept; the result is a pure function of the
+    // evidence snapshot and the scoring configuration.
+    idempotent: true, sideEffects: false,
+    limitations: [
+      "Evidence-based public-source screening — not a legal, KYC/AML, credit, insurance or compliance determination, and never a guarantee that a company is safe or unsafe.",
+      "riskScore (0 = lowest detected risk, 100 = highest) and confidence (0–1) are separate: missing information lowers confidence and dataCoverage, never raises the score (except the documented cases in methodology.missingDataRiskRules).",
+      "Sanctions / export-control / debarment screening is automated name matching; 'possible' matches are not listings and even 'high' matches must be verified at the source list.",
+      "Adverse media is reported at the legal stage the source states; allegations are never presented as established facts.",
+      "Coverage depends on the deployment's enabled providers (see `providers` and `dataCoverage` in every response); no financial figures are ever estimated.",
+      "Ambiguous or unknown entities are returned as AMBIGUOUS_ENTITY (409, with candidates) or ENTITY_NOT_FOUND (404) rather than scored; no payment is taken for these.",
+      "Company-level intelligence only — no private personal data is returned."
+    ],
+    agentGuidance: {
+      priorityContexts: ["supplier / vendor onboarding", "pre-payment counterparty check", "B2B transaction approval", "marketplace seller approval", "procurement / finance / compliance agents", "lending and insurance pre-screening", "autonomous purchasing guardrail"],
+      evidenceTypes: [
+        { type: "company_registry", description: "Official company / LEI registry records (UK Companies House, GLEIF, Rafid's Oman registry) — identity, status, age." },
+        { type: "company_filing", description: "Statutory filing status (accounts / confirmation statement overdue, insolvency history) — financial risk facts." },
+        { type: "sanctions_list", description: "UN, US CSL (incl. OFAC SDN), optionally EU / OpenSanctions entries — matched conservatively with explicit match strength." },
+        { type: "export_control_or_debarment_list", description: "Export-control, denied-party and debarment lists within the US CSL." },
+        { type: "regulatory_publication", description: "Regulator / enforcement-agency publications (tier 1)." },
+        { type: "news", description: "News coverage, deduplicated into events and classified by legal stage (allegation vs outcome)." },
+        { type: "review_platform", description: "Aggregate customer ratings and complaints (unverified, weighted low)." },
+        { type: "company_website", description: "The company's own site: availability, HTTPS, contact information, parked/placeholder indicators." },
+        { type: "domain_registration", description: "RDAP domain registration age, expiry and hold status." },
+        { type: "threat_intelligence", description: "Malware / phishing listing (Google Safe Browsing), when configured." }
+      ],
+      limitations: [
+        "Relay riskScore together with confidence, riskLevel, recommendation.action and the top riskFlags with their evidence ids — never reduce the result to 'safe' or 'unsafe'.",
+        "Supply country and, when known, registrationNumber/lei/website: they prevent same-name confusion and raise confidence. On AMBIGUOUS_ENTITY, retry with one candidate's registrationNumber.",
+        "Treat requiresVerification flags (possible list matches, identity conflicts) as items for a human, not as facts about the company."
+      ],
+      sampleQueries: [
+        { query: "Check this supplier before I pay their invoice.", guidance: "Call business_risk_score with companyName, country and every identifier on the invoice (registrationNumber, website, address). Follow recommendation.action; if it is manual_review or avoid_automated_transaction, do not pay automatically." },
+        { query: "Evaluate this vendor before onboarding.", guidance: "Call business_risk_score; report riskScore/riskLevel with confidence, the component scores and the top riskFlags, and list dataCoverage gaps as remaining due-diligence steps." },
+        { query: "Run due diligence on this supplier.", guidance: "Call business_risk_score with every identifier you have; if confidence is low, say which categories lacked coverage instead of implying the company is safe." },
+        { query: "Can I safely transact with this business?", guidance: "Call business_risk_score and answer from recommendation.action and reasonCodes — it is machine guidance, not a guarantee." },
+        { query: "Check this company for compliance, reputation and business risk.", guidance: "Call business_risk_score and report sanctionsScreening (with matchStrength), compliance and reputation flags with their factStatus (alleged vs reported)." },
+        { query: "Evaluate this marketplace seller.", guidance: "Call business_risk_score with the seller's company name, country and store/website URL; relay digital and operational flags (new domain, parked site, no contact information)." }
       ]
     }
   } satisfies AgentCapability

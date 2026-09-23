@@ -55,6 +55,10 @@ export const ESTIMATED_UPSTREAM_COST_USD: Partial<Record<CapabilityKey, { provid
     providerCostUSD: 0.024, llmCostUSD: 0,
     assumptions: "Uncached worst case: 3 web searches (2 news/adverse-media + 1 review-platform) at an estimated $0.008/search (Tavily pay-as-you-go class pricing, rounded up). GLEIF, RDAP, the company website, the UN list and the US CSL are free public sources; UK Companies House is free with a key. Evidence is cached per company identity (news 1d, reviews 3d, registry/domain 7d, sanctions 12h), so repeat checks cost less. OpenSanctions (optional, paid licence) is excluded from this estimate. No LLM synthesis."
   },
+  business_risk_score: {
+    providerCostUSD: 0.032, llmCostUSD: 0,
+    assumptions: "Uncached worst case: 4 web searches (2 news/adverse-media + 1 review-platform + 1 regulator/enforcement) at an estimated $0.008/search (Tavily pay-as-you-go class pricing, rounded up). GLEIF, RDAP, the company website, the UN list and the US CSL are free public sources; UK Companies House and Google Safe Browsing are free with a key. Evidence is shared with company_reputation_check through the same evidence cache (news 1d, reviews 3d, registry/domain 7d, sanctions 12h), so repeat or cross-capability checks cost less. Ambiguous/not-found entities stop before any paid search. OpenSanctions (optional, paid licence) is excluded. No LLM synthesis."
+  },
   analyze_company_risk: {
     providerCostUSD: 0.015, llmCostUSD: 0,
     assumptions: "Up to 3 targeted web searches (adverse news, reputation, legal/regulatory) at an estimated $0.005/search; domain/website/sanctions checks use free public sources (RDAP, OFAC) with no per-call fee. No LLM synthesis — findings are presented as retrieved evidence, not generated prose."

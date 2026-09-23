@@ -27,6 +27,8 @@ function registryEvidence(providerId: string, sourceName: string, now: Date, r: 
   recordId: string; legalName: string; otherNames: string[]; registrationNumber: string | null; lei: string | null;
   country: string | null; city: string | null; status: RegistryStatus; rawStatus: string | null; incorporationDate: string | null;
   leiRegistrationStatus: string | null; hasInsolvencyHistory: boolean | null; url: string | null; lastUpdated: string | null; recordKind: "company_registry" | "lei_registry";
+  /** Optional additional registry facts (additive; analyzers that don't know a key ignore it). */
+  extra?: NormalizedEvidence["metadata"];
 }): NormalizedEvidence {
   const legalName = cleanOrNull(r.legalName, 200) ?? r.legalName;
   return {
@@ -40,7 +42,8 @@ function registryEvidence(providerId: string, sourceName: string, now: Date, r: 
     metadata: {
       recordKind: r.recordKind, legalName, otherNames: r.otherNames.map(n => cleanOrNull(n, 200)).filter((n): n is string => Boolean(n)).slice(0, 10),
       registrationNumber: r.registrationNumber, lei: r.lei, country: r.country, city: r.city, status: r.status, rawStatus: r.rawStatus,
-      incorporationDate: r.incorporationDate, leiRegistrationStatus: r.leiRegistrationStatus, hasInsolvencyHistory: r.hasInsolvencyHistory, registryName: sourceName
+      incorporationDate: r.incorporationDate, leiRegistrationStatus: r.leiRegistrationStatus, hasInsolvencyHistory: r.hasInsolvencyHistory, registryName: sourceName,
+      ...(r.extra ?? {})
     }
   };
 }
@@ -109,7 +112,8 @@ export class GleifRegistryProvider implements ReputationProvider {
           hasInsolvencyHistory: null,
           url: `https://search.gleif.org/#/record/${lei}`,
           lastUpdated: typeof registration.lastUpdateDate === "string" ? registration.lastUpdateDate : null,
-          recordKind: "lei_registry"
+          recordKind: "lei_registry",
+          extra: { registeredAddress: formatAddress([...(Array.isArray(address.addressLines) ? address.addressLines : []), address.city, address.postalCode]) }
         }));
       }
       return { status: "ok", evidence, reason: null, requests: 1, estimatedCostUSD: 0 };
@@ -170,7 +174,8 @@ export class CompaniesHouseProvider implements ReputationProvider {
           created: typeof c.date_of_creation === "string" ? c.date_of_creation : null,
           locality: ((c.registered_office_address ?? {}) as { locality?: unknown }).locality,
           insolvency: typeof c.has_insolvency_history === "boolean" ? c.has_insolvency_history : null,
-          previousNames: Array.isArray(c.previous_company_names) ? c.previous_company_names.map(p => (p as { name?: unknown })?.name).filter((n): n is string => typeof n === "string") : []
+          previousNames: Array.isArray(c.previous_company_names) ? c.previous_company_names.map(p => (p as { name?: unknown })?.name).filter((n): n is string => typeof n === "string") : [],
+          extra: companiesHouseProfileFacts(c)
         });
         return { status: "ok", evidence: e ? [e] : [], reason: null, requests: 1, estimatedCostUSD: 0 };
       }
@@ -196,16 +201,52 @@ export class CompaniesHouseProvider implements ReputationProvider {
     }
   }
 
-  private toEvidence(now: Date, c: { number: string | null; name: string | null; status: string | null; created: string | null; locality: unknown; insolvency: boolean | null; previousNames: string[] }): NormalizedEvidence | null {
+  private toEvidence(now: Date, c: { number: string | null; name: string | null; status: string | null; created: string | null; locality: unknown; insolvency: boolean | null; previousNames: string[]; extra?: NormalizedEvidence["metadata"] }): NormalizedEvidence | null {
     if (!c.number || !c.name) return null;
     return registryEvidence(this.id, this.name, now, {
       recordId: c.number, legalName: c.name, otherNames: c.previousNames, registrationNumber: c.number, lei: null, country: "GB",
       city: typeof c.locality === "string" ? c.locality : null,
       status: (c.status && CH_STATUS[c.status]) || "unknown", rawStatus: c.status, incorporationDate: c.created,
       leiRegistrationStatus: null, hasInsolvencyHistory: c.insolvency,
-      url: `https://find-and-update.company-information.service.gov.uk/company/${encodeURIComponent(c.number)}`, lastUpdated: null, recordKind: "company_registry"
+      url: `https://find-and-update.company-information.service.gov.uk/company/${encodeURIComponent(c.number)}`, lastUpdated: null, recordKind: "company_registry",
+      extra: c.extra
     });
   }
+}
+
+function formatAddress(parts: readonly unknown[]): string | null {
+  const text = parts.filter((p): p is string => typeof p === "string" && p.trim().length > 0).map(p => p.trim()).join(", ");
+  return cleanOrNull(text, 300);
+}
+
+/**
+ * Structured statutory-filing facts from a Companies House company PROFILE (GET /company/{number}).
+ * Company-level facts only (no officer/person data). Keys are additive registry metadata; a key is
+ * present only when the profile states the fact, so "unknown" is never confused with "false".
+ * Shared by CompaniesHouseProvider and business_risk_score's filings (financial) provider.
+ */
+export function companiesHouseProfileFacts(c: Record<string, unknown>): NormalizedEvidence["metadata"] {
+  const facts: NormalizedEvidence["metadata"] = { filingDetail: true };
+  const accounts = (c.accounts ?? {}) as Record<string, unknown>;
+  const confirmation = (c.confirmation_statement ?? {}) as Record<string, unknown>;
+  const lastAccounts = (accounts.last_accounts ?? {}) as Record<string, unknown>;
+  if (typeof accounts.overdue === "boolean") facts.accountsOverdue = accounts.overdue;
+  if (typeof accounts.next_due === "string") facts.accountsNextDue = accounts.next_due;
+  if (typeof lastAccounts.made_up_to === "string") facts.lastAccountsMadeUpTo = lastAccounts.made_up_to;
+  if (typeof lastAccounts.type === "string") facts.lastAccountsType = lastAccounts.type;
+  if (typeof confirmation.overdue === "boolean") facts.confirmationStatementOverdue = confirmation.overdue;
+  if (typeof c.company_status_detail === "string") facts.statusDetail = c.company_status_detail;
+  if (typeof c.type === "string") facts.companyType = c.type;
+  if (typeof c.has_charges === "boolean") facts.hasCharges = c.has_charges;
+  if (typeof c.registered_office_is_in_dispute === "boolean") facts.registeredOfficeInDispute = c.registered_office_is_in_dispute;
+  if (typeof c.undeliverable_registered_office_address === "boolean") facts.undeliverableRegisteredOffice = c.undeliverable_registered_office_address;
+  if (typeof c.date_of_cessation === "string") facts.cessationDate = c.date_of_cessation;
+  if (Array.isArray(c.sic_codes)) facts.sicCodes = c.sic_codes.filter((x): x is string => typeof x === "string").slice(0, 5);
+  if (Array.isArray(c.previous_company_names)) facts.previousNameCount = c.previous_company_names.length;
+  const office = (c.registered_office_address ?? {}) as Record<string, unknown>;
+  const address = formatAddress([office.address_line_1, office.address_line_2, office.locality, office.region, office.postal_code]);
+  if (address) facts.registeredAddress = address;
+  return facts;
 }
 
 // ---------------------------------------------------------------------------------------------

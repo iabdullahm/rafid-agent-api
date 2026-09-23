@@ -14,6 +14,9 @@ export interface ReputationQuery {
   lei: string | null;
   city: string | null;
   industry: string | null;
+  /** Optional additional names to screen (trade names, former names). Used by the sanctions-list
+   *  adapter only; absent for company_reputation_check, whose behaviour and cache keys are unchanged. */
+  aliases?: readonly string[];
 }
 
 export type Applicability =

@@ -103,6 +103,13 @@ export function classifyDataSource(toolName: string, data: unknown): DataSource 
     return providers.some(p => p && typeof p === "object" && ["ok", "stale_cache"].includes(String((p as Record<string, unknown>).status))) ? "live_provider" : "not_configured";
   }
 
+  // business_risk_score: live when any provider actually returned (or served cached) evidence.
+  if (toolName === "business_risk_score") {
+    const providers = record.providers;
+    if (!Array.isArray(providers)) return "unknown";
+    return providers.some(p => p && typeof p === "object" && ["ok", "stale_cache"].includes(String((p as Record<string, unknown>).status))) ? "live_provider" : "not_configured";
+  }
+
   return null;
 }
 

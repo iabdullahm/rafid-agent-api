@@ -28,11 +28,12 @@ export class SanctionsListReputationProvider implements ReputationProvider {
   }
 
   cacheKey(q: ReputationQuery): string {
-    return `names:${[q.nameKey, q.legalName ?? ""].join("|")}|${q.country?.code ?? "*"}`;
+    const aliases = q.aliases && q.aliases.length > 0 ? `|aliases:${[...q.aliases].map(a => a.toUpperCase()).sort().join("|")}` : "";
+    return `names:${[q.nameKey, q.legalName ?? ""].join("|")}|${q.country?.code ?? "*"}${aliases}`;
   }
 
   async fetch(q: ReputationQuery, ctx: ProviderContext): Promise<ProviderFetchResult> {
-    const names = [...new Set([q.companyName, q.legalName].filter((n): n is string => Boolean(n)))];
+    const names = [...new Set([q.companyName, q.legalName, ...(q.aliases ?? [])].filter((n): n is string => Boolean(n)))];
     const evidence = new Map<string, NormalizedEvidence>();
     let requests = 0;
     for (const queriedName of names) {

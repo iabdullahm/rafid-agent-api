@@ -20,7 +20,12 @@ const errorSchema = {
     success: { const: false }, meta,
     error: { type: "object", required: ["code", "message"], properties: {
       code: { type: "string" }, message: { type: "string" },
-      details: { type: "array", items: { type: "object", required: ["path", "message"], properties: { path: { type: "string" }, message: { type: "string" } } } }
+      // INVALID_INPUT carries an array of {path, message}; a few capability-specific errors (e.g.
+      // business_risk_score's AMBIGUOUS_ENTITY candidate list) carry a structured object instead.
+      details: { oneOf: [
+        { type: "array", items: { type: "object", required: ["path", "message"], properties: { path: { type: "string" }, message: { type: "string" } } } },
+        { type: "object" }
+      ] }
     } }
   }
 };
@@ -30,6 +35,16 @@ const errors = Object.fromEntries([
   [429, "RATE_LIMITED", "Per-minute limit or monthly quota exceeded (QUOTA_EXCEEDED)"], [503, "SERVICE_UNAVAILABLE", "Customer or usage storage unavailable"], [500, "INTERNAL_ERROR", "An unexpected error occurred"]
 ].map(([status, code, message]) => [status, { description: message, content: json(errorSchema, { success: false, error: { code, message }, meta: { requestId: "example-request" } }) }]));
 const x402Errors = Object.fromEntries(Object.entries(errors).filter(([status]) => status !== "401"));
+/** Capability-specific structured errors (in addition to the shared set above). None of them is a
+ *  successful call, so no paid settlement happens on x402 / L402 / MPP. */
+const capabilityErrors: Partial<Record<string, Record<string, unknown>>> = {
+  business_risk_score: Object.fromEntries(([
+    [404, "ENTITY_NOT_FOUND", "No such company in the jurisdiction's registry and no other evidence the business exists", { status: "entity_not_found", registriesChecked: ["UK Companies House"], identifiersUsed: { companyName: "Example Trading Ltd", country: "GB", registrationNumber: null, lei: null, domain: null } }],
+    [409, "AMBIGUOUS_ENTITY", "Several registered companies match; retry with a candidate's registrationNumber", { status: "ambiguous_entity", candidates: [{ legalName: "EXAMPLE TRADING LIMITED", country: "GB", city: "London", registrationNumber: "09876543", lei: null, registrationStatus: "active", incorporationDate: "2015-11-03", registry: "UK Companies House", matchScore: 0.9, matchedOn: ["name", "country"] }], suggestedIdentifiers: ["registrationNumber", "city", "website"] }],
+    [503, "PROVIDER_UNAVAILABLE", "Every identity source failed; the minimum identity check could not be performed (retry, no charge)", { status: "provider_failure", providers: [{ provider: "UK Companies House", status: "unavailable", reason: "Companies House returned HTTP 502." }] }],
+    [504, "PROVIDER_TIMEOUT", "Every identity source timed out (retry, no charge)", { status: "provider_failure", providers: [{ provider: "UK Companies House", status: "timeout", reason: "The provider did not respond within the time budget." }] }]
+  ] as const).map(([status, code, message, details]) => [status, { description: message, content: json(errorSchema, { success: false, error: { code, message, details }, meta: { requestId: "example-request" } }) }]))
+};
 const toolMeta = { type: "object", required: ["requestId", "tool", "price", "currency"], properties: { requestId: { type: "string" }, tool: { type: "string" }, price: { type: "number" }, currency: { type: "string" } } };
 const toolSuccess = (data: unknown) => ({ type: "object", required: ["success", "data", "meta"], properties: { success: { const: true }, data, meta: toolMeta } });
 
@@ -43,7 +58,7 @@ for (const c of capabilities) {
       c.name === "analyze_oman_property" ? "Oman" :
       c.name === "research_company" || c.name === "find_companies" || c.name === "analyze_company_risk" ? "Intelligence" :
       c.name === "oman_supplier_check" ? "Procurement" :
-      c.name === "company_reputation_check" ? "Risk Intelligence" :
+      c.name === "company_reputation_check" || c.name === "business_risk_score" ? "Risk Intelligence" :
       "Property"
     ],
     summary: c.description,
@@ -52,7 +67,8 @@ for (const c of capabilities) {
     requestBody: { required: true, description: "Strict JSON input; unknown fields are rejected.", content: json(z.toJSONSchema(c.input), c.example, `${c.name} request`) },
     responses: {
       "200": { description: "Calculated metrics", content: json(toolSuccess(z.toJSONSchema(c.output)), { success: true, data: c.exampleOutput, meta: { requestId: "example-request", tool: c.name, price: prices[c.name], currency: "USD" } }, `${c.name} response`) },
-      ...errors
+      ...errors,
+      ...(capabilityErrors[c.name] ?? {})
     }
   };
   paths["/api/v1" + c.path] = { post: operation };
@@ -70,7 +86,8 @@ if (config.x402Enabled) {
       responses: {
         "200": { description: "Calculated metrics", content: json(toolSuccess(z.toJSONSchema(c.output)), { success: true, data: c.exampleOutput, meta: { requestId: "example-request", tool: c.name, price: prices[c.name], currency: "USD" } }, `${c.name} response`) },
         "402": { description: `Payment required — ${prices[c.name].toFixed(2)} USD in USDC on ${config.x402Network}. Response body lists accepted payment options per the x402 protocol.` },
-        ...x402Errors
+        ...x402Errors,
+        ...(capabilityErrors[c.name] ?? {})
       }
     } };
   }
@@ -87,8 +104,9 @@ if (config.l402Enabled) {
       responses: {
         "200": { description: "Calculated metrics", content: json(toolSuccess(z.toJSONSchema(c.output)), { success: true, data: c.exampleOutput, meta: { requestId: "example-request", tool: c.name, price: prices[c.name], currency: "USD" } }, `${c.name} response`) },
         "402": { description: `Payment required — ${prices[c.name].toFixed(2)} USD, payable in BTC over Lightning (lightning:${config.l402Network ?? "mainnet"}). See the WWW-Authenticate header (L402 macaroon + invoice).` },
-        "503": { description: "No BTC/USD rate or Lightning invoice could be produced right now; retry or use x402/API-key access." },
-        ...x402Errors
+        ...x402Errors,
+        ...(capabilityErrors[c.name] ?? {}),
+        "503": { description: "No BTC/USD rate or Lightning invoice could be produced right now; retry or use x402/API-key access." }
       }
     } };
   }
@@ -221,7 +239,7 @@ return {
     { name: "Maintenance", description: "Annual maintenance reserve estimation." },
     { name: "Oman", description: "Oman/Muscat-specific property analysis using local rental/sale comparables, normalization, confidence scoring and provenance. Muscat governorate only; see GET /llms.txt for supported areas and data limitations." },
     { name: "Intelligence", description: "Rafid Agent Intelligence: company research, discovery and evidence-tiered risk signals from public web sources. Inert (no external calls) until an operator configures the relevant provider — see GET /llms.txt." },
-    { name: "Risk Intelligence", description: "Global, evidence-first company risk intelligence for AI agents: company_reputation_check investigates a company in any country (registry identity, sanctions-list name screening, adverse media with legal stage, customer reputation, online presence, stability, domain signals) and returns evidence-linked scores with a separate confidence score. Screening only — not a legal or compliance determination." },
+    { name: "Risk Intelligence", description: "Global, evidence-first company risk intelligence for AI agents: company_reputation_check investigates a company in any country (registry identity, sanctions-list name screening, adverse media with legal stage, customer reputation, online presence, stability, domain signals) and returns evidence-linked scores with a separate confidence score. business_risk_score ($0.50) answers \"is it risky to do business with this company?\": a deterministic 0–100 risk score (100 = highest detected risk) across corporate, financial, compliance, reputation, operational and digital risk, a separate confidence, evidence-backed risk flags and a machine-readable due-diligence action. Screening only — not a legal or compliance determination." },
     { name: "Procurement", description: "Procurement supplier screening for AI procurement agents: oman_supplier_check screens an Oman supplier (identity, activity, website/contact/address consistency, sanctions and public-risk indicators) before an RFQ. Screening only — not KYC/AML or vendor approval." },
     { name: "Agent", description: "Public discovery, pricing and tool-catalog endpoints for AI agents and agent marketplaces." },
     { name: "System", description: "Public discovery, health and documentation endpoints." },

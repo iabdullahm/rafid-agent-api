@@ -56,18 +56,38 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
       // (z.toJSONSchema(c.input)/(c.output), the same conversion src/api/openapi.ts uses) and
       // the same hand-verified example/exampleOutput used everywhere else in this registry —
       // no second copy of a schema or example is maintained here.
-      extensions: declareDiscoveryExtension({
-        bodyType: "json",
-        input: c.example as Record<string, unknown>,
-        inputSchema: z.toJSONSchema(c.input) as Record<string, unknown>,
-        output: { example: c.exampleOutput, schema: z.toJSONSchema(c.output) as Record<string, unknown> }
-      })
+      extensions: discoveryDeclaration(c)
     };
   }
   // syncFacilitatorOnStart (default true): the returned handler awaits the facilitator's
   // supported-kinds sync on its own first invocation, inside the normal per-request async
   // flow — this does not block app construction or add a separate startup step.
   return paymentMiddleware(routes, resourceServer);
+}
+
+/** The Bazaar declaration travels inside the base64 PAYMENT-REQUIRED header of every 402 response.
+ *  Node's built-in HTTP client (undici — what @x402/fetch and most agent runtimes use) rejects
+ *  response headers above 16 KB, so an oversized declaration makes the 402 challenge unreadable and
+ *  the route unpayable. Budget for the declaration's JSON so the whole header stays under ~15 KB
+ *  (base64 adds a third, plus the payment requirements). Routes under budget are unchanged. */
+export const MAX_DISCOVERY_DECLARATION_CHARS = 10_000;
+
+/** Full declaration (input + output schema + output example) when it fits; otherwise degrade
+ *  gracefully — drop the output example, then the output entirely. The complete schemas and
+ *  examples always remain available from /openapi.json and /api/v1/capabilities. */
+export function discoveryDeclaration(c: (typeof capabilities)[number]): ReturnType<typeof declareDiscoveryExtension> {
+  const base = { bodyType: "json" as const, input: c.example as Record<string, unknown>, inputSchema: z.toJSONSchema(c.input) as Record<string, unknown> };
+  const outputSchema = z.toJSONSchema(c.output) as Record<string, unknown>;
+  const candidates = [
+    { ...base, output: { example: c.exampleOutput, schema: outputSchema } },
+    { ...base, output: { schema: outputSchema } },
+    base
+  ];
+  for (const candidate of candidates) {
+    const declaration = declareDiscoveryExtension(candidate);
+    if (JSON.stringify(declaration).length <= MAX_DISCOVERY_DECLARATION_CHARS) return declaration;
+  }
+  return declareDiscoveryExtension(base);
 }
 
 /**

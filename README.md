@@ -214,6 +214,7 @@ REST base: `http://localhost:8787`.
 | POST | /api/v1/maintenance/estimate | X-API-Key |
 | POST | /api/v1/oman/property/analyze | X-API-Key |
 | POST | /api/v1/risk/company-reputation-check | X-API-Key (x402: /api/v1/x402/risk/company-reputation-check; L402: /api/v1/l402/risk/company-reputation-check) |
+| POST | /api/v1/risk/business-risk-score | X-API-Key (x402: /api/v1/x402/risk/business-risk-score; L402: /api/v1/l402/risk/business-risk-score; MPP: /api/v1/mpp/charge/business_risk_score) |
 | POST | /api/v1/intelligence/research-company | X-API-Key |
 | POST | /api/v1/intelligence/find-companies | X-API-Key |
 | POST | /api/v1/intelligence/analyze-company-risk | X-API-Key |
@@ -451,6 +452,83 @@ Any provider can be switched off with `COMPANY_REPUTATION_DISABLED_PROVIDERS` (i
 **Unit economics:** worst case uncached ~3 web searches (≈ $0.024 at Tavily-class pricing); everything else is free public data. Estimated gross margin at $0.40 ≈ $0.37/call before hosting and facilitator fees. OpenSanctions, if enabled, adds its own per-call licence cost. Per-provider calls, cache hits, stale serves, outages and latency are recorded in-process (`src/company-reputation/telemetry.ts`) and returned by the internal `GET /api/v1/internal/revenue/unit-economics` route (`companyReputationTelemetry`).
 
 **Future product ladder:** `oman_supplier_check` ($0.50, Oman procurement) and `company_reputation_check` ($0.40, global reputation) are independent capabilities. They share only generic sanctions-list code (`src/shared/sanctions/`). A future `company_due_diligence` (~$1.50+: ownership/UBO, financials, litigation, PEP, corporate structure) can reuse the normalized evidence model, the evidence cache table and the provider interface without changing either.
+
+### Risk intelligence: global business risk score (`business_risk_score`, $0.50/call)
+
+```text
+business_risk_score
+$0.50 / call
+Global business due-diligence and risk assessment
+```
+
+`POST /api/v1/risk/business-risk-score` (API key) · `POST /api/v1/x402/risk/business-risk-score` (x402, $0.50 = 500000 USDC atomic units) · `POST /api/v1/l402/risk/business-risk-score` (L402, when enabled) · `POST /api/v1/mpp/charge/business_risk_score` and MPP session calls (when enabled) · MCP tool `business_risk_score` (remote `/mcp`, stdio, and paid `/mcp/mpp` when enabled). Category `risk_intelligence`, idempotent. Answers one question for procurement, finance, vendor-onboarding, B2B sales, marketplace, insurance, lending, compliance and autonomous purchasing agents: **is it risky to do business with this company?** — anywhere in the world, from evidence rather than model knowledge.
+
+```text
+Agent:
+"Check this supplier before I pay their invoice."
+
+↓
+
+business_risk_score
+$0.50
+
+↓
+
+Returns:
+- risk score (0–100, 100 = highest detected risk) and risk level
+- confidence (0–1, separate from risk)
+- company identity (entity match confidence, registry status)
+- corporate risk
+- financial risk
+- sanctions / compliance risk (with match strength)
+- reputation risk
+- operational risk
+- digital risk
+- evidence (source, URL, observed/retrieved dates, reliability, claim)
+- positive signals
+- risk flags (each traceable to evidence ids)
+- recommended due-diligence action
+```
+
+**Input** (strict; unknown fields → `400 INVALID_INPUT`, no payment): `companyName` (required) plus optional `country` (ISO 3166 alpha-2/alpha-3/English name — strongly recommended), `registrationNumber`, `lei`, `website`, `address`, `city`, `industry`, `knownAliases` (≤ 5), `includeNews` (default true), `includeDigitalSignals` (default true). Names are normalized on their distinctive core (legal forms compared separately), websites to an `https://` origin + registrable domain, countries to ISO-2.
+
+```bash
+curl -X POST http://localhost:8787/api/v1/risk/business-risk-score \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"companyName":"Example Trading Ltd","country":"GB","website":"https://example.com"}'
+```
+
+**Output:** `status` (`assessed` | `insufficient_data`), `assessmentId`, `business` (name, legalName, country, registrationNumber, registrationStatus, incorporationDate, registry, website, **entityMatchConfidence**, resolutionStatus), `riskScore`, `riskLevel` (0–20 low · 21–40 moderate · 41–60 elevated · 61–80 high · 81–100 critical), `confidence`, `components` (corporate/financial/compliance/reputation/operational/digital risk; `null` = no data coverage), `scoreBreakdown` (per-category contributions, effective weights, floors applied), `riskFlags[]` and `positiveSignals[]` (code, category, severity, weight, confidence, points, evidenceIds, factStatus `observed|reported|alleged`, requiresVerification), `sanctionsScreening` (lists checked/unavailable, names screened, matches with `matchStrength` possible|high and list type sanctions vs export-control/debarment), `evidence[]` (type, evidenceClass — official_record / regulatory_action / court_record / credible_journalism / other_publication / user_generated / allegation / self_published — sourceName, sourceUrl, publishedAt, observedAt, retrievedAt, ageDays, stale, freshness, claim, reliability, relevance, fromCache; `lookup_result` items document clean checks), `recommendation` (`proceed` / `proceed_with_monitoring` / `enhanced_due_diligence` / `manual_review` / `avoid_automated_transaction` + reason codes), `dataCoverage`, `confidenceBreakdown`, `providers[]`, `warnings[]`, `assumptions[]`, `limitations[]`, `methodology`, `evaluatedAt`. The documented example (OpenAPI, `/api/v1/capabilities`, x402 Bazaar metadata) is the real pipeline over an explicitly synthetic scenario — regenerate with `node --import tsx scripts/generateBusinessRiskExample.ts` (a test fails if it drifts).
+
+**Structured errors (no charge on x402/L402/MPP — only successful calls settle):** `AMBIGUOUS_ENTITY` 409 (`details.candidates` with registration numbers — retry with one), `ENTITY_NOT_FOUND` 404 (the jurisdiction's registry has no such company and nothing else shows it exists), `PROVIDER_TIMEOUT` 504 / `PROVIDER_UNAVAILABLE` 503 / `RATE_LIMITED` 429 (every identity source failed — the minimum identity check could not be performed), `INVALID_INPUT` 400, `INTERNAL_ERROR` 500. `INSUFFICIENT_DATA` is a 200 result (`status: "insufficient_data"`, null score) returned only when the deployment has no evidence source for the company at all.
+
+**Pipeline** (`src/business-risk/`): normalization → **stage 1** (registries GLEIF / UK Companies House / Rafid Oman registry, company website, RDAP — concurrent, isolated, time-boxed, cache-first) → **entity resolution** (`companyResolver.ts` from company_reputation_check: registration number/LEI decisive, other countries never match, near-equal candidates are ambiguous — deep scoring and every paid search are skipped for ambiguous/unknown entities) → **stage 2** with the resolved identifiers (sanctions & restricted-party lists screening the name, supplied aliases and former registry names; news; reviews; regulator publications; Companies House filing status; Google Safe Browsing) → dedup + relevance filtering (same-name companies in other jurisdictions are excluded, never merged) → six detectors (`signals.ts`) → `scoring.ts` → `confidence.ts` → `recommendation.ts`. It reuses company_reputation_check's provider contract, runner, evidence cache, normalizers, resolver and sanctions/adverse-media classifiers; only the risk model is new.
+
+**Scoring** (`config.ts`, version `brs-1.0.0`, echoed in every response's `methodology`): every signal contributes `SEVERITY_POINTS[severity] (info 0 · low 8 · medium 20 · high 40 · critical 70) × rule weight × confidence`. Category score = `baseline − baseline·(1−e^(−positive/30)) + (100−baseline)·(1−e^(−negative/45))` — positives only erode the residual baseline, they never cancel a red flag; categories without coverage are `null`. Overall = weighted mean of the covered categories with weights corporate 20% · financial 20% · compliance 25% · reputation 15% · operational 10% · digital 10% (renormalized; override with `BUSINESS_RISK_CATEGORY_WEIGHTS`), raised to documented floors when a confident severe signal exists (high-confidence sanctions match ≥ 85, dissolved company or malware/phishing listing ≥ 81, insolvency proceedings or restricted-party match ≥ 70, any critical ≥ 61, any high ≥ 35), clamped 0–100. **Missing data** lowers confidence and coverage only; it raises risk solely where the absence contradicts the request (company not in its jurisdiction's registry, supplied registration number not found, supplied website unreachable, supplied domain unregistered, reachable site with no contact information) — listed in `methodology.missingDataRiskRules`. LLMs are not used anywhere in scoring.
+
+**Confidence** (separate from risk): 30% entity-match confidence, 25% weighted category coverage, 15% source reliability, 10% authoritative registry records, 10% evidence freshness (media decays with a half-life; stale cache ×0.5), 10% consistency (−0.25 per contradiction); capped at 0.55 when identity is not verified against a registry.
+
+**Providers:**
+
+| Provider | Role | Enabled by | Cost |
+|---|---|---|---|
+| GLEIF Global LEI Index | corporate | `RISK_LIVE_CHECKS_ENABLED=true` | free |
+| UK Companies House (profile + filing status) | corporate + financial | `COMPANIES_HOUSE_API_KEY` | free key |
+| Rafid Oman company registry | corporate | `OMAN_BUSINESS_DATA_MODE=database/composite` | own DB |
+| UN Consolidated List, US CSL (OFAC SDN + BIS/DDTC export-control & debarment) | sanctions | `RISK_LIVE_CHECKS_ENABLED=true` | free |
+| EU FSF / OpenSanctions | sanctions | `EU_SANCTIONS_LIST_URL` / `OPENSANCTIONS_API_KEY` | free / paid licence |
+| News + review-platform search (3 searches) | news | `WEB_SEARCH_PROVIDER=tavily` + `TAVILY_API_KEY` | ~$0.024 |
+| Regulator / enforcement publications (1 search restricted to regulator domains) | regulatory | same | ~$0.008 |
+| Company website (SSRF-safe), RDAP | digital | `RISK_LIVE_CHECKS_ENABLED=true` | free |
+| Google Safe Browsing | digital | `GOOGLE_SAFE_BROWSING_API_KEY` (+ `RISK_LIVE_CHECKS_ENABLED=true`) | free key |
+
+Any provider or role can be switched off with `BUSINESS_RISK_DISABLED_PROVIDERS` (ids or roles, e.g. `news,regulatory`).
+
+**Caching and persistence:** provider evidence goes through the SAME evidence cache as company_reputation_check (`rafid_company_evidence_cache`, same provider ids ⇒ evidence is fetched once and shared; TTLs registry 7d, sanctions 12h, news 1d, reviews 3d, website 3d, domain 7d; keys include the normalized identity, so same-name companies in different countries never share rows; failed refreshes may serve flagged stale evidence). Each assessment is recomputed from evidence (deterministic) and persisted best-effort to `rafid_business_risk_assessments` (PostgreSQL via `BUSINESS_RISK_DATABASE_URL` or `DATABASE_URL`, created on first use; memory otherwise; `BUSINESS_RISK_ASSESSMENT_STORE=memory|off`), deduplicated on (identity, scoring version, evidence fingerprint) — the audit trail for "why was this company scored 67?".
+
+**Unit economics:** worst case uncached 4 web searches ≈ $0.032; everything else free. Estimated gross margin at $0.50 ≈ $0.47/call before hosting and facilitator fees (internal `GET /api/v1/internal/revenue/unit-economics`).
+
+**x402 challenge size:** the x402 Bazaar discovery declaration is embedded in the `PAYMENT-REQUIRED` header; declarations are now size-bounded (`MAX_DISCOVERY_DECLARATION_CHARS`, dropping the output example and then the output schema when needed) so every 402 stays readable by Node-based x402 clients (16 KB header limit). Full schemas/examples remain in `/openapi.json`.
 
 ### Production Oman market data (database mode, import, caching)
 

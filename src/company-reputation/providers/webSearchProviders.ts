@@ -21,13 +21,13 @@ import { outage, type Applicability, type ProviderContext, type ReputationProvid
 type SearchFactory = () => WebSearchProvider;
 const defaultFactory: SearchFactory = () => buildWebSearchProvider({ requestId: null, capability: "company_reputation_check" });
 
-async function runSearch(search: WebSearchProvider, query: string, options: Parameters<WebSearchProvider["search"]>[1]): Promise<WebSearchOutcome> {
+export async function runSearch(search: WebSearchProvider, query: string, options: Parameters<WebSearchProvider["search"]>[1]): Promise<WebSearchOutcome> {
   if (search.searchWithStatus) return search.searchWithStatus(query, options);
   // Providers without status reporting: results are trusted as "ok" (an empty list stays empty).
   return { status: "ok", results: await search.search(query, options) };
 }
 
-function toEvidence(providerId: string, r: WebSearchResult, now: Date, defaultType: EvidenceType, queryLabel: string): NormalizedEvidence | null {
+export function toSearchEvidence(providerId: string, r: WebSearchResult, now: Date, defaultType: EvidenceType, queryLabel: string): NormalizedEvidence | null {
   const url = canonicalUrl(r.url) ? r.url : null;
   if (!url) return null;
   const host = hostOf(url);
@@ -78,7 +78,7 @@ export class NewsProvider implements ReputationProvider {
       const first = outcomes[0]!;
       return outage(first.status === "ok" ? "unavailable" : first.status, `The web/news search provider did not answer (${first.status}).`, queries.length);
     }
-    const evidence = outcomes.flatMap((o, i) => o.results.map(r => toEvidence(this.id, r, ctx.now, "news", queries[i]!.label))).filter((e): e is NormalizedEvidence => e !== null);
+    const evidence = outcomes.flatMap((o, i) => o.results.map(r => toSearchEvidence(this.id, r, ctx.now, "news", queries[i]!.label))).filter((e): e is NormalizedEvidence => e !== null);
     return {
       status: "ok", evidence, requests: queries.length, estimatedCostUSD: okCount * ESTIMATED_COST_PER_SEARCH_USD,
       reason: okCount < queries.length ? "One of the two news searches failed; results are partial." : null
@@ -108,7 +108,7 @@ export class ReviewsProvider implements ReputationProvider {
     const text = `"${q.legalName ?? q.companyName}" reviews${q.domain ? ` ${q.domain}` : ""}`;
     const outcome = await runSearch(search, text, { maxResults: LIMITS.reviewResults, domains });
     if (outcome.status !== "ok") return outage(outcome.status, `The review search did not answer (${outcome.status}).`);
-    const evidence = outcome.results.map(r => toEvidence(this.id, r, ctx.now, "review", "reviews")).filter((e): e is NormalizedEvidence => e !== null);
+    const evidence = outcome.results.map(r => toSearchEvidence(this.id, r, ctx.now, "review", "reviews")).filter((e): e is NormalizedEvidence => e !== null);
     return { status: "ok", evidence, reason: null, requests: 1, estimatedCostUSD: ESTIMATED_COST_PER_SEARCH_USD };
   }
 }
