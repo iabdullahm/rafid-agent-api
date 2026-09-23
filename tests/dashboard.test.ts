@@ -7,9 +7,10 @@ import { MemoryAnalyticsRepository } from "../src/analytics/memoryRepository.js"
 import { MemoryRevenueLedger } from "../src/revenue/memoryLedger.js";
 import { hashAdminPassword } from "../src/middleware/adminAuth.js";
 import { buildSettlementDedupeKey } from "../src/revenue/idempotency.js";
-import { abbreviateTxHash, explorerUrlFor, buildRevenueTrend } from "../src/api/dashboard/service.js";
+import { abbreviateTxHash, explorerUrlFor, buildRevenueTrend, sortToolConversionRows } from "../src/api/dashboard/service.js";
 import type { RevenueSettlement, RevenueSettlementInput, RevenueLedger } from "../src/revenue/types.js";
 import type { AnalyticsEventInput } from "../src/analytics/types.js";
+import type { ToolConversionRow } from "../src/api/dashboard/service.js";
 
 const apiKey = "test-only-not-a-real-credential-12345";
 const adminUsername = "ops-admin";
@@ -91,6 +92,19 @@ function analyticsEvent(overrides: Partial<AnalyticsEventInput> = {}): Analytics
     channel: "x402", success: true, durationMs: 50, amount: null, currency: null, txHash: null,
     dataSource: null, clientHash: null, userAgent: null, referer: null, clientName: null,
     createdAt: new Date().toISOString(),
+    ...overrides
+  };
+}
+
+/** Fixture for pure-function tests of sortToolConversionRows() — never goes through HTTP/a
+ *  repository, so every field defaults to a harmless zero/null and a test only sets what it needs
+ *  to exercise a given sort key. */
+function toolConversionRowFixture(overrides: Partial<ToolConversionRow> = {}): ToolConversionRow {
+  return {
+    toolName: "fixture_tool", calls: 0, successCount: 0, failureCount: 0, challenges: 0,
+    paymentVerified: 0, settledCalls: 0, conversionPct: null, revenueByCurrency: {},
+    revenue: null, currency: null, averageRevenuePerSettledCall: null,
+    p50LatencyMs: null, p95LatencyMs: null,
     ...overrides
   };
 }
@@ -442,6 +456,246 @@ test("dashboard partner-feed usage percentage: null (not zero) when there are no
   const cookie = await loginAndGetSessionCookie(base);
   const data = (await (await fetch(base + "/internal/dashboard/data?period=24h", { headers: { Cookie: cookie } })).json()).data;
   assert.equal(data.usage.partnerFeedUsagePct, null);
+});
+
+// -------------------------------------------------------------------------------------------
+// Top Tools / Conversion by Tool (dashboard section added 2026-09-23) — reuses toolsWindow
+// (analytics tool-call events), x402Window (analytics x402 funnel events) and toolRevenue (the
+// revenue ledger) exactly as buildDashboardData() already computes them for revenueByTool/usage;
+// no new analytics system, no new revenue table, no new query.
+// -------------------------------------------------------------------------------------------
+test("tool conversion: a tool with calls but no 402 challenges has zero challenges/settlements and a null (not zero) conversion rate", async t => {
+  const { server, base, analyticsRepository } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await analyticsRepository.record(analyticsEvent({ toolName: "compare_properties", channel: "rest", success: true }));
+  await analyticsRepository.record(analyticsEvent({ toolName: "compare_properties", channel: "rest", success: true }));
+  await analyticsRepository.record(analyticsEvent({ toolName: "compare_properties", channel: "rest", success: true }));
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  const row = data.toolConversion.find((r: { toolName: string }) => r.toolName === "compare_properties");
+  assert.ok(row, "expected a toolConversion row for compare_properties");
+  assert.equal(row.calls, 3);
+  assert.equal(row.successCount, 3);
+  assert.equal(row.challenges, 0);
+  assert.equal(row.settledCalls, 0);
+  assert.equal(row.conversionPct, null);
+  assert.equal(row.revenue, null);
+  assert.deepEqual(row.revenueByCurrency, {});
+});
+
+test("tool conversion: a tool with 402 challenges but zero settlements reports a real 0% conversion, never null", async t => {
+  const { server, base, analyticsRepository } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  for (let i = 0; i < 4; i++) {
+    await analyticsRepository.record(analyticsEvent({ category: "x402", eventType: "challenge", toolName: "find_companies", success: null }));
+  }
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  const row = data.toolConversion.find((r: { toolName: string }) => r.toolName === "find_companies");
+  assert.ok(row);
+  assert.equal(row.challenges, 4);
+  assert.equal(row.settledCalls, 0);
+  assert.equal(row.conversionPct, 0);
+});
+
+test("tool conversion: settled/challenges yields the correct nonzero conversion percentage, payment-verified count, average revenue per settled call, and total revenue", async t => {
+  const { server, base, analyticsRepository, revenueLedger } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  for (let i = 0; i < 5; i++) {
+    await analyticsRepository.record(analyticsEvent({ category: "x402", eventType: "challenge", toolName: "analyze_company_risk", success: null }));
+  }
+  for (let i = 0; i < 3; i++) {
+    await analyticsRepository.record(analyticsEvent({ category: "x402", eventType: "payment_verified", toolName: "analyze_company_risk", success: null }));
+  }
+  revenueLedger.record(settlementRow({ toolName: "analyze_company_risk", amountDecimal: 0.15 }));
+  revenueLedger.record(settlementRow({ toolName: "analyze_company_risk", amountDecimal: 0.15 }));
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  const row = data.toolConversion.find((r: { toolName: string }) => r.toolName === "analyze_company_risk");
+  assert.ok(row);
+  assert.equal(row.challenges, 5);
+  assert.equal(row.paymentVerified, 3);
+  assert.equal(row.settledCalls, 2);
+  assert.equal(row.conversionPct, 40);
+  assert.equal(row.revenue, 0.3);
+  assert.equal(row.currency, "USDC");
+  assert.equal(row.averageRevenuePerSettledCall, 0.15);
+});
+
+test("tool conversion: a zero-challenge denominator always yields null, never a divide-by-zero or fabricated 0%, even when the tool has settlements", async t => {
+  const { server, base, revenueLedger } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  // Settled with no matching recorded 402 challenge for this tool — the denominator is zero even
+  // though the numerator (settledCalls) is not.
+  revenueLedger.record(settlementRow({ toolName: "research_company", amountDecimal: 0.35 }));
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  const row = data.toolConversion.find((r: { toolName: string }) => r.toolName === "research_company");
+  assert.ok(row);
+  assert.equal(row.challenges, 0);
+  assert.equal(row.settledCalls, 1);
+  assert.equal(row.conversionPct, null, "must never divide 1 settled call by 0 challenges");
+});
+
+test("tool conversion: revenue is summed across every settled row for a tool and excludes settlement_failed rows entirely", async t => {
+  const { server, base, analyticsRepository, revenueLedger } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  for (let i = 0; i < 3; i++) {
+    await analyticsRepository.record(analyticsEvent({ category: "x402", eventType: "challenge", toolName: "estimate_maintenance", success: null }));
+  }
+  revenueLedger.record(settlementRow({ toolName: "estimate_maintenance", amountDecimal: 0.1 }));
+  revenueLedger.record(settlementRow({ toolName: "estimate_maintenance", amountDecimal: 0.2 }));
+  revenueLedger.record(settlementRow({
+    toolName: "estimate_maintenance", status: "settlement_failed", amountDecimal: null, amountAtomic: null,
+    currency: null, asset: null, amountSource: "unavailable", settledAt: null, errorReason: "insufficient_funds"
+  }));
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  const row = data.toolConversion.find((r: { toolName: string }) => r.toolName === "estimate_maintenance");
+  assert.ok(row);
+  assert.equal(row.settledCalls, 2);
+  assert.equal(row.revenue, 0.3);
+  assert.equal(row.conversionPct, Math.round((2 / 3) * 1000) / 10);
+});
+
+test("tool conversion: multiple capabilities are tracked independently, and a capability with no activity this period is omitted — unlike Revenue by Tool, which always lists every known capability", async t => {
+  const { server, base, analyticsRepository, revenueLedger } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await analyticsRepository.record(analyticsEvent({ toolName: "analyze_oman_property", channel: "rest", success: true }));
+  await analyticsRepository.record(analyticsEvent({ category: "x402", eventType: "challenge", toolName: "find_companies", success: null }));
+  revenueLedger.record(settlementRow({ toolName: "research_company", amountDecimal: 0.35 }));
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  const names = data.toolConversion.map((r: { toolName: string }) => r.toolName);
+  assert.ok(names.includes("analyze_oman_property"));
+  assert.ok(names.includes("find_companies"));
+  assert.ok(names.includes("research_company"));
+  assert.ok(!names.includes("compare_properties"), "a capability with zero activity this period must not appear in toolConversion");
+  assert.ok(data.revenueByTool.some((r: { toolName: string }) => r.toolName === "compare_properties"), "but it must still appear in revenueByTool, which always lists every capability");
+});
+
+test("tool conversion: failed tool calls are counted separately from successful calls, both included in the call total", async t => {
+  const { server, base, analyticsRepository } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await analyticsRepository.record(analyticsEvent({ toolName: "compare_properties", channel: "rest", success: true }));
+  await analyticsRepository.record(analyticsEvent({ toolName: "compare_properties", channel: "rest", success: true }));
+  await analyticsRepository.record(analyticsEvent({ toolName: "compare_properties", channel: "rest", success: false }));
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  const row = data.toolConversion.find((r: { toolName: string }) => r.toolName === "compare_properties");
+  assert.equal(row.calls, 3);
+  assert.equal(row.successCount, 2);
+  assert.equal(row.failureCount, 1);
+});
+
+test("tool conversion: p50/p95 latency for a tool matches the nearest-rank percentile of that tool's own recorded call durations", async t => {
+  const { server, base, analyticsRepository } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const durations = [10, 20, 30, 40, 100]; // nearest-rank p50 -> 30, p95 -> 100 (see aggregate.ts's percentile())
+  for (const durationMs of durations) {
+    await analyticsRepository.record(analyticsEvent({ toolName: "analyze_property", channel: "rest", success: true, durationMs }));
+  }
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  const row = data.toolConversion.find((r: { toolName: string }) => r.toolName === "analyze_property");
+  assert.equal(row.p50LatencyMs, 30);
+  assert.equal(row.p95LatencyMs, 100);
+});
+
+test("tool conversion: respects the 24h/7d/30d/all period selector for calls and settlements alike", async t => {
+  const { server, base, analyticsRepository, revenueLedger } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const now = Date.now();
+  await analyticsRepository.record(analyticsEvent({ toolName: "analyze_oman_property", channel: "rest", success: true, createdAt: new Date(now - 1 * 60 * 60 * 1000).toISOString() })); // 1h ago
+  await analyticsRepository.record(analyticsEvent({ toolName: "analyze_oman_property", channel: "rest", success: true, createdAt: new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString() })); // 20d ago
+  revenueLedger.record(settlementRow({ toolName: "analyze_oman_property", amountDecimal: 0.25, createdAt: new Date(now - 1 * 60 * 60 * 1000).toISOString() }));
+  revenueLedger.record(settlementRow({ toolName: "analyze_oman_property", amountDecimal: 0.25, createdAt: new Date(now - 20 * 24 * 60 * 60 * 1000).toISOString() }));
+  const cookie = await loginAndGetSessionCookie(base);
+
+  const rowFor = async (period: string) => {
+    const data = (await (await fetch(base + `/internal/dashboard/data?period=${period}`, { headers: { Cookie: cookie } })).json()).data;
+    return data.toolConversion.find((r: { toolName: string }) => r.toolName === "analyze_oman_property");
+  };
+  const last24h = await rowFor("24h");
+  assert.equal(last24h.calls, 1);
+  assert.equal(last24h.settledCalls, 1);
+  const last30d = await rowFor("30d");
+  assert.equal(last30d.calls, 2);
+  assert.equal(last30d.settledCalls, 2);
+});
+
+test("tool conversion: settled rows in different currencies for the same tool are never summed — revenue is null and revenueByCurrency lists both separately", async t => {
+  const { server, base, revenueLedger } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  revenueLedger.record(settlementRow({ toolName: "analyze_oman_property", currency: "USDC", amountDecimal: 0.25 }));
+  revenueLedger.record(settlementRow({ toolName: "analyze_oman_property", currency: "EURC", asset: "EURC", amountDecimal: 0.20 }));
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  const row = data.toolConversion.find((r: { toolName: string }) => r.toolName === "analyze_oman_property");
+  assert.equal(row.revenue, null);
+  assert.equal(row.currency, null);
+  assert.deepEqual(row.revenueByCurrency, { USDC: 0.25, EURC: 0.20 });
+  assert.equal(row.averageRevenuePerSettledCall, null);
+});
+
+test("tool conversion: the toolConversion payload never leaks internal API keys, session secrets, or admin credentials", async t => {
+  const { server, base, analyticsRepository, revenueLedger } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await analyticsRepository.record(analyticsEvent({ category: "x402", eventType: "challenge", toolName: "analyze_company_risk", success: null }));
+  await analyticsRepository.record(analyticsEvent({ toolName: "analyze_company_risk", channel: "x402", success: true }));
+  revenueLedger.record(settlementRow({ toolName: "analyze_company_risk", amountDecimal: 0.15 }));
+  const cookie = await loginAndGetSessionCookie(base);
+  const json = await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).text();
+  const parsed = JSON.parse(json);
+  assert.ok(parsed.data.toolConversion.length > 0, "expected at least one toolConversion row to actually exercise this payload");
+  const forbidden = [
+    revenueInternalApiKey, analyticsInternalApiKey, adminSessionSecret, apiKey,
+    hashAdminPassword(adminPassword).slice(0, 20),
+    "REVENUE_INTERNAL_API_KEY", "ANALYTICS_INTERNAL_API_KEY", "ADMIN_SESSION_SECRET", "ADMIN_PASSWORD_HASH",
+    "privateKey", "facilitatorSecret"
+  ];
+  for (const secret of forbidden) assert.ok(!json.includes(secret), `toolConversion payload must never contain: ${secret}`);
+});
+
+test("dashboard UI: the Top Tools / Conversion by Tool panel, its sort control, and its exact empty-state copy are present in the rendered page", async t => {
+  const { server, base } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const cookie = await loginAndGetSessionCookie(base);
+  const html = await (await fetch(base + "/internal/dashboard", { headers: { Cookie: cookie } })).text();
+  assert.ok(html.includes("Top Tools / Conversion by Tool"));
+  assert.ok(html.includes('id="tool-conversion-sort"'));
+  assert.ok(html.includes("No tool usage recorded in this period."));
+});
+
+test("sortToolConversionRows: sorts by revenue descending by default, tie-broken by settled calls", () => {
+  const rows: ToolConversionRow[] = [
+    toolConversionRowFixture({ toolName: "a", revenue: 1, settledCalls: 1 }),
+    toolConversionRowFixture({ toolName: "b", revenue: 5, settledCalls: 2 }),
+    toolConversionRowFixture({ toolName: "c", revenue: null, settledCalls: 0 }),
+    toolConversionRowFixture({ toolName: "d", revenue: 5, settledCalls: 4 })
+  ];
+  const sorted = sortToolConversionRows(rows, "revenue").map(r => r.toolName);
+  assert.deepEqual(sorted, ["d", "b", "a", "c"]);
+});
+
+test("sortToolConversionRows: sorting by conversion rate ranks null (no 402 opportunity to convert) below every real percentage, tie-broken by revenue", () => {
+  const rows: ToolConversionRow[] = [
+    toolConversionRowFixture({ toolName: "low", conversionPct: 10, revenue: 1 }),
+    toolConversionRowFixture({ toolName: "high", conversionPct: 80, revenue: 1 }),
+    toolConversionRowFixture({ toolName: "none", conversionPct: null, revenue: 100 }),
+    toolConversionRowFixture({ toolName: "mid", conversionPct: 50, revenue: 1 })
+  ];
+  const sorted = sortToolConversionRows(rows, "conversion").map(r => r.toolName);
+  assert.deepEqual(sorted, ["high", "mid", "low", "none"]);
+});
+
+test("sortToolConversionRows: sorting by total calls and by settled calls each rank on their own column, both falling back to the revenue tie-break", () => {
+  const rows: ToolConversionRow[] = [
+    toolConversionRowFixture({ toolName: "many-calls-no-revenue", calls: 50, settledCalls: 0, revenue: null }),
+    toolConversionRowFixture({ toolName: "few-calls-high-revenue", calls: 2, settledCalls: 2, revenue: 10 })
+  ];
+  assert.deepEqual(sortToolConversionRows(rows, "calls").map(r => r.toolName), ["many-calls-no-revenue", "few-calls-high-revenue"]);
+  assert.deepEqual(sortToolConversionRows(rows, "settled").map(r => r.toolName), ["few-calls-high-revenue", "many-calls-no-revenue"]);
 });
 
 // -------------------------------------------------------------------------------------------

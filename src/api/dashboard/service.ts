@@ -243,6 +243,64 @@ export interface RevenueByToolRow extends RevenueToolStats {
   sharePct: number | null;
 }
 
+/**
+ * "Top Tools / Conversion by Tool" (dashboard section added 2026-09-23) — which capabilities
+ * attract usage vs. which actually convert into paid revenue. Reuses three already-fetched,
+ * already-window-scoped sources, in-process, with NO new analytics system and NO new revenue
+ * table: `toolsWindow.byTool` (analytics `category: "tool"` invocation events — never
+ * tools/list, initialize, or discovery hits, which live under `category: "mcp"`/`"discovery"`
+ * and are excluded by construction), `x402Window.byTool` (analytics `category: "x402"` funnel
+ * events) plus a small per-tool `payment_verified` count computed the same way
+ * buildDashboardData() already computes `x402ToolExecutionCounts` below, and `toolRevenue`
+ * (summarizeRevenueByTool() over the REVENUE LEDGER — the settlement source of truth, exactly
+ * the same object `revenueByTool` above is already built from).
+ *
+ * Conversion rate is deliberately `settledCalls` (from the revenue ledger) divided by
+ * `challenges` (from analytics) — never analytics' own `settlement_success` event count, so this
+ * number never drifts from what the Reconciliation section would also catch. `null` (rendered as
+ * "—" in the UI), never a fabricated 0%, when there were zero 402 challenges to convert from.
+ */
+export type ToolConversionSortKey = "revenue" | "settled" | "calls" | "conversion";
+export const TOOL_CONVERSION_SORT_KEYS: readonly ToolConversionSortKey[] = ["revenue", "settled", "calls", "conversion"];
+
+/** Pure, exported, and directly unit-tested (page.ts's client-side sort control reimplements this
+ *  same ordering inline, since the browser script is a dependency-free string template with no
+ *  import mechanism — the two must stay in sync; keep them identical when changing either). All
+ *  four sort keys are descending-only ("simple sorting controls" per the spec, not a toggleable
+ *  asc/desc system), and every key falls back to the revenue-descending tie-break so ties resolve
+ *  the same way regardless of which column is sorted. */
+export function sortToolConversionRows(rows: readonly ToolConversionRow[], key: ToolConversionSortKey): ToolConversionRow[] {
+  const byRevenue = (a: ToolConversionRow, b: ToolConversionRow) =>
+    (b.revenue ?? -1) - (a.revenue ?? -1) || b.settledCalls - a.settledCalls;
+  const sorted = [...rows];
+  if (key === "settled") sorted.sort((a, b) => b.settledCalls - a.settledCalls || byRevenue(a, b));
+  else if (key === "calls") sorted.sort((a, b) => b.calls - a.calls || byRevenue(a, b));
+  else if (key === "conversion") sorted.sort((a, b) => (b.conversionPct ?? -1) - (a.conversionPct ?? -1) || byRevenue(a, b));
+  else sorted.sort(byRevenue);
+  return sorted;
+}
+
+export interface ToolConversionRow {
+  toolName: string;
+  calls: number;
+  successCount: number;
+  failureCount: number;
+  challenges: number;
+  paymentVerified: number;
+  settledCalls: number;
+  /** null when challenges === 0 — there was no opportunity to convert, never displayed as 0%. */
+  conversionPct: number | null;
+  revenueByCurrency: Record<string, number>;
+  /** Single-currency convenience, null when zero settled or when settled rows span more than one
+   *  currency for this tool — same rule as RevenueToolStats.revenue; read revenueByCurrency for
+   *  the authoritative, never-combined breakdown. */
+  revenue: number | null;
+  currency: string | null;
+  averageRevenuePerSettledCall: number | null;
+  p50LatencyMs: number | null;
+  p95LatencyMs: number | null;
+}
+
 export interface X402FunnelReport {
   challenges: number;
   paymentVerified: number;
@@ -294,6 +352,12 @@ export interface DashboardData {
   paidCalls: number;
   revenueTrend: RevenueTrend;
   revenueByTool: RevenueByToolRow[];
+  /** Default-sorted by revenue descending (same tie-break as revenueByTool); the dashboard's own
+   *  sort control re-orders this array client-side — see page.ts. Only includes a tool that had
+   *  some real activity this period (a call, a challenge, or a settlement) — deliberately NOT the
+   *  full always-list-every-capability convention revenueByTool uses, since the empty state here
+   *  is "No tool usage recorded in this period," not a full zeroed table. */
+  toolConversion: ToolConversionRow[];
   x402Funnel: X402FunnelReport;
   usage: UsageReport;
   transactions: TransactionRow[];
@@ -364,6 +428,54 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   const discoveryWindow = summarizeDiscoveryAllTime(events);
   const toolsWindow = summarizeToolsAllTime(events);
   const analyzePropertyStats = toolsWindow.byTool["analyze_oman_property"];
+
+  // ---- Top Tools / Conversion by Tool — see ToolConversionRow's doc comment. Reuses toolsWindow
+  // (analytics tool-call events, already computed above), x402Window (analytics x402 funnel
+  // events, already computed above) plus a small per-tool payment_verified count, and toolRevenue
+  // (the revenue ledger, already computed above for revenueByTool) — no new aggregation source. ----
+  const paymentVerifiedByTool: Record<string, number> = {};
+  for (const event of events) {
+    if (event.category === "x402" && event.eventType === "payment_verified" && event.toolName) {
+      paymentVerifiedByTool[event.toolName] = (paymentVerifiedByTool[event.toolName] ?? 0) + 1;
+    }
+  }
+  const toolConversionNames = new Set<string>([
+    ...Object.keys(toolsWindow.byTool), ...Object.keys(x402Window.byTool), ...Object.keys(toolRevenue)
+  ]);
+  const toolConversion: ToolConversionRow[] = [...toolConversionNames]
+    .map((toolName): ToolConversionRow => {
+      const callStats = toolsWindow.byTool[toolName];
+      const x402Stats = x402Window.byTool[toolName];
+      const revStats: RevenueToolStats = toolRevenue[toolName] ?? {
+        settledCalls: 0, failedSettlements: 0, revenueByCurrency: {}, revenue: null, currency: null
+      };
+      const challenges = x402Stats?.challenges ?? 0;
+      // Deliberately settledCalls (revenue ledger) / challenges (analytics) — see the interface
+      // doc comment. null, never 0%, when there was no opportunity to convert.
+      const conversionPct = challenges === 0 ? null : round((revStats.settledCalls / challenges) * 100, 1);
+      return {
+        toolName,
+        calls: callStats?.calls ?? 0,
+        successCount: callStats?.successCount ?? 0,
+        failureCount: callStats?.failureCount ?? 0,
+        challenges,
+        paymentVerified: paymentVerifiedByTool[toolName] ?? 0,
+        settledCalls: revStats.settledCalls,
+        conversionPct,
+        revenueByCurrency: revStats.revenueByCurrency,
+        revenue: revStats.revenue,
+        currency: revStats.currency,
+        averageRevenuePerSettledCall: revStats.revenue !== null && revStats.settledCalls > 0
+          ? round(revStats.revenue / revStats.settledCalls, 4) : null,
+        p50LatencyMs: callStats?.p50LatencyMs ?? null,
+        p95LatencyMs: callStats?.p95LatencyMs ?? null
+      };
+    })
+    // Only a tool with some real signal this period — a call, a challenge, or a settlement —
+    // appears here at all (unlike revenueByTool, which always lists every known capability); see
+    // the empty-state rule in the doc comment above.
+    .filter(row => row.calls > 0 || row.challenges > 0 || row.settledCalls > 0)
+    .sort((a, b) => (b.revenue ?? -1) - (a.revenue ?? -1) || b.settledCalls - a.settledCalls);
   const toolDurations = events.filter(e => e.category === "tool" && typeof e.durationMs === "number").map(e => e.durationMs!);
   const usage: UsageReport = {
     discoveryHits: discoveryWindow.totalHits,
@@ -414,7 +526,7 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   });
 
   return {
-    period, generatedAt: now.toISOString(), revenue, paidCalls, revenueTrend, revenueByTool, x402Funnel, usage,
+    period, generatedAt: now.toISOString(), revenue, paidCalls, revenueTrend, revenueByTool, toolConversion, x402Funnel, usage,
     transactions, reconciliation: { anomalyCount: anomalies.length, anomalies }, systemStatus
   };
 }

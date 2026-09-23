@@ -63,6 +63,12 @@ code.hash { font-family: ui-monospace, monospace; cursor: help; }
 svg.trend-chart { width:100%; height:220px; display:block; }
 .legend { display:flex; gap:14px; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--muted); }
 .legend .swatch { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:5px; vertical-align:middle; }
+.panel-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+.panel-head h2 { margin:0; }
+.sort-control { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+.sort-control select { background:var(--panel2); border:1px solid var(--border); color:var(--text); border-radius:6px; padding:4px 8px; font-size:12px; }
+tr.row-highlight { background:rgba(127,224,164,0.05); }
+tr.row-highlight td:first-child { box-shadow: inset 3px 0 0 #1d4a30; }
 `;
 
 // A small, fixed color palette for multi-currency trend lines — never more than a handful of
@@ -190,6 +196,66 @@ const CLIENT_SCRIPT = `
     );
   }
 
+  // ---- Top Tools / Conversion by Tool ----------------------------------------------------
+  // Sorting is a pure client-side re-order of the already-fetched data.toolConversion array —
+  // no re-fetch, matching how a period change (the only thing that DOES re-fetch) already works.
+  var lastDashboardData = null;
+
+  function sortToolConversion(rows, key) {
+    var sorted = rows.slice();
+    var byRevenue = function (a, b) { return (b.revenue !== null ? b.revenue : -1) - (a.revenue !== null ? a.revenue : -1) || b.settledCalls - a.settledCalls; };
+    if (key === "settled") sorted.sort(function (a, b) { return b.settledCalls - a.settledCalls || byRevenue(a, b); });
+    else if (key === "calls") sorted.sort(function (a, b) { return b.calls - a.calls || byRevenue(a, b); });
+    else if (key === "conversion") sorted.sort(function (a, b) { return (b.conversionPct !== null ? b.conversionPct : -1) - (a.conversionPct !== null ? a.conversionPct : -1) || byRevenue(a, b); });
+    else sorted.sort(byRevenue);
+    return sorted;
+  }
+
+  // Never combines currencies (spec section on multiple assets): a tool with zero settled calls
+  // shows the literal "0.00 USDC" empty state; one settled currency shows that currency's amount;
+  // more than one shows each currency's amount separately, comma-joined, never summed.
+  function renderRevenueCell(r) {
+    var currencies = Object.keys(r.revenueByCurrency || {});
+    if (r.settledCalls === 0 || currencies.length === 0) return "0.00 USDC";
+    if (currencies.length === 1) return fmtAmount(r.revenueByCurrency[currencies[0]]) + " " + currencies[0];
+    return currencies.map(function (c) { return fmtAmount(r.revenueByCurrency[c]) + " " + c; }).join(", ");
+  }
+
+  function renderAvgCell(r) {
+    if (r.settledCalls === 0) return "—";
+    var currencies = Object.keys(r.revenueByCurrency || {});
+    if (currencies.length === 1) return fmtAmount(r.averageRevenuePerSettledCall) + " " + currencies[0];
+    return currencies.map(function (c) { return fmtAmount(r.revenueByCurrency[c] / r.settledCalls) + " " + c; }).join(", ");
+  }
+
+  function renderToolConversion(data) {
+    lastDashboardData = data;
+    var el = document.getElementById("tool-conversion");
+    var sortSelect = document.getElementById("tool-conversion-sort");
+    var key = sortSelect ? sortSelect.value : "revenue";
+    var rows = sortToolConversion(data.toolConversion || [], key);
+    el.innerHTML = table(
+      [
+        { header: "Tool", render: function (r) { return esc(r.toolName); } },
+        { header: "Calls", right: true, render: function (r) { return fmtNum(r.calls); } },
+        { header: "Success", right: true, render: function (r) { return fmtNum(r.successCount); } },
+        { header: "402", right: true, render: function (r) { return fmtNum(r.challenges); } },
+        { header: "Settled", right: true, render: function (r) { return fmtNum(r.settledCalls); } },
+        { header: "Conversion", right: true, render: function (r) { return r.conversionPct === null ? "—" : r.conversionPct + "%"; } },
+        { header: "Revenue", right: true, render: function (r) { return renderRevenueCell(r); } },
+        { header: "Avg / Paid Call", right: true, render: function (r) { return renderAvgCell(r); } },
+        { header: "p50", right: true, render: function (r) { return fmtMs(r.p50LatencyMs); } },
+        { header: "p95", right: true, render: function (r) { return fmtMs(r.p95LatencyMs); } }
+      ],
+      rows,
+      "No tool usage recorded in this period."
+    );
+    if (rows.length) {
+      var trs = el.querySelectorAll("tbody tr");
+      rows.forEach(function (r, i) { if (r.settledCalls > 0 && trs[i]) trs[i].classList.add("row-highlight"); });
+    }
+  }
+
   function renderX402Funnel(data) {
     var f = data.x402Funnel;
     var el = document.getElementById("x402-funnel");
@@ -287,6 +353,7 @@ const CLIENT_SCRIPT = `
     renderRevenueByTool(data);
     renderX402Funnel(data);
     renderUsage(data);
+    renderToolConversion(data);
     renderTransactions(data);
     renderReconciliation(data);
     renderSystemStatus(data);
@@ -325,6 +392,12 @@ const CLIENT_SCRIPT = `
     document.querySelectorAll(".period-bar button").forEach(function (btn) {
       btn.addEventListener("click", function () { loadPeriod(btn.getAttribute("data-period")); });
     });
+    var sortSelect = document.getElementById("tool-conversion-sort");
+    if (sortSelect) {
+      sortSelect.addEventListener("change", function () {
+        if (lastDashboardData) renderToolConversion(lastDashboardData);
+      });
+    }
   });
 })();
 `;
@@ -395,6 +468,21 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
   <div class="panel">
     <h2>Agent / Tool Usage</h2>
     <div id="usage-metrics"></div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Top Tools / Conversion by Tool</h2>
+      <label class="sort-control">Sort by
+        <select id="tool-conversion-sort">
+          <option value="revenue">Revenue</option>
+          <option value="settled">Settled Calls</option>
+          <option value="calls">Total Calls</option>
+          <option value="conversion">Conversion Rate</option>
+        </select>
+      </label>
+    </div>
+    <div id="tool-conversion"></div>
   </div>
 
   <div class="panel">
