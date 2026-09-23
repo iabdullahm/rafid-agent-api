@@ -35,7 +35,7 @@ function cleanRegistrationNumber(value: string): string {
 /** Character-bigram Dice coefficient — a standard, deterministic string-similarity measure (no
  *  model, no external service). 1.0 for identical strings, 0 for no shared bigrams. Falls back to
  *  an exact-equality check for strings shorter than 2 characters, where bigrams don't apply. */
-function bigramSimilarity(a: string, b: string): number {
+export function bigramSimilarity(a: string, b: string): number {
   if (a === b) return 1;
   if (a.length < 2 || b.length < 2) return a === b ? 1 : 0;
   const bigrams = (s: string): Map<string, number> => {

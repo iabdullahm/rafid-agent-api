@@ -37,6 +37,11 @@ function buildProvider(): CompanyDataProvider {
 
 const provider = buildProvider();
 
+/** The module-level provider built from OMAN_BUSINESS_DATA_MODE — exposed (read-only) so other
+ *  capabilities that need canonical Oman company identity (oman_supplier_check) resolve it through
+ *  the exact same data source and mode as search_oman_company, never a second connection/config. */
+export function getOmanCompanyDataProvider(): CompanyDataProvider { return provider; }
+
 function domainFromWebsite(website: string | null): string | null {
   if (!website) return null;
   try { return new URL(website).hostname.replace(/^www\./, ""); } catch { return null; }

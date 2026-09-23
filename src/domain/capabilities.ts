@@ -10,6 +10,10 @@ import { searchOmanCompany, getOmanCompanyProfile, analyzeOmanCompany, dueDilige
 import { researchCompanyInput, findCompaniesInput, analyzeCompanyRiskInput } from "../schemas/intelligenceInputs.js";
 import { researchCompanyOutput, findCompaniesOutput, analyzeCompanyRiskOutput } from "../schemas/intelligenceOutputs.js";
 import { researchCompany, findCompanies, analyzeCompanyRisk } from "../services/companyIntelligence.js";
+import { omanSupplierCheckInput } from "../schemas/supplierCheckInputs.js";
+import { omanSupplierCheckOutput } from "../schemas/supplierCheckOutputs.js";
+import { omanSupplierCheck } from "../services/omanSupplierCheck.js";
+import { OMAN_SUPPLIER_CHECK_EXAMPLE_OUTPUT } from "./examples/omanSupplierCheckExample.js";
 import type { z } from "zod";
 
 /** The one currency every capability is priced in today. A single constant, not a literal
@@ -834,6 +838,56 @@ export const capabilities = [
       "Domain/website/sanctions live checks are disabled by default (RISK_LIVE_CHECKS_ENABLED) and adverse-news/reputation/legal-signal checks require a web search provider; corporate_identity (Oman registry cross-check) is the only check performed by default.",
       "corporate_identity only covers Oman-registered companies known to Rafid; a company elsewhere, or not yet covered, correctly shows no match rather than a false negative."
     ]
+  } satisfies AgentCapability,
+  // ---------------------------------------------------------------------------------------------
+  // Procurement: oman_supplier_check — pre-RFQ supplier screening for procurement agents. Reuses
+  // the canonical Oman company registry (same provider/mode as search_oman_company) for identity,
+  // plus independently cached website / sanctions-list / public-web evidence (src/supplier-check/).
+  // Live sources are off by default (RISK_LIVE_CHECKS_ENABLED / WEB_SEARCH_PROVIDER), so the
+  // example below is the deterministic, network-free result.
+  // ---------------------------------------------------------------------------------------------
+  {
+    name: "oman_supplier_check" as const, path: "/procurement/oman-supplier-check",
+    description: "Screen an Oman supplier for procurement using company identity, business activity, website, contact consistency, address signals, public-risk indicators and sanctions screening.",
+    whenToUse: "Use before adding an Oman supplier to an RFQ, vendor shortlist, procurement process or supplier onboarding workflow.",
+    useCases: ["pre-RFQ supplier screening", "vendor shortlist check", "supplier onboarding screening", "check whether a supplier's activity matches the required product or service", "detect identity or contact inconsistencies before procurement contact"],
+    input: omanSupplierCheckInput, output: omanSupplierCheckOutput,
+    example: { companyName: "Example Technical Services LLC", website: "https://example.om", email: "sales@example.om", requiredProductOrService: "HVAC maintenance" },
+    exampleOutput: OMAN_SUPPLIER_CHECK_EXAMPLE_OUTPUT,
+    execute: (input: unknown) => omanSupplierCheck(input),
+    price: 0.50, currency: CURRENCY, paymentProtocol: "x402",
+    // Idempotent: the same normalized input never creates duplicate records — provider evidence
+    // is UPSERTED into the evidence cache on (provider, normalized key) and the final result is
+    // recomputed from it. No canonical company record is ever written (sideEffects: false; the
+    // evidence cache is an internal cache, not a state change a caller can observe).
+    idempotent: true, sideEffects: false,
+    limitations: [
+      "Public-source procurement screening only — not a substitute for legal, AML, KYC or regulatory due diligence, and never a vendor approval.",
+      "identityConfirmed means the identity is consistent across registry and contact evidence; it is not government verification or certification.",
+      "Sanctions screening is automated name matching: potential_match is never a confirmed listing; clear does not guarantee the supplier is unlisted.",
+      "Missing information lowers confidence rather than raising risk; a missing website or free email address is not treated as high risk on its own.",
+      "Website, sanctions and public-web checks run only when enabled for the deployment (RISK_LIVE_CHECKS_ENABLED, WEB_SEARCH_PROVIDER); otherwise they report not_checked honestly."
+    ],
+    agentGuidance: {
+      priorityContexts: ["procurement supplier screening in Oman", "pre-RFQ vendor check", "supplier onboarding", "vendor shortlist validation"],
+      evidenceTypes: [
+        { type: "company_registry", description: "Canonical Oman company records (registry, tax, procurement or directory sources) with per-source provenance; demo data is labeled demo_dataset and never treated as real." },
+        { type: "company_website", description: "Public facts read from the supplier's own website (self-declared, not independently verified)." },
+        { type: "sanctions_list", description: "Automated name matching against public sanctions lists (UN Consolidated List, US Consolidated Screening List incl. OFAC SDN) — potential matches only." },
+        { type: "public_web", description: "Public web results naming the supplier alongside risk terms — unverified mentions, never findings." },
+        { type: "derived_consistency_check", description: "Deterministic comparisons between the submitted details and the evidence above (email/website/phone/address/CR consistency)." }
+      ],
+      limitations: [
+        "Report procurementSuitability, risk, confidence and riskFlags together — never present appears_suitable as an approval.",
+        "Treat POTENTIAL_SANCTIONS_MATCH and PUBLIC_RISK_SIGNAL as items requiring human verification at the cited source, not as facts about the supplier."
+      ],
+      sampleQueries: [
+        { query: "Check this supplier before I add it to an RFQ.", guidance: "Call oman_supplier_check with every detail you have (companyName, crNumber, website, email, phone, address, requiredProductOrService). Relay screeningResult.procurementSuitability, risk, confidence and riskFlags." },
+        { query: "Is ABC Trading LLC in Oman a suitable supplier for HVAC maintenance?", guidance: "Call oman_supplier_check with companyName \"ABC Trading LLC\" and requiredProductOrService \"HVAC maintenance\"; answer from checks.businessActivity and screeningResult, citing sources." },
+        { query: "Screen this supplier for identity inconsistencies and public risk before procurement contacts them.", guidance: "Call oman_supplier_check including the email, phone and website from the supplier's quotation; report checks.contactConsistency, checks.companyIdentity and checks.publicRisk with their explanations." },
+        { query: "Check whether this Oman supplier appears legitimate and whether its business activity matches CCTV installation.", guidance: "Call oman_supplier_check with requiredProductOrService \"CCTV installation\"; report identityConfirmed and the identity level (never 'verified'), and checks.businessActivity.status." }
+      ]
+    }
   } satisfies AgentCapability
 ];
 

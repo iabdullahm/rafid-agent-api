@@ -82,6 +82,18 @@ export function classifyDataSource(toolName: string, data: unknown): DataSource 
     return "unknown";
   }
 
+  // oman_supplier_check: live provider checks take precedence (website/sanctions/public web
+  // actually consulted); otherwise classify by the registry evidence behind the identity match,
+  // using the same real-vs-demo vocabulary as the Oman business tools.
+  if (toolName === "oman_supplier_check") {
+    const coverage = record.dataCoverage;
+    if (!coverage || typeof coverage !== "object") return "unknown";
+    const c = coverage as Record<string, unknown>;
+    if (Array.isArray(c.liveChecksPerformed) && c.liveChecksPerformed.length > 0) return "live_provider";
+    if (c.registryMatch === true) return c.demoDataOnly === true ? "demo_manual" : "partner_feed";
+    return "not_configured";
+  }
+
   return null;
 }
 

@@ -47,6 +47,10 @@ export const ESTIMATED_UPSTREAM_COST_USD: Partial<Record<CapabilityKey, { provid
     providerCostUSD: 0.006, llmCostUSD: 0.006,
     assumptions: "One web search covering up to the internal 20-result cap, plus one small-model extraction call over the retrieved snippets."
   },
+  oman_supplier_check: {
+    providerCostUSD: 0.005, llmCostUSD: 0,
+    assumptions: "At most one public-web risk search (~$0.005, Tavily-class pricing) per uncached supplier name; registry lookup is Rafid's own database; website inspection and sanctions lists (UN Consolidated List, US CSL) are free public sources; evidence is cached (identity 7d, website 3d, sanctions 12h, public web 1d), so repeat screenings usually cost less. No LLM synthesis."
+  },
   analyze_company_risk: {
     providerCostUSD: 0.015, llmCostUSD: 0,
     assumptions: "Up to 3 targeted web searches (adverse news, reputation, legal/regulatory) at an estimated $0.005/search; domain/website/sanctions checks use free public sources (RDAP, OFAC) with no per-call fee. No LLM synthesis — findings are presented as retrieved evidence, not generated prose."
