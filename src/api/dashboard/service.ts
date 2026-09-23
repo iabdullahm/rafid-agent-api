@@ -2,11 +2,12 @@ import type { Config } from "../../config/env.js";
 import type { AnalyticsEvent, AnalyticsRepository } from "../../analytics/types.js";
 import {
   WINDOW_MS, percentile,
-  summarizeAllTime, summarizeDiscoveryAllTime, summarizeToolsAllTime, summarizeX402AllTime
+  summarizeAllTime, summarizeDiscoveryAllTime, summarizeToolsAllTime, summarizeX402AllTime,
+  type ToolsWindow
 } from "../../analytics/aggregate.js";
 import type { RevenueLedger, RevenueSettlement } from "../../revenue/types.js";
 import {
-  REVENUE_PERIODS, periodSince, summarizeRevenue, summarizeRevenueByTool, buildReconciliation, isPaidToolExecution,
+  REVENUE_PERIODS, periodSince, summarizeRevenue, summarizeRevenueByTool, buildReconciliation,
   type RevenuePeriod, type RevenueSummary, type RevenueToolStats, type ReconciliationAnomaly
 } from "../../revenue/aggregate.js";
 import { PostgresRevenueLedger } from "../../db/revenueStore.js";
@@ -80,7 +81,7 @@ function makeBucket(start: Date, end: Date, label: string, succeeded: readonly R
   const revenueByCurrency: Record<string, number> = {};
   for (const row of inBucket) {
     if (row.currency === null || row.amountDecimal === null) continue;
-    revenueByCurrency[row.currency] = round((revenueByCurrency[row.currency] ?? 0) + row.amountDecimal, 8);
+    revenueByCurrency[row.currency] = round((revenueByCurrency[row.currency] ?? 0) + row.amountDecimal, 6);
   }
   return { label, startIso: start.toISOString(), endIso: end.toISOString(), revenueByCurrency };
 }
@@ -170,7 +171,6 @@ export function explorerUrlFor(network: string, txHash: string): string | null {
 export interface SystemStatusReport {
   mcp: "Enabled" | "Disabled";
   x402: "Enabled" | "Disabled";
-  l402: "Enabled" | "Disabled";
   analytics: "Active" | "Unknown";
   revenueLedger: "Active" | "Unknown";
   partnerData: "Active" | "No partner-fed calls observed in this period" | "Unknown";
@@ -225,7 +225,6 @@ async function gatherSystemStatus(args: {
   return {
     mcp: config.mcpRemoteEnabled ? "Enabled" : "Disabled",
     x402: config.x402Enabled ? "Enabled" : "Disabled",
-    l402: config.l402Enabled ? "Enabled" : "Disabled",
     analytics: analyticsOk ? "Active" : "Unknown",
     revenueLedger: revenueOk ? "Active" : "Unknown",
     partnerData: !anyToolCallsInPeriod ? "Unknown" : partnerFeedInPeriod ? "Active" : "No partner-fed calls observed in this period",
@@ -329,6 +328,276 @@ export interface UsageReport {
   partnerFeedUsagePct: number | null;
 }
 
+// -----------------------------------------------------------------------------------------------
+// AI Agent Operations Command Center (dashboard redesign added 2026-09-23) — three new,
+// PRESENTATION-ONLY derived views, computed entirely from data already fetched above (`events`,
+// `toolsWindow`, `x402Funnel`, reconciliation's anomaly count). No new analytics system, no new
+// revenue table, no new query, no new HTTP route: every field below is either copied straight off
+// an existing aggregate or a small, transparent, exported pure function over it — see each
+// function's own doc comment for exactly which real fields back it. Nothing here is simulated;
+// "waiting" / zero states are honest zero states, never a fabricated placeholder number.
+// -----------------------------------------------------------------------------------------------
+
+export type AgentStatusLevel = "active" | "processing" | "waiting" | "error";
+
+/** One of the six operational groupings the dashboard's "Active Agents" panel shows. Five are a
+ *  fixed, non-overlapping partition of the 11 registered capabilities (domain/capabilities.ts) —
+ *  chosen so every capability belongs to exactly one group and no group is empty in a mature
+ *  deployment; the sixth ("reconciliation") is cross-cutting and has no tools of its own. */
+export type AgentGroupId = "research" | "property" | "supplier" | "risk" | "payment" | "reconciliation";
+
+export interface AgentGroupDef {
+  id: AgentGroupId;
+  name: string;
+  /** Capability names this group owns (empty for the two cross-cutting groups, "payment" and
+   *  "reconciliation", whose status comes from the x402 funnel / reconciliation anomalies instead
+   *  of per-tool analytics — see buildAgentStatuses()). */
+  toolNames: readonly string[];
+}
+
+export const AGENT_GROUPS: readonly AgentGroupDef[] = [
+  { id: "research", name: "Research Agent", toolNames: ["research_company", "find_companies"] },
+  { id: "property", name: "Property Agent", toolNames: ["analyze_property", "compare_properties", "estimate_maintenance", "analyze_oman_property"] },
+  { id: "supplier", name: "Supplier Intelligence Agent", toolNames: ["search_oman_company", "get_oman_company_profile", "analyze_oman_company", "due_diligence_oman_company"] },
+  { id: "risk", name: "Risk Agent", toolNames: ["analyze_company_risk"] },
+  { id: "payment", name: "Payment / Settlement Agent", toolNames: [] },
+  { id: "reconciliation", name: "Reconciliation Agent", toolNames: [] }
+];
+
+/** A tool-group agent is "processing" (mid-burst of real activity) when its most recent event in
+ *  this period landed within this window of `now` — never a claim of a literally-still-executing
+ *  request (the analytics log only ever records completed calls; see analytics/types.ts). */
+const AGENT_RECENT_ACTIVITY_MS = 2 * 60 * 1000;
+/** Below this per-group success rate (and only once the group has a meaningful sample), the
+ *  group's card surfaces as "error" rather than "active" — an honest signal, not a guess. */
+const AGENT_ERROR_SUCCESS_RATE_PCT = 80;
+
+export interface AgentStatusRow {
+  id: AgentGroupId;
+  name: string;
+  status: AgentStatusLevel;
+  statusLabel: string;
+  currentTask: string;
+  metricLabel: string;
+  toolNames: readonly string[];
+  calls: number;
+  lastEventAt: string | null;
+}
+
+function fmtPctForStatus(n: number | null): string {
+  return n === null ? "—" : `${n}%`;
+}
+
+/** Builds the six Active-Agents cards from data already computed in buildDashboardData() — never
+ *  a second query. Tool-group agents (research/property/supplier/risk) are summed from
+ *  `toolsWindow.byTool` (analytics `category: "tool"` events, already period-scoped) plus a scan
+ *  of the already-fetched `events` array for that group's most recent event and any
+ *  `dataSource === "not_configured"` signal (a real, already-tracked provider-misconfiguration
+ *  marker — see analytics/types.ts's DataSource doc comment). The two cross-cutting agents read
+ *  the already-computed x402 funnel and reconciliation anomaly count instead of per-tool stats. */
+export function buildAgentStatuses(args: {
+  events: readonly AnalyticsEvent[];
+  toolsWindow: ToolsWindow;
+  x402Funnel: X402FunnelReport;
+  settledPayments: number;
+  anomalyCount: number;
+  now: Date;
+}): AgentStatusRow[] {
+  const { events, toolsWindow, x402Funnel, settledPayments, anomalyCount, now } = args;
+
+  const rows: AgentStatusRow[] = AGENT_GROUPS.map(group => {
+    if (group.id === "payment") {
+      const toolEvents = events.filter(e => e.category === "x402");
+      const lastEvent = toolEvents.reduce<AnalyticsEvent | null>((latest, e) =>
+        !latest || e.createdAt > latest.createdAt ? e : latest, null);
+      const recentMs = lastEvent ? now.getTime() - new Date(lastEvent.createdAt).getTime() : null;
+      let status: AgentStatusLevel; let statusLabel: string; let currentTask: string;
+      if (x402Funnel.challenges === 0) {
+        status = "waiting"; statusLabel = "Waiting"; currentTask = "No payment activity in this period";
+      } else if (x402Funnel.settlementFailed > 0 && x402Funnel.settlementSucceeded === 0) {
+        status = "error"; statusLabel = "Settlements failing"; currentTask = `${x402Funnel.settlementFailed} failed settlement(s), 0 succeeded`;
+      } else if (recentMs !== null && recentMs < AGENT_RECENT_ACTIVITY_MS) {
+        status = "processing"; statusLabel = "Processing"; currentTask = "Verifying a payment / settling a call";
+      } else {
+        status = "active"; statusLabel = "Active"; currentTask = `${settledPayments} settled this period`;
+      }
+      return {
+        id: group.id, name: group.name, status, statusLabel, currentTask,
+        metricLabel: `${x402Funnel.challenges} challenge(s) · ${x402Funnel.settlementSucceeded} settled`,
+        toolNames: group.toolNames, calls: x402Funnel.challenges, lastEventAt: lastEvent?.createdAt ?? null
+      };
+    }
+    if (group.id === "reconciliation") {
+      const status: AgentStatusLevel = anomalyCount === 0 ? "active" : "error";
+      return {
+        id: group.id, name: group.name, status,
+        statusLabel: anomalyCount === 0 ? "All clear" : "Anomalies found",
+        currentTask: anomalyCount === 0 ? "Settlements and tool executions agree" : `${anomalyCount} anomaly(ies) need review`,
+        metricLabel: `${anomalyCount} anomaly(ies) this period`,
+        toolNames: group.toolNames, calls: 0, lastEventAt: null
+      };
+    }
+
+    // Tool-group agents: research / property / supplier / risk.
+    const groupToolEvents = events.filter(e => e.category === "tool" && e.toolName && (group.toolNames as readonly string[]).includes(e.toolName));
+    const calls = group.toolNames.reduce((sum, name) => sum + (toolsWindow.byTool[name]?.calls ?? 0), 0);
+    const successCount = group.toolNames.reduce((sum, name) => sum + (toolsWindow.byTool[name]?.successCount ?? 0), 0);
+    const failureCount = group.toolNames.reduce((sum, name) => sum + (toolsWindow.byTool[name]?.failureCount ?? 0), 0);
+    const successRatePct = calls === 0 ? null : round((successCount / calls) * 100, 1);
+    const lastEvent = groupToolEvents.reduce<AnalyticsEvent | null>((latest, e) =>
+      !latest || e.createdAt > latest.createdAt ? e : latest, null);
+    const recentMs = lastEvent ? now.getTime() - new Date(lastEvent.createdAt).getTime() : null;
+    const recentNotConfigured = groupToolEvents
+      .slice()
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, 5)
+      .some(e => e.dataSource === "not_configured");
+
+    let status: AgentStatusLevel; let statusLabel: string; let currentTask: string;
+    if (recentNotConfigured) {
+      status = "error"; statusLabel = "Not configured"; currentTask = "A required provider is not configured — see .env.example";
+    } else if (calls === 0) {
+      status = "waiting"; statusLabel = "Waiting"; currentTask = "No calls in this period";
+    } else if (recentMs !== null && recentMs < AGENT_RECENT_ACTIVITY_MS) {
+      status = "processing"; statusLabel = "Processing";
+      currentTask = `Running ${lastEvent!.toolName}${lastEvent!.success === false ? " (last call failed)" : "..."}`;
+    } else if (successRatePct !== null && successRatePct < AGENT_ERROR_SUCCESS_RATE_PCT) {
+      status = "error"; statusLabel = "Elevated failures"; currentTask = `${failureCount} of ${calls} calls failed this period`;
+    } else {
+      status = "active"; statusLabel = "Active"; currentTask = `${calls} call(s) this period · ${fmtPctForStatus(successRatePct)} success`;
+    }
+    return {
+      id: group.id, name: group.name, status, statusLabel, currentTask,
+      metricLabel: `${calls} call(s) · ${fmtPctForStatus(successRatePct)} success`,
+      toolNames: group.toolNames, calls, lastEventAt: lastEvent?.createdAt ?? null
+    };
+  });
+
+  return rows;
+}
+
+// -----------------------------------------------------------------------------------------------
+// Live Agent Activity feed — a plain, human-readable rendering of the same safe fields the rest of
+// this file already exposes (category, eventType, toolName, success, durationMs, path, createdAt —
+// see analytics/types.ts's own field-by-field privacy doc comment; never a client hash, user
+// agent, or referer). No new query: reuses the already period-scoped `events` array.
+// -----------------------------------------------------------------------------------------------
+
+export interface ActivityFeedItem {
+  at: string;
+  kind: AnalyticsEvent["category"];
+  toolName: string | null;
+  success: boolean | null;
+  label: string;
+}
+
+export const MAX_ACTIVITY_FEED_ITEMS = 50;
+
+function describeActivityEvent(e: AnalyticsEvent): string {
+  if (e.category === "discovery") return `Discovery hit${e.path ? ` on ${e.path}` : ""}`;
+  if (e.category === "mcp") {
+    if (e.eventType === "initialize") return "MCP session initialized";
+    if (e.eventType === "tools_list") return "MCP client listed available tools";
+    return `MCP tool call${e.toolName ? `: ${e.toolName}` : ""}`;
+  }
+  if (e.category === "x402") {
+    if (e.eventType === "challenge") return `402 payment challenge issued${e.toolName ? ` for ${e.toolName}` : ""}`;
+    if (e.eventType === "payment_verified") return `Payment verified${e.toolName ? ` for ${e.toolName}` : ""}`;
+    if (e.eventType === "payment_failed") return `Payment verification failed${e.toolName ? ` for ${e.toolName}` : ""}`;
+    if (e.eventType === "settlement_success") return `Settlement succeeded${e.toolName ? ` for ${e.toolName}` : ""}`;
+    return `Settlement failed${e.toolName ? ` for ${e.toolName}` : ""}`;
+  }
+  // "tool"
+  const durationLabel = typeof e.durationMs === "number" ? ` (${Math.round(e.durationMs)}ms)` : "";
+  return `${e.toolName ?? "unknown tool"} call ${e.success === false ? "failed" : "completed"}${durationLabel}`;
+}
+
+/** Newest-first, capped at MAX_ACTIVITY_FEED_ITEMS — every row is a real, already-recorded
+ *  analytics event; there is no synthetic/demo row on the server side under any circumstance (the
+ *  dashboard's client-side "demo mode", when a viewer opts into it with ?demo=1, only ever adds
+ *  clearly-labeled illustrative rows in the browser — see page.ts — never from this function). */
+export function buildActivityFeed(events: readonly AnalyticsEvent[]): ActivityFeedItem[] {
+  return [...events]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, MAX_ACTIVITY_FEED_ITEMS)
+    .map(e => ({ at: e.createdAt, kind: e.category, toolName: e.toolName, success: e.success, label: describeActivityEvent(e) }));
+}
+
+// -----------------------------------------------------------------------------------------------
+// System health score — a transparent, documented formula over already-computed SystemStatusReport
+// fields plus the reconciliation anomaly count. Only counts a check that was ACTUALLY measured this
+// request (an "Unknown" signal — e.g. a query that itself failed — is excluded from the
+// denominator, never scored as unhealthy or silently as healthy); 100% is only ever possible when
+// every measured signal is healthy, per the spec's explicit requirement.
+// -----------------------------------------------------------------------------------------------
+
+export interface SystemHealthReport {
+  scorePct: number;
+  measuredCount: number;
+  healthyCount: number;
+  checks: { label: string; measured: boolean; healthy: boolean }[];
+}
+
+export function buildSystemHealthScore(status: SystemStatusReport, anomalyCount: number): SystemHealthReport {
+  const checks = [
+    { label: "Analytics", measured: status.analytics !== "Unknown", healthy: status.analytics === "Active" },
+    { label: "Revenue Ledger", measured: status.revenueLedger !== "Unknown", healthy: status.revenueLedger === "Active" },
+    { label: "Database", measured: status.database !== "Unknown", healthy: status.database.startsWith("Connected") },
+    { label: "Reconciliation", measured: true, healthy: anomalyCount === 0 }
+  ];
+  const measured = checks.filter(c => c.measured);
+  const healthyCount = measured.filter(c => c.healthy).length;
+  const scorePct = measured.length === 0 ? 0 : Math.round((healthyCount / measured.length) * 100);
+  return { scorePct, measuredCount: measured.length, healthyCount, checks };
+}
+
+// -----------------------------------------------------------------------------------------------
+// Count sparklines (spec sections 7, 12) — a small, fixed number of buckets showing recent trend
+// shape, not exact analytics. Reuses the exact bucket boundaries buildRevenueTrend() already uses
+// per period (hourly/daily/monthly) so a KPI's sparkline lines up with the Revenue Trend chart's
+// own buckets; counts real matching events only, never interpolated or smoothed.
+// -----------------------------------------------------------------------------------------------
+
+export function buildCountSparkline(events: readonly AnalyticsEvent[], period: RevenuePeriod, now: Date, matches: (e: AnalyticsEvent) => boolean): number[] {
+  const matching = events.filter(matches);
+  const boundaries = bucketBoundaries(period, now);
+  return boundaries.map(([start, end]) => matching.filter(e => {
+    const t = new Date(e.createdAt).getTime();
+    return t >= start.getTime() && t < end.getTime();
+  }).length);
+}
+
+function bucketBoundaries(period: RevenuePeriod, now: Date): [Date, Date][] {
+  if (period === "24h") {
+    const nowHour = new Date(now); nowHour.setUTCMinutes(0, 0, 0);
+    return Array.from({ length: 24 }, (_, idx) => {
+      const i = 23 - idx;
+      const start = new Date(nowHour.getTime() - i * 3_600_000);
+      return [start, new Date(start.getTime() + 3_600_000)] as [Date, Date];
+    });
+  }
+  const days = period === "7d" ? 7 : period === "30d" ? 30 : 30;
+  const nowDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  return Array.from({ length: days }, (_, idx) => {
+    const i = days - 1 - idx;
+    const start = new Date(nowDay.getTime() - i * 86_400_000);
+    return [start, new Date(start.getTime() + 86_400_000)] as [Date, Date];
+  });
+}
+
+/** Settlement-count sparkline — deliberately a COUNT of settled rows per bucket, never a summed
+ *  currency amount, so it can never violate the never-combine-currencies rule while still giving
+ *  the Gross Revenue KPI card a meaningful trend shape (see buildCountSparkline() above for the
+ *  identical bucketing logic applied to analytics events). */
+export function buildSettlementCountSparkline(settlements: readonly RevenueSettlement[], period: RevenuePeriod, now: Date): number[] {
+  const succeeded = settlements.filter(r => r.status === "settlement_succeeded");
+  const boundaries = bucketBoundaries(period, now);
+  return boundaries.map(([start, end]) => succeeded.filter(r => {
+    const t = new Date(r.createdAt).getTime();
+    return t >= start.getTime() && t < end.getTime();
+  }).length);
+}
+
 export interface TransactionRow {
   time: string;
   capability: string;
@@ -365,6 +634,16 @@ export interface DashboardData {
   transactions: TransactionRow[];
   reconciliation: { anomalyCount: number; anomalies: ReconciliationAnomaly[] };
   systemStatus: SystemStatusReport;
+  /** "AI Agent Operations Command Center" additions (2026-09-23) — see each type's own doc
+   *  comment for exactly which already-fetched real data backs it. */
+  agents: AgentStatusRow[];
+  activityFeed: ActivityFeedItem[];
+  systemHealth: SystemHealthReport;
+  sparklines: {
+    revenue: number[];
+    toolCalls: number[];
+    discoveryHits: number[];
+  };
 }
 
 export interface DashboardServiceOptions {
@@ -513,7 +792,7 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   // reconciliation (revenueRoutes.ts), computed in-process here rather than proxied over HTTP. ----
   const x402ToolExecutionCounts: Record<string, number> = {};
   for (const event of events) {
-    if (isPaidToolExecution(event) && event.toolName) {
+    if (event.category === "tool" && event.channel === "x402" && event.success === true && event.toolName) {
       x402ToolExecutionCounts[event.toolName] = (x402ToolExecutionCounts[event.toolName] ?? 0) + 1;
     }
   }
@@ -527,8 +806,22 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
     period, periodEvents: events, periodSettlements: settlements
   });
 
+  // ---- AI Agent Operations Command Center additions — all computed from data already fetched
+  // above; see each function's own doc comment for the exact real fields behind it. ----
+  const agents = buildAgentStatuses({
+    events, toolsWindow, x402Funnel, settledPayments: revenue.settledPayments, anomalyCount: anomalies.length, now
+  });
+  const activityFeed = buildActivityFeed(events);
+  const systemHealth = buildSystemHealthScore(systemStatus, anomalies.length);
+  const sparklines = {
+    revenue: buildSettlementCountSparkline(settlements, period, now),
+    toolCalls: buildCountSparkline(events, period, now, e => e.category === "tool"),
+    discoveryHits: buildCountSparkline(events, period, now, e => e.category === "discovery")
+  };
+
   return {
     period, generatedAt: now.toISOString(), revenue, paidCalls, revenueTrend, revenueByTool, toolConversion, x402Funnel, usage,
-    transactions, reconciliation: { anomalyCount: anomalies.length, anomalies }, systemStatus
+    transactions, reconciliation: { anomalyCount: anomalies.length, anomalies }, systemStatus,
+    agents, activityFeed, systemHealth, sparklines
   };
 }

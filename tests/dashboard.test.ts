@@ -7,10 +7,14 @@ import { MemoryAnalyticsRepository } from "../src/analytics/memoryRepository.js"
 import { MemoryRevenueLedger } from "../src/revenue/memoryLedger.js";
 import { hashAdminPassword } from "../src/middleware/adminAuth.js";
 import { buildSettlementDedupeKey } from "../src/revenue/idempotency.js";
-import { abbreviateTxHash, explorerUrlFor, buildRevenueTrend, sortToolConversionRows } from "../src/api/dashboard/service.js";
+import {
+  abbreviateTxHash, explorerUrlFor, buildRevenueTrend, sortToolConversionRows,
+  buildAgentStatuses, buildActivityFeed, buildSystemHealthScore, buildCountSparkline, buildSettlementCountSparkline
+} from "../src/api/dashboard/service.js";
 import type { RevenueSettlement, RevenueSettlementInput, RevenueLedger } from "../src/revenue/types.js";
-import type { AnalyticsEventInput } from "../src/analytics/types.js";
-import type { ToolConversionRow } from "../src/api/dashboard/service.js";
+import type { AnalyticsEvent, AnalyticsEventInput } from "../src/analytics/types.js";
+import type { ToolConversionRow, SystemStatusReport, X402FunnelReport } from "../src/api/dashboard/service.js";
+import type { ToolsWindow } from "../src/analytics/aggregate.js";
 
 const apiKey = "test-only-not-a-real-credential-12345";
 const adminUsername = "ops-admin";
@@ -105,6 +109,38 @@ function toolConversionRowFixture(overrides: Partial<ToolConversionRow> = {}): T
     paymentVerified: 0, settledCalls: 0, conversionPct: null, revenueByCurrency: {},
     revenue: null, currency: null, averageRevenuePerSettledCall: null,
     p50LatencyMs: null, p95LatencyMs: null,
+    ...overrides
+  };
+}
+
+/** Fixture for pure-function tests of buildAgentStatuses() — a ToolsWindow with only the named
+ *  tools populated (every other AGENT_GROUPS tool defaults to "no calls", i.e. absent from byTool,
+ *  exactly as summarizeToolsAllTime() would leave an uncalled tool). */
+function toolsWindowFixture(byTool: Record<string, { calls: number; successCount: number; failureCount: number }>): ToolsWindow {
+  const built: ToolsWindow["byTool"] = {};
+  for (const [name, stats] of Object.entries(byTool)) {
+    built[name] = {
+      calls: stats.calls, successCount: stats.successCount, failureCount: stats.failureCount,
+      successRate: null, p50LatencyMs: null, p95LatencyMs: null,
+      partnerFeedCalls: 0, demoManualCalls: 0, mixedCalls: 0, unknownDataSourceCalls: 0
+    };
+  }
+  return { totalInvocations: Object.values(built).reduce((a, s) => a + s.calls, 0), byTool: built, mcp: { initialize: 0, toolsList: 0, toolsCall: 0 } };
+}
+
+function x402FunnelFixture(overrides: Partial<X402FunnelReport> = {}): X402FunnelReport {
+  return {
+    challenges: 0, paymentVerified: 0, settlementSucceeded: 0, settlementFailed: 0,
+    conversion: { challengeToVerifiedPct: null, verifiedToSettledPct: null, challengeToSettledPct: null },
+    ...overrides
+  };
+}
+
+function systemStatusFixture(overrides: Partial<SystemStatusReport> = {}): SystemStatusReport {
+  return {
+    mcp: "Enabled", x402: "Enabled", analytics: "Active", revenueLedger: "Active",
+    partnerData: "Unknown", database: "Connected (in-memory — not durable across restarts)",
+    lastSuccessfulSettlementAt: null, lastAnalyzeOmanPropertyCallAt: null, lastPartnerFeedAnalysisAt: null,
     ...overrides
   };
 }
@@ -696,6 +732,213 @@ test("sortToolConversionRows: sorting by total calls and by settled calls each r
   ];
   assert.deepEqual(sortToolConversionRows(rows, "calls").map(r => r.toolName), ["many-calls-no-revenue", "few-calls-high-revenue"]);
   assert.deepEqual(sortToolConversionRows(rows, "settled").map(r => r.toolName), ["few-calls-high-revenue", "many-calls-no-revenue"]);
+});
+
+// -------------------------------------------------------------------------------------------
+// AI Agent Operations Command Center (dashboard redesign added 2026-09-23) — agents,
+// activity feed, system health score, and sparklines. All derived from data already fetched by
+// buildDashboardData(); see service.ts's own doc comments for exactly which real fields back each.
+// -------------------------------------------------------------------------------------------
+
+test("buildAgentStatuses: a tool-group agent reports waiting/active/processing/error correctly from real call stats and event recency", () => {
+  const now = new Date();
+  const oldTs = new Date(now.getTime() - 10 * 60 * 1000).toISOString(); // outside the 2-minute "processing" window
+  const recentTs = new Date(now.getTime() - 30 * 1000).toISOString(); // inside it
+
+  // Waiting: zero calls at all this period.
+  const waiting = buildAgentStatuses({
+    events: [], toolsWindow: toolsWindowFixture({}), x402Funnel: x402FunnelFixture(), settledPayments: 0, anomalyCount: 0, now
+  }).find(a => a.id === "property")!;
+  assert.equal(waiting.status, "waiting");
+  assert.equal(waiting.calls, 0);
+
+  // Active: real calls, high success rate, most recent call outside the "processing" window.
+  const active = buildAgentStatuses({
+    events: [analyticsEvent({ toolName: "analyze_oman_property", channel: "rest", success: true, createdAt: oldTs }) as AnalyticsEvent],
+    toolsWindow: toolsWindowFixture({ analyze_oman_property: { calls: 10, successCount: 10, failureCount: 0 } }),
+    x402Funnel: x402FunnelFixture(), settledPayments: 0, anomalyCount: 0, now
+  }).find(a => a.id === "property")!;
+  assert.equal(active.status, "active");
+  assert.equal(active.calls, 10);
+
+  // Processing: most recent real call for the group landed inside the last 2 minutes.
+  const processing = buildAgentStatuses({
+    events: [analyticsEvent({ toolName: "research_company", channel: "rest", success: true, createdAt: recentTs }) as AnalyticsEvent],
+    toolsWindow: toolsWindowFixture({ research_company: { calls: 1, successCount: 1, failureCount: 0 } }),
+    x402Funnel: x402FunnelFixture(), settledPayments: 0, anomalyCount: 0, now
+  }).find(a => a.id === "research")!;
+  assert.equal(processing.status, "processing");
+
+  // Error: real calls, majority failing, most recent call outside the processing window.
+  const errorRow = buildAgentStatuses({
+    events: [analyticsEvent({ toolName: "analyze_company_risk", channel: "rest", success: false, createdAt: oldTs }) as AnalyticsEvent],
+    toolsWindow: toolsWindowFixture({ analyze_company_risk: { calls: 10, successCount: 2, failureCount: 8 } }),
+    x402Funnel: x402FunnelFixture(), settledPayments: 0, anomalyCount: 0, now
+  }).find(a => a.id === "risk")!;
+  assert.equal(errorRow.status, "error");
+  assert.equal(errorRow.statusLabel, "Elevated failures");
+
+  // Error: a real, already-tracked "not_configured" data-source signal on a recent call overrides
+  // everything else, even a perfect success rate — this is a genuine provider-misconfiguration
+  // marker, not a guess (see analytics/types.ts's DataSource doc comment).
+  const notConfigured = buildAgentStatuses({
+    events: [analyticsEvent({ toolName: "research_company", channel: "rest", success: true, dataSource: "not_configured", createdAt: oldTs }) as AnalyticsEvent],
+    toolsWindow: toolsWindowFixture({ research_company: { calls: 3, successCount: 3, failureCount: 0 } }),
+    x402Funnel: x402FunnelFixture(), settledPayments: 0, anomalyCount: 0, now
+  }).find(a => a.id === "research")!;
+  assert.equal(notConfigured.status, "error");
+  assert.equal(notConfigured.statusLabel, "Not configured");
+});
+
+test("buildAgentStatuses: the Payment/Settlement agent derives its status from the x402 funnel, never from a per-tool call count", () => {
+  const now = new Date();
+  const waiting = buildAgentStatuses({
+    events: [], toolsWindow: toolsWindowFixture({}), x402Funnel: x402FunnelFixture(), settledPayments: 0, anomalyCount: 0, now
+  }).find(a => a.id === "payment")!;
+  assert.equal(waiting.status, "waiting");
+
+  const active = buildAgentStatuses({
+    events: [], toolsWindow: toolsWindowFixture({}),
+    x402Funnel: x402FunnelFixture({ challenges: 5, settlementSucceeded: 5 }), settledPayments: 5, anomalyCount: 0, now
+  }).find(a => a.id === "payment")!;
+  assert.equal(active.status, "active");
+  assert.equal(active.metricLabel, "5 challenge(s) · 5 settled");
+
+  const errorRow = buildAgentStatuses({
+    events: [], toolsWindow: toolsWindowFixture({}),
+    x402Funnel: x402FunnelFixture({ challenges: 3, settlementFailed: 3, settlementSucceeded: 0 }), settledPayments: 0, anomalyCount: 0, now
+  }).find(a => a.id === "payment")!;
+  assert.equal(errorRow.status, "error");
+});
+
+test("buildAgentStatuses: the Reconciliation agent is 'All clear' with zero anomalies and 'error' the moment any anomaly exists", () => {
+  const now = new Date();
+  const clear = buildAgentStatuses({
+    events: [], toolsWindow: toolsWindowFixture({}), x402Funnel: x402FunnelFixture(), settledPayments: 0, anomalyCount: 0, now
+  }).find(a => a.id === "reconciliation")!;
+  assert.equal(clear.status, "active");
+  assert.equal(clear.statusLabel, "All clear");
+
+  const anomalous = buildAgentStatuses({
+    events: [], toolsWindow: toolsWindowFixture({}), x402Funnel: x402FunnelFixture(), settledPayments: 0, anomalyCount: 2, now
+  }).find(a => a.id === "reconciliation")!;
+  assert.equal(anomalous.status, "error");
+  assert.equal(anomalous.metricLabel, "2 anomaly(ies) this period");
+});
+
+test("buildActivityFeed: sorts newest-first, produces a human-readable label per event category, and caps the result", () => {
+  const events: AnalyticsEvent[] = [
+    analyticsEvent({ category: "discovery", eventType: "hit", path: "/agent.json", toolName: null, channel: null, createdAt: "2026-01-01T00:00:00.000Z" }) as AnalyticsEvent,
+    analyticsEvent({ category: "mcp", eventType: "initialize", toolName: null, channel: null, createdAt: "2026-01-01T00:01:00.000Z" }) as AnalyticsEvent,
+    analyticsEvent({ category: "x402", eventType: "challenge", toolName: "find_companies", channel: null, success: null, createdAt: "2026-01-01T00:02:00.000Z" }) as AnalyticsEvent,
+    analyticsEvent({ category: "tool", eventType: "invocation", toolName: "analyze_oman_property", channel: "rest", success: true, durationMs: 120, createdAt: "2026-01-01T00:03:00.000Z" }) as AnalyticsEvent
+  ];
+  const feed = buildActivityFeed(events);
+  assert.equal(feed.length, 4);
+  assert.equal(feed[0]!.at, "2026-01-01T00:03:00.000Z");
+  assert.match(feed[0]!.label, /analyze_oman_property call completed \(120ms\)/);
+  assert.match(feed[1]!.label, /402 payment challenge issued for find_companies/);
+  assert.match(feed[2]!.label, /MCP session initialized/);
+  assert.match(feed[3]!.label, /Discovery hit on \/agent\.json/);
+
+  const many: AnalyticsEvent[] = Array.from({ length: 60 }, (_, i) =>
+    analyticsEvent({ createdAt: new Date(Date.now() - i * 1000).toISOString() }) as AnalyticsEvent);
+  assert.equal(buildActivityFeed(many).length, 50);
+});
+
+test("buildActivityFeed: never carries a client hash, user agent, or referer into the feed, even when the source event has one", () => {
+  const risky = analyticsEvent({ clientHash: "deadbeef", userAgent: "SecretAgent/1.0", referer: "https://internal.example/secret" }) as AnalyticsEvent;
+  const feed = buildActivityFeed([risky]);
+  const json = JSON.stringify(feed);
+  assert.ok(!json.includes("deadbeef"));
+  assert.ok(!json.includes("SecretAgent"));
+  assert.ok(!json.includes("internal.example"));
+});
+
+test("buildSystemHealthScore: scores 100% only when every actually-measured check is healthy, and an Unknown signal is excluded from the denominator rather than counted either way", () => {
+  const allHealthy = buildSystemHealthScore(systemStatusFixture(), 0);
+  assert.equal(allHealthy.scorePct, 100);
+  assert.equal(allHealthy.measuredCount, 4);
+  assert.equal(allHealthy.healthyCount, 4);
+
+  const oneUnmeasured = buildSystemHealthScore(systemStatusFixture({ analytics: "Unknown" }), 0);
+  assert.equal(oneUnmeasured.measuredCount, 3);
+  assert.equal(oneUnmeasured.healthyCount, 3);
+  assert.equal(oneUnmeasured.scorePct, 100, "an unmeasured signal must never drag the score below 100% on its own");
+
+  const withAnomalies = buildSystemHealthScore(systemStatusFixture(), 2);
+  assert.ok(withAnomalies.scorePct < 100);
+  assert.equal(withAnomalies.checks.find(c => c.label === "Reconciliation")?.healthy, false);
+});
+
+test("buildCountSparkline: a 24h period returns 24 hourly buckets whose sum matches the real matching event count", () => {
+  const now = new Date();
+  const events: AnalyticsEvent[] = [
+    analyticsEvent({ category: "tool", createdAt: new Date(now.getTime() - 60 * 1000).toISOString() }) as AnalyticsEvent,
+    analyticsEvent({ category: "tool", createdAt: new Date(now.getTime() - 2 * 3_600_000).toISOString() }) as AnalyticsEvent,
+    analyticsEvent({ category: "discovery", createdAt: new Date(now.getTime() - 60 * 1000).toISOString() }) as AnalyticsEvent
+  ];
+  const spark = buildCountSparkline(events, "24h", now, e => e.category === "tool");
+  assert.equal(spark.length, 24);
+  assert.equal(spark.reduce((a, b) => a + b, 0), 2);
+});
+
+test("buildSettlementCountSparkline: a 7d period returns 7 daily buckets and counts only settlement_succeeded rows", () => {
+  const now = new Date();
+  const rows: RevenueSettlement[] = [
+    settlementRow({ createdAt: new Date(now.getTime() - 1 * 86_400_000).toISOString() }),
+    settlementRow({
+      status: "settlement_failed", amountDecimal: null, amountAtomic: null, currency: null, asset: null,
+      amountSource: "unavailable", settledAt: null, errorReason: "insufficient_funds", createdAt: new Date(now.getTime() - 1 * 86_400_000).toISOString()
+    })
+  ];
+  const spark = buildSettlementCountSparkline(rows, "7d", now);
+  assert.equal(spark.length, 7);
+  assert.equal(spark.reduce((a, b) => a + b, 0), 1);
+});
+
+test("dashboard command-center fields: agents, activityFeed, systemHealth and sparklines are present in the real payload, cover all six agent groups, and never leak secrets or demo markers", async t => {
+  const { server, base, analyticsRepository, revenueLedger } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  await analyticsRepository.record(analyticsEvent({ toolName: "analyze_oman_property", channel: "rest", success: true }));
+  await analyticsRepository.record(analyticsEvent({ category: "x402", eventType: "challenge", toolName: "find_companies", success: null }));
+  revenueLedger.record(settlementRow({ toolName: "analyze_oman_property", amountDecimal: 0.25 }));
+  const cookie = await loginAndGetSessionCookie(base);
+  const res = await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } });
+  const json = await res.text();
+  const body = JSON.parse(json);
+  const data = body.data;
+
+  assert.equal(data.agents.length, 6);
+  for (const id of ["research", "property", "supplier", "risk", "payment", "reconciliation"]) {
+    assert.ok(data.agents.some((a: { id: string }) => a.id === id), `expected an agent card for ${id}`);
+  }
+  assert.ok(data.activityFeed.length >= 2);
+  assert.equal(typeof data.systemHealth.scorePct, "number");
+  assert.ok(Array.isArray(data.sparklines.revenue));
+  assert.ok(Array.isArray(data.sparklines.toolCalls));
+  assert.ok(Array.isArray(data.sparklines.discoveryHits));
+
+  const forbidden = [
+    revenueInternalApiKey, analyticsInternalApiKey, adminSessionSecret, apiKey,
+    hashAdminPassword(adminPassword).slice(0, 20),
+    "REVENUE_INTERNAL_API_KEY", "ANALYTICS_INTERNAL_API_KEY", "ADMIN_SESSION_SECRET", "ADMIN_PASSWORD_HASH",
+    "privateKey", "facilitatorSecret", "DEMO ACTIVITY"
+  ];
+  for (const secret of forbidden) assert.ok(!json.includes(secret), `command-center payload must never contain: ${secret}`);
+});
+
+test("dashboard UI: sidebar navigation, AI Workforce status, Active Agents, Live Agent Activity and System Health panels are present in the rendered page", async t => {
+  const { server, base } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const cookie = await loginAndGetSessionCookie(base);
+  const html = await (await fetch(base + "/internal/dashboard", { headers: { Cookie: cookie } })).text();
+  assert.ok(html.includes("AI Workforce Online"));
+  assert.ok(html.includes("Active Agents"));
+  assert.ok(html.includes("Live Agent Activity"));
+  assert.ok(html.includes("Live Analysis &amp; Calculation Preview"));
+  assert.ok(html.includes("System Health"));
+  assert.ok(html.includes("Agents &amp; Tools"));
 });
 
 // -------------------------------------------------------------------------------------------
