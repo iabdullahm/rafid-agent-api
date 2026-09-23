@@ -51,6 +51,10 @@ export const ESTIMATED_UPSTREAM_COST_USD: Partial<Record<CapabilityKey, { provid
     providerCostUSD: 0.005, llmCostUSD: 0,
     assumptions: "At most one public-web risk search (~$0.005, Tavily-class pricing) per uncached supplier name; registry lookup is Rafid's own database; website inspection and sanctions lists (UN Consolidated List, US CSL) are free public sources; evidence is cached (identity 7d, website 3d, sanctions 12h, public web 1d), so repeat screenings usually cost less. No LLM synthesis."
   },
+  company_reputation_check: {
+    providerCostUSD: 0.024, llmCostUSD: 0,
+    assumptions: "Uncached worst case: 3 web searches (2 news/adverse-media + 1 review-platform) at an estimated $0.008/search (Tavily pay-as-you-go class pricing, rounded up). GLEIF, RDAP, the company website, the UN list and the US CSL are free public sources; UK Companies House is free with a key. Evidence is cached per company identity (news 1d, reviews 3d, registry/domain 7d, sanctions 12h), so repeat checks cost less. OpenSanctions (optional, paid licence) is excluded from this estimate. No LLM synthesis."
+  },
   analyze_company_risk: {
     providerCostUSD: 0.015, llmCostUSD: 0,
     assumptions: "Up to 3 targeted web searches (adverse news, reputation, legal/regulatory) at an estimated $0.005/search; domain/website/sanctions checks use free public sources (RDAP, OFAC) with no per-call fee. No LLM synthesis — findings are presented as retrieved evidence, not generated prose."

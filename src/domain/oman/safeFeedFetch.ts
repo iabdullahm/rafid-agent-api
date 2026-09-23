@@ -22,6 +22,8 @@ export interface SafeFeedFetchResult {
   contentType: string | null;
   body: string;
   finalUrl: string;
+  /** Only ever true when the caller opted into truncateAtLimit. */
+  truncated?: boolean;
 }
 
 export interface SafeFeedFetchOptions extends FeedUrlValidationOptions {
@@ -30,6 +32,11 @@ export interface SafeFeedFetchOptions extends FeedUrlValidationOptions {
   maxRedirects?: number;
   headers?: Record<string, string>;
   fetchImpl?: typeof fetch;
+  /** When true, a body larger than maxResponseBytes is truncated at the limit (and `truncated`
+   *  set on the result) instead of throwing FeedFetchError("too_large"). Default false — every
+   *  existing caller keeps the strict behavior. Used by page inspection (company websites),
+   *  where the first N bytes of a large homepage are still valid evidence. */
+  truncateAtLimit?: boolean;
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -73,6 +80,10 @@ export async function safeFeedFetch(url: string, options: SafeFeedFetchOptions):
     }
 
     const contentType = response.headers.get("content-type");
+    if (options.truncateAtLimit) {
+      const { body, truncated } = await readBodyTruncating(response, options.maxResponseBytes);
+      return { status: response.status, contentType, body, finalUrl: currentUrl.toString(), truncated };
+    }
     const body = await readBodyWithLimit(response, options.maxResponseBytes);
     return { status: response.status, contentType, body, finalUrl: currentUrl.toString() };
   }
@@ -98,4 +109,29 @@ async function readBodyWithLimit(response: Response, maxBytes: number): Promise<
     reader.releaseLock?.();
   }
   return Buffer.concat(chunks.map(c => Buffer.from(c))).toString("utf8");
+}
+
+async function readBodyTruncating(response: Response, maxBytes: number): Promise<{ body: string; truncated: boolean }> {
+  const reader = response.body?.getReader();
+  if (!reader) return { body: "", truncated: false };
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  let truncated = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (received + value.byteLength > maxBytes) {
+        chunks.push(value.subarray(0, Math.max(0, maxBytes - received)));
+        truncated = true;
+        await reader.cancel().catch(() => {});
+        break;
+      }
+      received += value.byteLength;
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock?.();
+  }
+  return { body: Buffer.concat(chunks.map(c => Buffer.from(c))).toString("utf8"), truncated };
 }

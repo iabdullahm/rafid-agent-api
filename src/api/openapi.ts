@@ -43,6 +43,7 @@ for (const c of capabilities) {
       c.name === "analyze_oman_property" ? "Oman" :
       c.name === "research_company" || c.name === "find_companies" || c.name === "analyze_company_risk" ? "Intelligence" :
       c.name === "oman_supplier_check" ? "Procurement" :
+      c.name === "company_reputation_check" ? "Risk Intelligence" :
       "Property"
     ],
     summary: c.description,
@@ -220,6 +221,7 @@ return {
     { name: "Maintenance", description: "Annual maintenance reserve estimation." },
     { name: "Oman", description: "Oman/Muscat-specific property analysis using local rental/sale comparables, normalization, confidence scoring and provenance. Muscat governorate only; see GET /llms.txt for supported areas and data limitations." },
     { name: "Intelligence", description: "Rafid Agent Intelligence: company research, discovery and evidence-tiered risk signals from public web sources. Inert (no external calls) until an operator configures the relevant provider — see GET /llms.txt." },
+    { name: "Risk Intelligence", description: "Global, evidence-first company risk intelligence for AI agents: company_reputation_check investigates a company in any country (registry identity, sanctions-list name screening, adverse media with legal stage, customer reputation, online presence, stability, domain signals) and returns evidence-linked scores with a separate confidence score. Screening only — not a legal or compliance determination." },
     { name: "Procurement", description: "Procurement supplier screening for AI procurement agents: oman_supplier_check screens an Oman supplier (identity, activity, website/contact/address consistency, sanctions and public-risk indicators) before an RFQ. Screening only — not KYC/AML or vendor approval." },
     { name: "Agent", description: "Public discovery, pricing and tool-catalog endpoints for AI agents and agent marketplaces." },
     { name: "System", description: "Public discovery, health and documentation endpoints." },

@@ -213,6 +213,7 @@ REST base: `http://localhost:8787`.
 | POST | /api/v1/property/compare | X-API-Key |
 | POST | /api/v1/maintenance/estimate | X-API-Key |
 | POST | /api/v1/oman/property/analyze | X-API-Key |
+| POST | /api/v1/risk/company-reputation-check | X-API-Key (x402: /api/v1/x402/risk/company-reputation-check; L402: /api/v1/l402/risk/company-reputation-check) |
 | POST | /api/v1/intelligence/research-company | X-API-Key |
 | POST | /api/v1/intelligence/find-companies | X-API-Key |
 | POST | /api/v1/intelligence/analyze-company-risk | X-API-Key |
@@ -404,6 +405,52 @@ Checks, each assessed independently (`src/supplier-check/analysis/`): company id
 **Data sources and reuse:** identity resolves through the existing canonical Oman company registry (`getOmanCompanyDataProvider()` — same `OMAN_BUSINESS_DATA_MODE` provider, `rankCompanies`, `mergeCompanyRows` and provenance as `search_oman_company`). No company records are created. Website and sanctions checks reuse `RISK_LIVE_CHECKS_ENABLED`; public-web signals reuse `WEB_SEARCH_PROVIDER`. With nothing enabled, those checks report `not_checked` honestly.
 
 **Caching & idempotency:** each provider's evidence is cached independently in `rafid_supplier_evidence` (PostgreSQL when `SUPPLIER_EVIDENCE_DATABASE_URL`/`DATABASE_URL` is set — one `CREATE TABLE IF NOT EXISTS`, upsert on `(provider_id, evidence_key)`; in-memory otherwise). Default TTLs: identity 7 days, website 3 days, sanctions 12 hours, public web 1 day (override with `SUPPLIER_*_CACHE_TTL_MS`). Only successful evidence is cached (outages are retried), and the final risk result is never cached — it is recomputed from evidence on every call. This is an evidence cache, not a second company/source-evidence model: it is never merged into `oman_companies`.
+
+### Risk intelligence: global company reputation check (`company_reputation_check`, $0.40/call)
+
+`POST /api/v1/risk/company-reputation-check` (API key) · `POST /api/v1/x402/risk/company-reputation-check` (x402, $0.40) · `POST /api/v1/l402/risk/company-reputation-check` (L402, when enabled) · MCP tool `company_reputation_check`. Category `risk_intelligence`, idempotent. For an agent that must look into a company **in any country** before signing a contract, onboarding a vendor, sending money, partnering, investing or approving a marketplace seller. It is evidence-first: every signal cites evidence ids, every evidence item carries its source, authority tier, retrieval time and relevance. It never labels a company "safe", "legitimate", "fraudulent" or "sanctioned". It is **not** a legal, KYC/AML, credit or compliance determination and does not guarantee legitimacy.
+
+**Input:** `companyName` (required); strongly recommended `country` (ISO-2/ISO-3/English name); optional `website`, `domain`, `registrationNumber`, `lei` (checksum-validated), `legalName`, `city`, `industry`. Strict schema: unknown fields, unknown countries, invalid LEIs and a website/domain pair that disagree are rejected with `400 INVALID_INPUT` — which also means no x402 settlement and no L402 token burn.
+
+```bash
+curl -X POST http://localhost:8787/api/v1/risk/company-reputation-check \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"companyName":"Example Technologies Ltd","country":"United Kingdom","website":"https://example.com"}'
+```
+
+**Output (abridged):** `company`, `resolution` (status `resolved|probable|ambiguous|unresolved|registry_not_checked`, confidence, candidates), `reputationScore` 0-100, `confidenceScore` 0-100, `trustLevel` (`insufficient_evidence` / `significant_concerns` / `some_concerns` / `no_major_concerns_found` / `favorable_public_signals`), `scores` per dimension plus `scoreBreakdown` (weight, raw score, coverage) and `confidenceBreakdown`, `identity`, `sanctions` (possible vs high-confidence matches, lists checked/unavailable), `adverseMedia` (events with `category`, `legalStage`, `established`, coverage count, sources), `customerSentiment`, `onlinePresence`, `legalRiskSignals`, `businessStabilitySignals`, `cyberDomainSignals`, `transparencySignals`, `positiveSignals`, `redFlags`, `evidenceSummary`, `evidence[]`, `coverage.providers[]` (per-provider status incl. `not_configured` / `timeout` / `stale_cache`), `warnings[]` (`COMPANY_NOT_RESOLVED`, `AMBIGUOUS_COMPANY`, `INSUFFICIENT_EVIDENCE`, `PROVIDER_UNAVAILABLE`, `PROVIDER_TIMEOUT`, `RATE_LIMITED`, `DATA_STALE`, `PROVIDER_NOT_CONFIGURED`, `COUNTRY_NOT_PROVIDED`), `limitations`, `summary`, `methodology`. The registry's documented example (`/api/v1/capabilities`, OpenAPI) is the real pipeline run over an explicitly synthetic scenario (fictional company, `.example` publishers) — regenerate with `node --import tsx scripts/generateCompanyReputationExample.ts`.
+
+**Pipeline** (`src/company-reputation/`): input validation → normalization (`normalization.ts`: global legal forms, ISO countries, domains, URLs, registration numbers, LEI) → providers run concurrently, isolated, time-boxed (`providers/runner.ts`: per-provider timeout, one retry for free idempotent sources only, never for paid searches) with a cache-first hybrid lookup → evidence dedup and syndication grouping (`deduplication.ts`) → entity resolution (`companyResolver.ts`) → relevance filtering of third-party items → analyzers (`analyzers/*`: identity, sanctions, adverse media, customer sentiment, online presence, business stability, cyber/domain, transparency) produce signals → `scoring.ts` → `confidence.ts`. Providers only collect normalized evidence; analyzers never fetch; scoring only sees signals.
+
+**Scoring** (`config.ts`, version `crc-1.0.0`): weights identity 20%, legal/regulatory 20%, adverse media 15%, customer reputation 15%, online presence 10%, business stability 10%, cyber/domain 5%, transparency 5%. Per dimension: signal points = severity points (info 3, low 8, medium 20, high 40, critical 80) × strength (authority × relevance × bounded corroboration), saturating (`swing × (1 − e^(−points/40))`) so many weak items cannot add up linearly and one weak item moves a dimension only a few points. Each dimension is then shrunk toward a neutral prior of 50 by its evidence coverage: `score = 50 + coverage × (raw − 50)`. Missing data therefore reads as "unknown" (50) with low confidence, never as "good". Documented caps: a high-confidence sanctions match caps the score at 20; an established conviction/judgment for fraud, corruption, sanctions or criminal conduct from an official or major source caps it at 35.
+
+**Confidence (separate from reputation):** 30% entity-resolution confidence, 20% weighted dimension coverage, 15% independent sources (event groups, not articles), 10% source authority, 10% freshness (stale cache and old coverage count less), 10% evidence diversity, 5% jurisdiction-registry coverage; −3 per provider outage; capped at 40 when identity is ambiguous and 50 when it is unresolved. `78/91` and `78/34` mean very different things.
+
+**Safety properties (tested):** a similar sanctioned name is not a match (shared conservative matcher from `src/shared/sanctions/`, ≥0.88 similarity and ≥60% token overlap); an exact name without a corroborating country/registration identifier is only `possible`; one anonymous complaint cannot cause a major penalty; ten syndicated copies are one event; missing data and provider timeouts are never negative signals; allegations stay allegations (legal stage is taken only from explicit source wording); same-name companies in other jurisdictions (different country, different legal form in the text) are excluded, and with an ambiguous identity only identifier-backed items are attributed. External text is sanitized and instruction-like text is removed; nothing is sent to an LLM.
+
+**Providers:**
+
+| Provider | Category | Enabled by | Cost |
+|---|---|---|---|
+| GLEIF Global LEI Index (global, official) | registry | `RISK_LIVE_CHECKS_ENABLED=true` | free |
+| UK Companies House | registry (GB only) | `COMPANIES_HOUSE_API_KEY` | free key |
+| Rafid Oman company registry | registry (OM only) | `OMAN_BUSINESS_DATA_MODE=database/composite` (demo data never used) | own DB |
+| UN Security Council Consolidated List | sanctions | `RISK_LIVE_CHECKS_ENABLED=true` | free |
+| US Consolidated Screening List (incl. OFAC SDN) | sanctions | `RISK_LIVE_CHECKS_ENABLED=true` (+ optional `SANCTIONS_CSL_API_KEY`) | free |
+| EU Financial Sanctions Files | sanctions | `EU_SANCTIONS_LIST_URL` (tokenised URL issued by the EU) | free |
+| OpenSanctions (UN/EU/UK/US and national lists) | sanctions | `OPENSANCTIONS_API_KEY` | paid licence for commercial use |
+| News / adverse media (2 searches) | news | `WEB_SEARCH_PROVIDER=tavily` + `TAVILY_API_KEY` | ~$0.016 |
+| Review platforms / forums (1 search) | reviews | same as news | ~$0.008 |
+| Company website (1 page, SSRF-safe) | website | `RISK_LIVE_CHECKS_ENABLED=true` | free |
+| RDAP domain registration | domain | `RISK_LIVE_CHECKS_ENABLED=true` | free |
+
+Any provider can be switched off with `COMPANY_REPUTATION_DISABLED_PROVIDERS` (ids or categories). With nothing enabled the call still returns a valid, clearly limited result (`trustLevel: insufficient_evidence`).
+
+**Cache:** provider evidence is cached per `(provider, normalized company identity)` in `rafid_company_evidence_cache` (PostgreSQL via `COMPANY_REPUTATION_DATABASE_URL` or `DATABASE_URL`, one `CREATE TABLE IF NOT EXISTS`; in-memory otherwise). TTLs: registry 7d, sanctions 12h, news 1d, reviews 3d, website 3d, domain 7d (`COMPANY_REPUTATION_*_TTL_MS`). Cached evidence keeps its original retrieval time (`fetchedAt`/`observedAt`, `fromCache: true`). If a refresh fails, expired evidence up to `COMPANY_REPUTATION_MAX_STALE_MS` (default 14 days) is served flagged `stale_cache` + `DATA_STALE` and lowers confidence. Outages are never cached, and the final score is never cached.
+
+**Unit economics:** worst case uncached ~3 web searches (≈ $0.024 at Tavily-class pricing); everything else is free public data. Estimated gross margin at $0.40 ≈ $0.37/call before hosting and facilitator fees. OpenSanctions, if enabled, adds its own per-call licence cost. Per-provider calls, cache hits, stale serves, outages and latency are recorded in-process (`src/company-reputation/telemetry.ts`) and returned by the internal `GET /api/v1/internal/revenue/unit-economics` route (`companyReputationTelemetry`).
+
+**Future product ladder:** `oman_supplier_check` ($0.50, Oman procurement) and `company_reputation_check` ($0.40, global reputation) are independent capabilities. They share only generic sanctions-list code (`src/shared/sanctions/`). A future `company_due_diligence` (~$1.50+: ownership/UBO, financials, litigation, PEP, corporate structure) can reuse the normalized evidence model, the evidence cache table and the provider interface without changing either.
 
 ### Production Oman market data (database mode, import, caching)
 

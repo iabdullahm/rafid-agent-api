@@ -1,4 +1,5 @@
 import express, { type Router } from "express";
+import { getReputationTelemetry } from "../company-reputation/telemetry.js";
 import { requireInternalAuth } from "../middleware/partnerAuth.js";
 import { ApiError } from "../utils/errors.js";
 import type { RevenueLedger } from "../revenue/types.js";
@@ -124,7 +125,7 @@ export function createRevenueRoutes(options: RevenueRoutesOptions): Router {
   // facilitator/network fees.
   router.get("/api/v1/internal/revenue/unit-economics", internalAuth, async (_req, res, next) => {
     try {
-      send(res, { capabilities: computeAllUnitEconomics(prices) });
+      send(res, { capabilities: computeAllUnitEconomics(prices), companyReputationTelemetry: getReputationTelemetry() });
     } catch (error) { next(error); }
   });
 

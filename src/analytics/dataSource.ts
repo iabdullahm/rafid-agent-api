@@ -94,6 +94,15 @@ export function classifyDataSource(toolName: string, data: unknown): DataSource 
     return "not_configured";
   }
 
+  // company_reputation_check: live when any provider actually returned (or served cached) evidence.
+  if (toolName === "company_reputation_check") {
+    const coverage = record.coverage;
+    if (!coverage || typeof coverage !== "object") return "unknown";
+    const providers = (coverage as Record<string, unknown>).providers;
+    if (!Array.isArray(providers)) return "unknown";
+    return providers.some(p => p && typeof p === "object" && ["ok", "stale_cache"].includes(String((p as Record<string, unknown>).status))) ? "live_provider" : "not_configured";
+  }
+
   return null;
 }
 

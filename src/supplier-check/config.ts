@@ -35,38 +35,9 @@ export function getSupplierWebsiteChecksEnabled(env: NodeJS.ProcessEnv = process
   return getRiskLiveChecksEnabled(env);
 }
 
-export type SanctionsProviderId = "un" | "csl";
-const SANCTIONS_IDS: readonly SanctionsProviderId[] = ["un", "csl"];
-
-/** Which sanctions list providers to query. Default: none unless RISK_LIVE_CHECKS_ENABLED=true,
- *  then both the UN Security Council Consolidated List and the US Consolidated Screening List
- *  (which includes OFAC SDN). Override explicitly with SUPPLIER_SANCTIONS_PROVIDERS=un,csl or
- *  "none". Unknown ids fail loudly, like every other mode switch in this codebase. */
-export function getSanctionsProviderIds(env: NodeJS.ProcessEnv = process.env): SanctionsProviderId[] {
-  const raw = env.SUPPLIER_SANCTIONS_PROVIDERS?.trim().toLowerCase();
-  if (!raw) return getRiskLiveChecksEnabled(env) ? ["un", "csl"] : [];
-  if (raw === "none") return [];
-  const ids = raw.split(",").map(s => s.trim()).filter(Boolean);
-  for (const id of ids) {
-    if (!SANCTIONS_IDS.includes(id as SanctionsProviderId)) throw new Error(`SUPPLIER_SANCTIONS_PROVIDERS entries must be one of: ${SANCTIONS_IDS.join(", ")}, or "none"`);
-  }
-  return [...new Set(ids)] as SanctionsProviderId[];
-}
-
-/** UN Security Council Consolidated List (public XML, no key). */
-export function getUnSanctionsListUrl(env: NodeJS.ProcessEnv = process.env): string {
-  return env.SUPPLIER_UN_SANCTIONS_URL?.trim() || "https://scsanctions.un.org/resources/xml/en/consolidated.xml";
-}
-
-/** US Consolidated Screening List search API (trade.gov; includes OFAC SDN). The ITA developer
- *  portal issues a free subscription key; when SANCTIONS_CSL_API_KEY is set it is sent as the
- *  `subscription-key` header. Endpoint is overridable because ITA has moved it before. */
-export function getCslApiUrl(env: NodeJS.ProcessEnv = process.env): string {
-  return env.SANCTIONS_CSL_API_URL?.trim() || "https://data.trade.gov/consolidated_screening_list/v1/search";
-}
-export function getCslApiKey(env: NodeJS.ProcessEnv = process.env): string | null {
-  return env.SANCTIONS_CSL_API_KEY?.trim() || null;
-}
+// Sanctions-list configuration moved to src/shared/sanctions/config.ts (shared with
+// company_reputation_check); re-exported unchanged for existing callers.
+export { getSanctionsProviderIds, getUnSanctionsListUrl, getCslApiUrl, getCslApiKey, type SanctionsProviderId } from "../shared/sanctions/config.js";
 
 /** Evidence cache backend: "postgres" when a database URL is available (SUPPLIER_EVIDENCE_DATABASE_URL,
  *  falling back to DATABASE_URL — same fallback convention as ANALYTICS_DATABASE_URL), else

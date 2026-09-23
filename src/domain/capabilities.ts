@@ -14,6 +14,10 @@ import { omanSupplierCheckInput } from "../schemas/supplierCheckInputs.js";
 import { omanSupplierCheckOutput } from "../schemas/supplierCheckOutputs.js";
 import { omanSupplierCheck } from "../services/omanSupplierCheck.js";
 import { OMAN_SUPPLIER_CHECK_EXAMPLE_OUTPUT } from "./examples/omanSupplierCheckExample.js";
+import { companyReputationCheckInput } from "../schemas/companyReputationInputs.js";
+import { companyReputationCheckOutput } from "../schemas/companyReputationOutputs.js";
+import { companyReputationCheck } from "../services/companyReputationCheck.js";
+import { COMPANY_REPUTATION_CHECK_EXAMPLE_OUTPUT } from "./examples/companyReputationCheckExample.js";
 import type { z } from "zod";
 
 /** The one currency every capability is priced in today. A single constant, not a literal
@@ -104,6 +108,9 @@ export interface AgentCapability {
    *  partially recovered (limitations and sampleQueries verbatim; priorityContexts and the full
    *  evidenceTypes list were not recoverable from available context and are marked below).
    *  Populate/complete this field from your own source of truth before relying on it. */
+  /** Optional machine-readable category (e.g. "risk_intelligence"), surfaced additively on
+   *  GET /api/v1/capabilities and /agent.json. */
+  category?: string;
   agentGuidance?: {
     priorityContexts: readonly string[];
     evidenceTypes: readonly { type: string; description: string }[];
@@ -886,6 +893,67 @@ export const capabilities = [
         { query: "Is ABC Trading LLC in Oman a suitable supplier for HVAC maintenance?", guidance: "Call oman_supplier_check with companyName \"ABC Trading LLC\" and requiredProductOrService \"HVAC maintenance\"; answer from checks.businessActivity and screeningResult, citing sources." },
         { query: "Screen this supplier for identity inconsistencies and public risk before procurement contacts them.", guidance: "Call oman_supplier_check including the email, phone and website from the supplier's quotation; report checks.contactConsistency, checks.companyIdentity and checks.publicRisk with their explanations." },
         { query: "Check whether this Oman supplier appears legitimate and whether its business activity matches CCTV installation.", guidance: "Call oman_supplier_check with requiredProductOrService \"CCTV installation\"; report identityConfirmed and the identity level (never 'verified'), and checks.businessActivity.status." }
+      ]
+    }
+  } satisfies AgentCapability,
+  // ---------------------------------------------------------------------------------------------
+  // Risk intelligence: company_reputation_check — GLOBAL, evidence-first company reputation and
+  // commercial-risk intelligence (src/company-reputation/). Independent of oman_supplier_check
+  // (which is Oman/procurement-specific); the two share only generic sanctions-list matching
+  // (src/shared/sanctions/). Every networked provider is off by default, so execute(example) in
+  // tests is network-free. NOTE: unlike most capabilities, exampleOutput is NOT execute(example)
+  // in the default configuration — it is the real pipeline run over an explicitly synthetic
+  // evidence scenario (see scripts/generateCompanyReputationExample.ts), so agents can see a
+  // realistic, fully-populated response. tests/company-reputation.test.ts pins it to the pipeline.
+  // ---------------------------------------------------------------------------------------------
+  {
+    name: "company_reputation_check" as const, path: "/risk/company-reputation-check",
+    description: "Investigate the public reputation and commercial risk signals of a company in any country — identity consistency against official registries, sanctions-list name screening, adverse media (with legal stage: allegation vs. outcome), customer reputation, online presence, business stability and domain signals — returning evidence-linked scores with a separate confidence score.",
+    whenToUse: "Use this capability when an AI agent needs to assess a company's public reputation, credibility, adverse-media exposure, sanctions signals, customer reputation, online presence, identity consistency and other publicly observable commercial risk indicators before entering a business relationship.",
+    useCases: [
+      "check a company before signing a contract", "vendor / SaaS vendor onboarding", "check a counterparty before sending payment",
+      "partner or investment pre-screening", "marketplace seller approval", "contractor or supplier selection (any country)",
+      "negative news / adverse media check", "sanctions name screening of a company"
+    ],
+    category: "risk_intelligence",
+    input: companyReputationCheckInput, output: companyReputationCheckOutput,
+    example: { companyName: "Example Technologies Ltd", country: "United Kingdom", website: "https://example.com", registrationNumber: "01234567" },
+    exampleOutput: COMPANY_REPUTATION_CHECK_EXAMPLE_OUTPUT,
+    execute: (input: unknown) => companyReputationCheck(input),
+    price: 0.40, currency: CURRENCY, paymentProtocol: "x402",
+    // Idempotent: no state a caller can observe changes; provider evidence is upserted into an
+    // internal cache keyed by (provider, normalized identity) and the result is recomputed from it.
+    idempotent: true, sideEffects: false,
+    limitations: [
+      "Evidence-based public-source screening — not a legal, KYC/AML, credit or compliance determination, and never a guarantee that a company is legitimate, safe or fraudulent.",
+      "reputationScore and confidenceScore are separate: a mid-range score with low confidence means 'little evidence', not 'average reputation'. Missing data lowers confidence; it never raises the score.",
+      "Sanctions screening is automated name matching; 'possible' matches are not listings and 'high' matches still require verification at the source list.",
+      "Adverse media is reported at the legal stage the source states (allegation, investigation, lawsuit, charge, settlement, judgment, conviction); allegations are not findings.",
+      "Coverage depends on the deployment's enabled providers (see coverage.providers in every response); companies with a small public footprint get low-confidence results.",
+      "Company-level intelligence only — not designed for, and must not be used to, profile private individuals."
+    ],
+    agentGuidance: {
+      priorityContexts: ["pre-contract counterparty check", "vendor onboarding", "pre-payment check", "partner / investment screening", "marketplace seller approval", "global company due-diligence screening (first pass)"],
+      evidenceTypes: [
+        { type: "registry", description: "Official company / LEI registry records (GLEIF, UK Companies House, Rafid's Oman registry) — tier 1; used for identity resolution and business status." },
+        { type: "sanctions", description: "Entries returned by public sanctions lists (UN, US CSL incl. OFAC SDN, optionally EU / OpenSanctions) — matched conservatively into possible vs high-confidence matches." },
+        { type: "news", description: "News and web coverage, deduplicated into events (syndicated copies = one event) and classified by category and legal stage." },
+        { type: "regulatory", description: "Items published on government/regulator domains — tier 1." },
+        { type: "review", description: "Review-platform pages; aggregate ratings are used, individual reviews are weak unverified signals." },
+        { type: "forum", description: "Forum/social posts — lowest authority; never treated as facts." },
+        { type: "website", description: "The company's own website (self-published): availability, HTTPS, contact/legal pages, registration details." },
+        { type: "domain", description: "RDAP domain registration data (age, status)." }
+      ],
+      limitations: [
+        "Always relay reputationScore together with confidenceScore, trustLevel and the top redFlags/positiveSignals with their evidence ids — never reduce the result to 'good' or 'bad'.",
+        "Supply country (and registrationNumber, LEI or website when known): without them same-name companies cannot be excluded and confidence is capped.",
+        "Treat sanctions 'possible' matches and allegation-stage adverse media as items requiring human verification, not as facts about the company."
+      ],
+      sampleQueries: [
+        { query: "Check the reputation of this company before we sign a contract.", guidance: "Call company_reputation_check with companyName, country and every identifier you have (website, registrationNumber, lei). Report trustLevel, reputationScore with confidenceScore, redFlags and the summary." },
+        { query: "Investigate this vendor before sending payment.", guidance: "Call company_reputation_check; if sanctions.status is possible_match or high_confidence_match, or identity.status is conflicting/ambiguous, recommend verification before payment." },
+        { query: "Check this company for negative news.", guidance: "Call company_reputation_check and report adverseMedia.items with each item's legalStage and stageDescription — distinguish allegations from established outcomes." },
+        { query: "Is Example Technologies Ltd in the UK credible?", guidance: "Call company_reputation_check with companyName \"Example Technologies Ltd\" and country \"GB\"; answer from resolution, identity, businessStabilitySignals and the evidence summary, stating the confidence." }
       ]
     }
   } satisfies AgentCapability

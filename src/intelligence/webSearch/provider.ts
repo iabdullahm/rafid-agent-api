@@ -31,6 +31,15 @@ export interface WebSearchProvider {
    *  prefer a provider that logs internally (see TavilyWebSearchProvider) rather than relying on
    *  the return value alone — the public capability contract never blocks on that distinction. */
   search(query: string, options: WebSearchQueryOptions): Promise<readonly WebSearchResult[]>;
+  /** Optional, additive: the same search, but reporting whether the provider actually answered —
+   *  so a caller can tell "no results" apart from "provider down/timed out/rate limited" (a
+   *  provider outage must never be read as "no adverse news found"). */
+  searchWithStatus?(query: string, options: WebSearchQueryOptions): Promise<WebSearchOutcome>;
+}
+
+export interface WebSearchOutcome {
+  status: "ok" | "unavailable" | "timeout" | "rate_limited";
+  results: readonly WebSearchResult[];
 }
 
 /** The honest default and what the generic capability tests exercise: no live provider was
@@ -75,6 +84,10 @@ export class TavilyWebSearchProvider implements WebSearchProvider {
   }
 
   async search(query: string, options: WebSearchQueryOptions): Promise<readonly WebSearchResult[]> {
+    return (await this.searchWithStatus(query, options)).results;
+  }
+
+  async searchWithStatus(query: string, options: WebSearchQueryOptions): Promise<WebSearchOutcome> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     try {
@@ -92,11 +105,11 @@ export class TavilyWebSearchProvider implements WebSearchProvider {
           ...(options.freshness && options.freshness !== "any" ? { time_range: freshnessToTavilyRange(options.freshness) } : {})
         })
       });
-      if (!response.ok) return [];
+      if (!response.ok) return { status: response.status === 429 ? "rate_limited" : "unavailable", results: [] };
       const body = (await response.json()) as { results?: unknown };
       recordProviderCost({ provider: this.name, estimatedCostUSD: this.estimatedCostPerSearchUSD, requestId: this.requestId, capability: this.capability });
-      if (!Array.isArray(body.results)) return [];
-      return body.results
+      if (!Array.isArray(body.results)) return { status: "ok", results: [] };
+      const results = body.results
         .filter((r): r is Record<string, unknown> => Boolean(r) && typeof r === "object")
         .map(r => ({
           title: typeof r.title === "string" ? r.title : "Untitled",
@@ -106,11 +119,12 @@ export class TavilyWebSearchProvider implements WebSearchProvider {
           publisher: publisherFromUrl(typeof r.url === "string" ? r.url : null)
         }))
         .filter(r => r.url.length > 0);
-    } catch {
+      return { status: "ok", results };
+    } catch (error) {
       // Network failure, timeout, malformed response — never surfaces as a 500 to the capability
-      // caller; the capability treats this exactly like "no results" and reports it in
-      // `limitations`, honestly.
-      return [];
+      // caller; search() treats this exactly like "no results", searchWithStatus() reports it.
+      const aborted = error instanceof Error && error.name === "AbortError";
+      return { status: aborted ? "timeout" : "unavailable", results: [] };
     } finally {
       clearTimeout(timer);
     }

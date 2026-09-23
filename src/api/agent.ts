@@ -134,6 +134,8 @@ export function buildCapabilitiesRegistry(config: PaymentDiscoveryConfig) {
   return capabilities.map(c => ({
     name: c.name,
     description: c.description,
+    // Optional capability category (e.g. "risk_intelligence"); null when a capability defines none.
+    category: (c as { category?: string }).category ?? null,
     whenToUse: c.whenToUse,
     useCases: c.useCases,
     price: c.price,
