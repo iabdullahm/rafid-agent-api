@@ -20,6 +20,7 @@ import { assessRisks } from "./extract/risk.js";
 import { detectActiveContentText, detectEmbeddedInstructions } from "./extract/injection.js";
 import { answerRequests, matchRequest } from "./requested.js";
 import { llmAssist, type LlmQuestion } from "./llm.js";
+import type { CapabilityPreviewBody } from "../preview/types.js";
 
 /**
  * document_facts_extract — orchestration.
@@ -103,6 +104,66 @@ export async function runDocumentFactsExtract(rawInput: unknown, deps: DocumentF
     if (e instanceof ApiError) throw e;
     throw extractionFailed();
   }
+}
+
+/** Free Preview (src/preview/) for document_facts_extract. Reuses the real `load → normalize →
+ *  classify` prefix of the pipeline above (documentUrl fetch is SSRF-protected and size/time-
+ *  bounded by loader.ts's existing DOCUMENT_FACTS_LIMITS, exactly as it is for a paid call) but
+ *  stops there — it never runs labeled-field/date/amount/percentage/duration/entity/clause
+ *  extraction, requested-fact answering, the optional LLM assist, or risk-flag assessment, all of
+ *  which stay exclusively in the paid result. This is the one preview in this codebase that
+ *  cannot avoid its own real network fetch when documentUrl is used (a document's content is only
+ *  knowable by reading it) — see the Free Preview implementation report's "remaining limitations"
+ *  for why that is disclosed rather than hidden. */
+export async function previewDocumentFactsExtract(rawInput: unknown, deps: DocumentFactsDependencies = {}): Promise<CapabilityPreviewBody> {
+  const input: DocumentFactsExtractInput = documentFactsExtractInput.parse(rawInput);
+  const hasUrl = input.documentUrl !== undefined && input.documentUrl.trim() !== "";
+  const hasText = input.text !== undefined;
+  if (hasUrl && hasText) throw conflictingSources();
+  if (!hasUrl && !hasText) throw missingDocument();
+  if (hasText && !input.text!.trim()) throw emptyDocument();
+  const budget = deps.totalBudgetMs ?? L.totalBudgetMs;
+
+  let loaded: LoadedDocument;
+  try {
+    loaded = hasUrl
+      ? await withTimeout(loadFromUrl(input.documentUrl!, deps), budget, () => documentTimeout("download"))
+      : loadFromText(input.text!);
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
+    throw unreadableDocument("the document could not be parsed.");
+  }
+
+  const norm = (t: string) => normalizeDocumentText(t).text;
+  const doc = loaded.pages ? new DocumentModel(loaded.pages.map(norm)) : new DocumentModel(null, norm(loaded.text));
+  if (doc.text.length > L.maxTextChars) throw documentTooLarge("characters", doc.text.length);
+  const meaningful = doc.text.replace(/\s+/g, "").length;
+  if (meaningful < L.minMeaningfulCharsPerPage) {
+    throw loaded.source.kind === "text" ? emptyDocument() : unreadableDocument("no extractable text was found in the document.");
+  }
+
+  const requestedType = input.documentType && input.documentType !== "auto" ? input.documentType as DocumentType : null;
+  const detected = classifyDocument(doc);
+  const type: DocumentType = requestedType ?? detected.type;
+  const documentTypeConfidence = requestedType ? 1 : detected.confidence;
+  const wordCount = (doc.text.match(/\p{L}[\p{L}\p{N}'’-]*/gu) ?? []).length;
+  const pageCount = loaded.pageCount ?? doc.pageCount;
+  // Real, array-valued output-schema top-level fields (schemas/documentFactsOutputs.ts) the paid
+  // result populates — a static list, independent of this document's actual content.
+  const availableSections = ["facts", "entities", "dates", "amounts", "percentages", "obligations", "requirements", "deadlines", "riskFlags"];
+
+  return {
+    capability: "document_facts_extract",
+    status: "available",
+    inputRecognized: true,
+    preview: {
+      entity: loaded.source.url ?? "supplied text", entityType: "document",
+      coverageScore: Math.round(documentTypeConfidence * 100) / 100,
+      dataCoverage: documentTypeConfidence >= 0.66 ? "high" : documentTypeConfidence >= 0.33 ? "medium" : "low",
+      availableSections,
+      signals: { documentType: type, pageCount: pageCount ?? 0, characterCount: doc.text.length, wordCount, format: loaded.format }
+    }
+  };
 }
 
 async function extract(input: DocumentFactsExtractInput, loaded: LoadedDocument, deps: DocumentFactsDependencies, remainingMs: number): Promise<DocumentFactsExtractOutput> {

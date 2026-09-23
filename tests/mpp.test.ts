@@ -857,7 +857,10 @@ test("MPP over MCP (MPP_MCP_ENABLED): mppx McpClient pays a tools/call on /mcp/m
   };
   // Discovery is delegated verbatim to the standard MCP server.
   const list = await rpc("/mcp/mpp", "tools/list", {});
-  assert.equal(list.result.tools.length, capabilities.length);
+  // Free Preview (src/preview/) adds one extra generic "preview_capability" tool to every MCP
+  // transport (src/mcp/server.ts), including this MPP-over-MCP one — discovery here is
+  // delegated verbatim to the standard MCP server, so the count grows by exactly one.
+  assert.equal(list.result.tools.length, capabilities.length + 1);
   // Unpaid tools/call → JSON-RPC -32042 with real MPP challenges.
   const unpaid = await rpc("/mcp/mpp", "tools/call", { name: "analyze_property", arguments: analyzeProperty.example });
   assert.equal(unpaid.error.code, -32042);

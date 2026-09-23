@@ -9,6 +9,7 @@ import { buildX402Status } from "../billing/x402.js";
 import { l402BasePath } from "../billing/l402/gate.js";
 import { buildMcpStatus, mcpStatusBasePath } from "../mcp/remote.js";
 import { buildMppOpenapiPaths } from "../billing/mpp/openapi.js";
+import { previewBasePath } from "./previewRoutes.js";
 import type { MppConfig } from "../billing/mpp/config.js";
 const json = (schema: unknown, example?: unknown, summary = "Example") => ({ "application/json": {
   schema, ...(example === undefined ? {} : { examples: { default: { summary, value: example } } })
@@ -129,6 +130,60 @@ if (config.l402Enabled) {
       }
     } };
   }
+}
+// Free Preview (src/preview/): one generic, unauthenticated, FREE route for every capability
+// that defines a `preview`. No payment required — deliberately no security scheme, no 402
+// response, and never listed alongside a capability's paid x402/L402/MPP routes above.
+{
+  const previewSuccessSchema = success({
+    type: "object", required: ["capability", "status", "inputRecognized", "preview", "fullResult"], properties: {
+      capability: { type: "string" },
+      status: { type: "string", enum: ["available", "limited", "unavailable", "invalid_input"], description: "\"available\": useful data/analysis coverage was found. \"limited\": some coverage, but thin. \"unavailable\": this capability defines no preview — call GET /api/v1/capabilities first to check `preview.available`. \"invalid_input\" is reserved for a preview implementation that reports invalid input directly rather than throwing (most report a plain 400 instead — see the 400 response)." },
+      inputRecognized: { type: "boolean", description: "Whether the input was recognized as a valid request for this capability, independent of whether data/analysis coverage was found for it." },
+      preview: { type: "object", description: "Evidence that useful data/analysis is available for this input — proof of \"I have information for this request,\" never the paid analysis itself. Every field is optional; only the fields a given capability's preview computes are present.", properties: {
+        entity: { type: "string" }, entityType: { type: "string" }, sourcesFound: { type: "integer" }, freshestSourceDate: { type: "string" },
+        coverageScore: { type: "number", minimum: 0, maximum: 1 }, dataCoverage: { type: "string", enum: ["low", "medium", "high"] },
+        availableSections: { type: "array", items: { type: "string" }, description: "Which top-level sections the PAID result would populate for this input — the section names only, never their contents." },
+        signals: { type: "object", description: "Small, capability-specific objective signals (e.g. configuredSourceCategories, registryCandidatesFound) — counts and booleans, never scored findings." }
+      } },
+      fullResult: { type: "object", required: ["capability", "price"], properties: {
+        capability: { type: "string" },
+        price: { type: "object", required: ["amount", "currency"], properties: { amount: { type: "string" }, currency: { type: "string" } }, description: "The PAID capability's price — read from the exact same capability-registry entry the paid route bills from, so it can never drift from GET /api/v1/capabilities or the x402/L402/MPP price." },
+        paymentMethods: { type: "array", items: { type: "string" } },
+        endpoint: { type: "string", description: "Where to call the paid capability once the preview looks worthwhile." }
+      } }
+    }
+  });
+  const previewExamples = {
+    available: { summary: "status: available (useful coverage found)", value: { success: true, data: {
+      capability: "company_reputation_check", status: "available", inputRecognized: true,
+      preview: { entity: "Example Technologies Ltd", entityType: "company", coverageScore: 0.86, dataCoverage: "high",
+        availableSections: ["identity", "sanctions", "adverseMedia", "customerSentiment", "onlinePresence", "legalRiskSignals", "businessStabilitySignals", "cyberDomainSignals", "transparencySignals"],
+        signals: { configuredSourceCategories: 6, totalSourceCategories: 7 } },
+      fullResult: { capability: "company_reputation_check", price: { amount: "0.40", currency: "USD" }, endpoint: "/api/v1/risk/company-reputation-check" }
+    }, meta: { requestId: "example-request" } } },
+    unavailable: { summary: "status: unavailable (capability defines no preview)", value: { success: true, data: {
+      capability: "analyze_company_risk", status: "unavailable", inputRecognized: false, preview: {},
+      fullResult: { capability: "analyze_company_risk", price: { amount: "0.35", currency: "USD" }, endpoint: "/api/v1/intelligence/analyze-company-risk" }
+    }, meta: { requestId: "example-request" } } }
+  };
+  paths[previewBasePath + "/{capability}"] = { post: {
+    operationId: "preview_capability",
+    tags: ["Preview"],
+    summary: "Free preview: check data availability before paying",
+    description: "FREE — no payment, X-PAYMENT header, X-API-Key or account required. Checks whether a paid capability has useful data/analysis available for the given input, without revealing the paid analysis itself: proof of \"I have information for this request,\" never \"here is the information.\" This route never runs the paid capability's `execute()` and never triggers x402/L402/MPP payment, blockchain settlement, invoice creation or paid usage consumption. Not every capability supports preview — check `preview.available` on GET /api/v1/capabilities, or call this route and read `status: \"unavailable\"` back. Recommended agent flow: discover -> preview -> evaluate -> pay -> execute.",
+    security: [],
+    parameters: [{ name: "capability", in: "path", required: true, schema: { type: "string", enum: capabilities.map(c => c.name) }, description: "A capability name from GET /api/v1/capabilities, e.g. \"research_company\"." }],
+    requestBody: { required: false, description: "The same input the paid capability accepts (unknown fields rejected). Optional: a capability whose preview needs no fields may be called with an empty body.", content: json({ type: "object" }, { companyName: "Example Technologies Ltd", country: "United Kingdom" }, "preview request (company_reputation_check example)") },
+    responses: {
+      "200": { description: "Preview result (see the `status` field for what it means). Always 200, whatever the capability's own coverage — an empty/thin result is `status: \"limited\"`, not an error.", content: { "application/json": { schema: previewSuccessSchema, examples: previewExamples } } },
+      "400": errors["400"],
+      "404": { description: "No such capability.", content: json(errorSchema, { success: false, error: { code: "CAPABILITY_NOT_FOUND", message: "No such capability \"not_a_real_tool\". See GET /api/v1/capabilities for the full list of tools." }, meta: { requestId: "example-request" } }) },
+      "415": errors["415"],
+      "429": errors["429"]
+    }
+  } };
+  paths["/v1/preview/{capability}"] = { post: { ...(paths[previewBasePath + "/{capability}"] as { post: object }).post, operationId: "preview_capability_legacy", deprecated: true } };
 }
 for (const path of ["/api/v1/health", "/health"]) {
   paths[path] = { get: { operationId: path === "/health" ? "health_legacy" : "health", tags: ["System"], summary: "Process liveness", description: "Public liveness endpoint. No API key is required.", security: [],
@@ -262,6 +317,7 @@ return {
     { name: "Finance", description: "invoice_anomaly_check ($0.25): deterministic pre-payment invoice anomaly detection for accounts-payable agents in any country — arithmetic (quantity × unit price, subtotal, tax, total, decimal-safe with rounding tolerance), duplicate and near-duplicate invoices, supplier-history deviations (amount, currency, payment terms, invoice-number format, frequency), changed or unknown bank accounts (masked), purchase-order / contract / approval-limit issues, split-invoice patterns, date anomalies and repeated line items. Returns a transparent 0–100 risk score, risk level, advisory decision (continue / review / hold) and evidence-backed anomalies. Risk indicators only — not a fraud determination." },
     { name: "Document Intelligence", description: "document_facts_extract ($0.25): converts business documents from any country (contracts, invoices, purchase orders, quotations, tenders/RFPs, leases, policies, financial reports, legal documents, CVs, company profiles) into structured, evidence-backed facts — each with a 0–1 extraction confidence and source evidence (excerpt, offsets, section, page when real). Accepts an https documentUrl (PDF with a text layer, DOCX, HTML, text; max 25 pages) or extracted text. Document content is untrusted data: embedded instructions are never followed. Unusable documents return structured errors and are not charged." },
     { name: "Procurement", description: "Procurement supplier screening for AI procurement agents: oman_supplier_check screens an Oman supplier (identity, activity, website/contact/address consistency, sanctions and public-risk indicators) before an RFQ. Screening only — not KYC/AML or vendor approval." },
+    { name: "Preview", description: "Free Preview: POST " + previewBasePath + "/{capability} checks whether a paid capability has useful data/analysis available for a given input, at no cost and with no account — evidence that the paid call is worthwhile, never the paid analysis itself. Not every capability supports it; see each tool's `preview` field on GET /api/v1/capabilities." },
     { name: "Agent", description: "Public discovery, pricing and tool-catalog endpoints for AI agents and agent marketplaces." },
     { name: "System", description: "Public discovery, health and documentation endpoints." },
     { name: "x402", description: "Pay-per-call protocol information, always available; payment-gated endpoints are settled on-chain via the x402 protocol and require no account or API key." },

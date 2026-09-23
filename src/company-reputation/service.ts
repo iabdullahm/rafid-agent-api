@@ -30,6 +30,7 @@ import { scoreDimensions } from "./scoring.js";
 import { TIER_LABELS } from "./sourceQuality.js";
 import { recordReputationRun } from "./telemetry.js";
 import { DIMENSIONS, type NormalizedEvidence, type ProviderCategory, type ProviderRun, type ReputationWarning, type Signal, type SourceTier } from "./types.js";
+import type { CapabilityPreviewBody } from "../preview/types.js";
 
 /**
  * company_reputation_check orchestration:
@@ -86,6 +87,41 @@ export function getDefaultReputationDependencies(): ReputationDependencies {
   return defaultDeps;
 }
 
+/** Free Preview (src/preview/) for company_reputation_check. Deliberately does NOT run
+ *  `runProviders()`/`resolveIdentity()` (the real, potentially-networked evidence-gathering
+ *  step) — it calls each configured provider's own `applicability(query)` (providers/types.ts),
+ *  a synchronous, side-effect-free, zero-network method every ReputationProvider already
+ *  implements to decide whether IT would even attempt a fetch for this query (env/API-key
+ *  configured, category applicable). This reports how much of the analysis this deployment can
+ *  actually perform — never a reputation score, a trust level, a sanctions result, an adverse-
+ *  media finding, or any other paid finding, all of which require the real provider run this
+ *  preview intentionally skips. */
+export async function previewCompanyReputationCheck(rawInput: unknown, deps: ReputationDependencies = getDefaultReputationDependencies()): Promise<CapabilityPreviewBody> {
+  const input = companyReputationCheckInput.parse(rawInput);
+  const query = buildQuery(input);
+  const configuredProviders = deps.providers.filter(p =>
+    !deps.disabled.has(p.id.toLowerCase()) && !deps.disabled.has(p.category) && p.applicability(query).status === "ready"
+  );
+  const configuredCount = configuredProviders.length;
+  const totalCount = deps.providers.length;
+  const coverageScore = totalCount > 0 ? Math.round((configuredCount / totalCount) * 100) / 100 : 0;
+  // Real output-schema module-level keys (schemas/companyReputationOutputs.ts) the paid result
+  // populates — a static list, independent of this call's input.
+  const availableSections = ["identity", "sanctions", "adverseMedia", "customerSentiment", "onlinePresence", "legalRiskSignals", "businessStabilitySignals", "cyberDomainSignals", "transparencySignals"];
+
+  return {
+    capability: "company_reputation_check",
+    status: configuredCount > 0 ? "available" : "limited",
+    inputRecognized: true,
+    preview: {
+      entity: input.companyName, entityType: "company",
+      coverageScore, dataCoverage: coverageScore >= 0.66 ? "high" : coverageScore >= 0.33 ? "medium" : "low",
+      availableSections,
+      signals: { configuredSourceCategories: configuredCount, totalSourceCategories: totalCount }
+    }
+  };
+}
+
 const BASE_LIMITATIONS = [
   "Evidence-based public-source screening only — not a legal, KYC/AML, credit or compliance determination, and not a guarantee of legitimacy or of misconduct.",
   "reputationScore summarizes publicly observable signals; confidenceScore states how much evidence supports it. Read them together.",
@@ -96,7 +132,7 @@ const BASE_LIMITATIONS = [
   "External web content is treated strictly as data; instruction-like text found in it is removed and never acted upon."
 ];
 
-function buildQuery(input: ReturnType<typeof companyReputationCheckInput.parse>): ReputationQuery {
+export function buildQuery(input: ReturnType<typeof companyReputationCheckInput.parse>): ReputationQuery {
   const website = normalizeWebsite(input.website ?? null) ?? (input.domain ? normalizeWebsite(input.domain) : null);
   return {
     companyName: input.companyName.replace(/\s+/g, " "),

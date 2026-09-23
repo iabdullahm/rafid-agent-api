@@ -5,6 +5,7 @@ import { prices } from "../billing/catalog.js";
 import { x402BasePath } from "../billing/x402.js";
 import { l402BasePath } from "../billing/l402/gate.js";
 import { mppBasePath } from "../billing/mpp/routes.js";
+import { previewBasePath } from "./previewRoutes.js";
 import type { Config } from "../config/env.js";
 
 /** Payment-rail config every discovery builder reads. l402/mpp are optional so existing callers
@@ -150,6 +151,19 @@ export function buildCapabilitiesRegistry(config: PaymentDiscoveryConfig) {
     // when MPP charge mode is on. Session calls use POST /api/v1/mpp/sessions/{id}/tools/{name}.
     paymentMethods,
     ...(mppCharge ? { mppChargeEndpoint: `${mppBasePath}/charge/${c.name}` } : {}),
+    // Free Preview (src/preview/): derived purely from whether this registry entry defines a
+    // `preview` function — never a second, hand-maintained list of "which tools have a preview".
+    // Deliberately no `purchaseRecommended`-style verdict field: the platform provides evidence
+    // (via the preview call itself), never a decision, so an agent's own reasoning over the
+    // preview response is what decides whether the paid call is worthwhile.
+    preview: c.preview
+      ? {
+          available: true,
+          price: { amount: "0", currency: c.currency },
+          endpoint: `${previewBasePath}/${c.name}`,
+          description: "Use this free preview before purchasing this capability, to verify that relevant data and analysis coverage are available. Recommended agent flow: discover -> preview -> evaluate -> pay -> execute. This does not reveal the paid analysis itself."
+        }
+      : { available: false },
     method: "POST",
     inputSchema: { ...z.toJSONSchema(c.input), examples: [c.example] },
     outputSchema: z.toJSONSchema(c.output),

@@ -47,7 +47,9 @@ test("remote MCP tool listing matches the shared capability registry exactly (na
   await withServer(config, async base => {
     const { body } = await rpc(base, "tools/list");
     const tools = body.result.tools as any[];
-    assert.deepEqual(tools.map(t => t.name).sort(), capabilities.map(c => c.name).sort());
+    // Free Preview (src/preview/) adds exactly one generic "preview_capability" tool alongside
+    // the per-capability tools built straight from the registry — not a second tool list.
+    assert.deepEqual(tools.map(t => t.name).sort(), [...capabilities.map(c => c.name), "preview_capability"].sort());
     for (const c of capabilities) {
       const tool = tools.find(t => t.name === c.name);
       assert.ok(tool, `expected a remote MCP tool entry for ${c.name}`);
@@ -82,7 +84,16 @@ test("remote MCP registry parity with stdio: both are built by the exact same cr
   const config = loadConfig({ RAFID_API_KEYS: key });
   await withServer(config, async base => {
     const { body } = await rpc(base, "tools/list");
-    const remoteTools = (body.result.tools as any[]).map(t => ({ name: t.name, description: t.description, additionalProperties: t.inputSchema.additionalProperties })).sort((a, b) => a.name.localeCompare(b.name));
+    const allRemoteTools = (body.result.tools as any[]).map(t => ({ name: t.name, description: t.description, additionalProperties: t.inputSchema.additionalProperties })).sort((a, b) => a.name.localeCompare(b.name));
+    // Free Preview (src/preview/) registers one extra generic "preview_capability" tool
+    // (src/mcp/server.ts) alongside every per-capability tool built from the registry — assert
+    // it separately (its own dedicated schema, not one derived from a capability) rather than
+    // folding it into the per-capability parity check below.
+    const previewTool = allRemoteTools.find(t => t.name === "preview_capability");
+    assert.ok(previewTool, "expected a preview_capability tool on the remote MCP transport");
+    assert.equal(previewTool!.additionalProperties, false);
+    assert.match(previewTool!.description, /preview/i);
+    const remoteTools = allRemoteTools.filter(t => t.name !== "preview_capability");
     const expected = capabilities.map(c => ({ name: c.name, description: `${c.description} ${c.whenToUse}`, additionalProperties: false })).sort((a, b) => a.name.localeCompare(b.name));
     assert.deepEqual(remoteTools, expected);
   });

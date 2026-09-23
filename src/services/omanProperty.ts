@@ -18,6 +18,7 @@ import { MemoryOfficialMarketContextCache } from "../domain/oman/officialContext
 import { unavailableOfficialContext, type OfficialMarketContext } from "../domain/oman/officialContext.js";
 import { PostgresPropertyMarketRepository } from "../db/marketStore.js";
 import { NcsiClient } from "./ncsi/ncsiClient.js";
+import type { CapabilityPreviewBody } from "../preview/types.js";
 
 /**
  * Phase 6: builds the provider this capability actually queries, from OMAN_PROPERTY_DATA_MODE:
@@ -432,4 +433,50 @@ export async function runOmanPropertyAnalysis(input: unknown, activeProvider: Om
  *  is a separate, provider-parameterized function. */
 export async function analyzeOmanProperty(input: unknown) {
   return runOmanPropertyAnalysis(input, provider, officialProvider);
+}
+
+/** Free Preview (src/preview/) for analyze_oman_property. Cheap and REAL, not a stubbed-out
+ *  execute(): normalizes the location (Section 5, pure/local) and looks up the same rental/sale
+ *  comparable CANDIDATE POOLS the full pipeline selects from (`findRentalComparables`/
+ *  `findSaleComparables` — a local/fixture or single indexed database query, exactly like
+ *  search_oman_company's identity lookup) — but stops there: no outlier removal, no confidence
+ *  scoring, no historicalSalesContext (2 extra provider calls), no NCSI official-context fetch,
+ *  and none of the yield/price/operating-cost arithmetic. The preview reports how many comparable
+ *  records exist and how fresh the newest one is — never the estimated market value, expected
+ *  rent, yield, operating cost, comparable prices, or any investment recommendation, all of which
+ *  stay exclusively in the paid result. */
+export async function previewOmanProperty(input: unknown): Promise<CapabilityPreviewBody> {
+  const p = omanPropertyInput.parse(input);
+  const location = normalizeLocation({ governorate: p.governorate, wilayat: p.wilayat, area: p.area });
+  const entity = `${p.propertyType} in ${location.area || p.area}, ${location.governorate || p.governorate}`;
+  // Real output-schema top-level section names (schemas/omanOutputs.ts) that the paid result
+  // populates — a static list, independent of this call's input, so it can never leak a
+  // per-request finding.
+  const availableSections = ["market", "investment", "pricePosition", "comparablesSummary", "historicalSalesContext", "officialMarketContext"];
+
+  if (!location.supported) {
+    return {
+      capability: "analyze_oman_property", status: "limited", inputRecognized: true,
+      preview: { entity, entityType: "property_location", coverageScore: 0, dataCoverage: "low", availableSections, signals: { locationSupported: false } }
+    };
+  }
+
+  const query: OmanPropertyQuery = { area: location.area, propertyType: p.propertyType, bedrooms: p.bedrooms, sizeSqm: p.sizeSqm, furnished: p.furnished };
+  const [rentalPool, salePool] = await Promise.all([provider.findRentalComparables(query), provider.findSaleComparables(query)]);
+  const combined = [...rentalPool, ...salePool];
+  const sourcesFound = combined.length;
+  const freshestSourceDate = combined.reduce<string | null>((latest, r) => (!latest || r.sourceDate > latest ? r.sourceDate : latest), null);
+  const coverageScore = Math.round(Math.min(1, sourcesFound / (MIN_COMPARABLES * 2)) * 100) / 100;
+  const dataCoverage: "low" | "medium" | "high" = coverageScore >= 0.66 ? "high" : coverageScore >= 0.33 ? "medium" : "low";
+  const status = rentalPool.length >= MIN_COMPARABLES || salePool.length >= MIN_COMPARABLES ? "available" : "limited";
+
+  return {
+    capability: "analyze_oman_property", status, inputRecognized: true,
+    preview: {
+      entity, entityType: "property_location", sourcesFound,
+      ...(freshestSourceDate ? { freshestSourceDate } : {}),
+      coverageScore, dataCoverage, availableSections,
+      signals: { rentalComparablesFound: rentalPool.length, saleComparablesFound: salePool.length, locationSupported: true }
+    }
+  };
 }

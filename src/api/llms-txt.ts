@@ -4,6 +4,7 @@ import { prices } from "../billing/catalog.js";
 import { x402BasePath } from "../billing/x402.js";
 import { l402BasePath } from "../billing/l402/gate.js";
 import { mppBasePath } from "../billing/mpp/routes.js";
+import { previewBasePath } from "./previewRoutes.js";
 import { MUSCAT_GOVERNORATE, SUPPORTED_MUSCAT_AREAS } from "../domain/oman/locations.js";
 import type { Config } from "../config/env.js";
 
@@ -31,7 +32,10 @@ export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network">
       ...(mppCharge ? [`MPP charge:    POST ${mppBasePath}/charge/${c.name}  (no account — one-time Machine Payments Protocol payment)`] : []),
       ...(mppSession ? [`MPP session:   POST ${mppBasePath}/sessions/{sessionId}/tools/${c.name}  (metered against an open MPP session budget)`] : []),
       `MCP tool name: ${c.name}`,
-      `Example request: ${JSON.stringify(c.example)}`
+      `Example request: ${JSON.stringify(c.example)}`,
+      // Free Preview: read straight off whether this registry entry defines a `preview` function
+      // — the same source GET /api/v1/capabilities' `preview.available` field uses.
+      ...(c.preview ? [`Free preview: POST ${previewBasePath}/${c.name}  (no payment, no account — verify data availability before paying)`] : [])
     ];
     // Agent tool-selection guidance (domain/capabilities.ts's AgentCapability.agentGuidance),
     // rendered only for a capability that defines it — never a ranking against another service,
@@ -91,6 +95,16 @@ ${config.mpp?.enabled
   : `MPP (Machine Payments Protocol) is not enabled on this deployment. See GET ${mppBasePath}/status for current status.`}
 
 No account, signup or dashboard is required for any access model.
+
+## Free Preview
+
+Paid capabilities may expose a free preview.
+Preview endpoint: POST ${previewBasePath}/<capability>
+A preview verifies input recognition, data availability, source coverage and the sections available in the paid analysis.
+The preview intentionally does not reveal the paid analysis itself.
+Recommended agent flow: discover -> preview -> evaluate -> pay -> execute
+No payment, account or API key is required to call a preview. See each tool's "Free preview" line
+above for which capabilities support it, or GET /api/v1/capabilities' \`preview\` field.
 
 ## Other machine-readable endpoints
 

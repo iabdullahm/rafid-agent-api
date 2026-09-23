@@ -32,7 +32,9 @@ test("compiled MCP stdio: initialize, discovery, structured results, validation"
   assert.equal(init.result.serverInfo.name, "rafid-agent-api");
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
   const listed = await call("tools/list", {});
-  assert.deepEqual(listed.result.tools.map((tool: any) => tool.name).sort(), capabilities.map(c => c.name).sort());
+  // Free Preview (src/preview/) adds exactly one generic "preview_capability" tool alongside
+  // the per-capability tools built straight from the registry — not a second tool list.
+  assert.deepEqual(listed.result.tools.map((tool: any) => tool.name).sort(), [...capabilities.map(c => c.name), "preview_capability"].sort());
   for (const c of capabilities) {
     const tool = listed.result.tools.find((x: any) => x.name === c.name);
     assert.equal(tool.inputSchema.additionalProperties, false); assert.ok(tool.outputSchema);

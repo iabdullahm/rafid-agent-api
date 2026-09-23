@@ -16,6 +16,7 @@ import { normalizeRequest } from "./normalization.js";
 import { scoreAnomalies } from "./scoring.js";
 import { dayToIso, maskAccount, sameSupplier, supplierKnown, todayDay } from "./text.js";
 import { ANOMALY_CODES, severityRank, type AnalysisContext, type Anomaly, type AnomalyCode } from "./types.js";
+import type { CapabilityPreviewBody } from "../preview/types.js";
 
 export interface InvoiceAnomalyDependencies {
   /** Current UTC day number (injectable for tests); used only when options.asOfDate is absent. */
@@ -61,6 +62,64 @@ export async function runInvoiceAnomalyCheck(rawInput: unknown, deps: InvoiceAno
     if (error instanceof ApiError) throw error;
     throw analysisFailed();
   }
+}
+
+/**
+ * invoice_anomaly_check's Free Preview (src/preview/): reuses ONLY the validate → normalize step
+ * (normalizeRequest — the exact same function runInvoiceAnomalyCheck() itself calls first) and
+ * stops there, before any of the nine deterministic check modules (arithmetic, duplicates,
+ * supplier patterns, payment details, PO/contract, split-invoice, line items, dates, missing
+ * data) or scoreAnomalies() run. This never computes a riskScore, riskLevel, decision or any
+ * anomaly — only whether the invoice was recognized and which optional check categories have
+ * supporting context supplied (exactly the same `supplied`/`mode` distinction the paid result's
+ * own `contextUsed`/`mode` fields report), so it costs nothing beyond parsing and normalizing the
+ * request the caller was going to send anyway.
+ */
+export async function previewInvoiceAnomalyCheck(rawInput: unknown, deps: InvoiceAnomalyDependencies = {}): Promise<CapabilityPreviewBody> {
+  const input: InvoiceAnomalyCheckInput = invoiceAnomalyCheckInput.parse(rawInput);
+  const req = normalizeRequest(input, deps.today ?? todayDay);
+  const inv = req.invoice;
+
+  // The five OPTIONAL check categories (duplicates/supplier-patterns/payment-details/PO-contract/
+  // split-invoice) only activate with supplied context; arithmetic/dates/line-items/missing-data
+  // always run on the invoice alone (standalone mode) and are excluded from this score so it
+  // reflects genuinely variable coverage, not a floor every valid invoice already clears.
+  const optionalCategoriesActive = [
+    req.history.length > 0,                                   // duplicates
+    req.history.length >= req.options.minHistory,              // supplierPatterns
+    req.profile !== null || req.history.some(h => h.bankAccount !== null), // paymentDetails
+    req.purchaseOrder !== null || req.contract !== null,        // poContract
+    req.approval !== null && req.history.length > 0             // splitInvoice
+  ];
+  const activeCount = optionalCategoriesActive.filter(Boolean).length;
+  const coverageScore = Math.round((activeCount / optionalCategoriesActive.length) * 100) / 100;
+  const contextAware = Object.values(req.supplied).some(Boolean);
+
+  return {
+    capability: "invoice_anomaly_check",
+    status: contextAware ? "available" : "limited",
+    inputRecognized: true,
+    preview: {
+      entity: inv.supplier.name ?? inv.number?.raw ?? "invoice",
+      entityType: "invoice",
+      sourcesFound: req.history.length + req.payments.length,
+      coverageScore,
+      dataCoverage: coverageScore >= 0.66 ? "high" : coverageScore >= 0.33 ? "medium" : "low",
+      // Real output-schema top-level fields (schemas/invoiceAnomalyOutputs.ts's
+      // invoiceAnomalyCheckOutput) the paid result populates — never the values themselves.
+      availableSections: ["riskScore", "riskLevel", "decision", "anomalies", "financialChecks", "recommendedAction", "summary", "contextUsed", "invoiceSummary", "dataCompleteness", "scoring"],
+      signals: {
+        mode: contextAware ? "context_aware" : "standalone",
+        historicalInvoicesProvided: req.history.length,
+        paymentHistoryProvided: req.payments.length,
+        supplierProfileProvided: req.profile !== null,
+        purchaseOrderProvided: req.purchaseOrder !== null,
+        contractProvided: req.contract !== null,
+        approvalContextProvided: req.approval !== null,
+        lineItemCount: inv.lines.length
+      }
+    }
+  };
 }
 
 function analyze(req: ReturnType<typeof normalizeRequest>): InvoiceAnomalyCheckOutput {

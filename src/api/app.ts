@@ -9,6 +9,7 @@ import { BillingService } from "../billing/service.js";
 import { buildX402Gate, buildX402Info, buildX402Status, x402BasePath } from "../billing/x402.js";
 import { capabilities } from "../domain/capabilities.js";
 import { agentBasePath, buildAgentInfo, buildCapabilitiesRegistry, buildPricingInfo, buildToolCatalog, capabilitiesBasePath, pricingBasePath, toolsBasePath } from "./agent.js";
+import { createPreviewRoutes, previewBasePath } from "./previewRoutes.js";
 import { buildAgentCard, buildAgentManifest, buildAiPluginManifest } from "./manifest.js";
 import { buildLlmsTxt } from "./llms-txt.js";
 import { landingHtml } from "./landing.js";
@@ -167,6 +168,10 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   const l402Limiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   const mppLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   const ingestionLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
+  // Free Preview (src/preview/): its own independent rate-limiter instance, exactly like every
+  // other route group above — an unauthenticated preview burst can never exhaust another group's
+  // budget (or vice versa).
+  const previewLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   // Vercel's Node runtime does not set Express's "trust proxy", so req.protocol stays "http"
   // behind TLS termination; read X-Forwarded-Proto directly instead so /agent.json and the
   // two /.well-known manifests always report the URL the caller actually reached us on.
@@ -286,6 +291,13 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         sendToolResult(res, data, c.name);
       });
   }
+  // Free Preview (src/preview/): a separate, always-mounted, entirely unauthenticated and FREE
+  // route family (POST /api/v1/preview/:capability and /v1/preview/:capability) — no API key, no
+  // billing.authorize, no x402/L402/MPP gate, no store.admit/complete (see previewRoutes.ts's doc
+  // comment). Mounted once, independent of X402_ENABLED/L402_ENABLED/MPP — a capability's preview
+  // is available whenever that capability itself defines one, regardless of which paid rails are
+  // turned on for this deployment.
+  app.use(createPreviewRoutes({ limiter: previewLimiter }));
   // Pay-per-call via x402: a separate, unauthenticated route family. A valid on-chain
   // payment (X-PAYMENT header) is the sole authorization; no API key or customer account
   // is checked or metered here. Mounted only when X402_ENABLED=true; otherwise these

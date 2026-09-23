@@ -1,9 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { capabilities } from "../domain/capabilities.js";
 import { publicError } from "../utils/errors.js";
 import type { Logger } from "../utils/logging.js";
 import { classifyDataSource } from "../analytics/dataSource.js";
+import { runCapabilityPreview } from "../preview/service.js";
 export function createMcpServer(logger: Logger = () => {}) {
   const server = new McpServer({ name: "rafid-agent-api", version: "0.1.0" });
   for (const c of capabilities) {
@@ -34,5 +36,45 @@ export function createMcpServer(logger: Logger = () => {}) {
       }
     });
   }
+  // Free Preview (src/preview/): ONE generic tool covering every capability, mirroring
+  // previewRoutes.ts's single generic REST route — never a second `<tool>_preview` tool per
+  // capability. FREE: this never touches billing/payment and never calls a capability's own
+  // execute(); it only delegates to runCapabilityPreview() (src/preview/service.ts), which looks
+  // the capability up in the same registry and calls its optional `preview()` function.
+  const previewInputSchema = z.strictObject({
+    capability: z.string().describe("A capability name from this tool list, e.g. \"research_company\"."),
+    input: z.unknown().optional().describe("The same input the paid capability accepts. Optional for a capability whose preview needs no input fields.")
+  });
+  const previewOutputSchema = z.object({
+    capability: z.string(),
+    status: z.enum(["available", "limited", "unavailable", "invalid_input"]),
+    inputRecognized: z.boolean(),
+    preview: z.record(z.string(), z.unknown()),
+    fullResult: z.object({
+      capability: z.string(),
+      price: z.object({ amount: z.string(), currency: z.string() }),
+      paymentMethods: z.array(z.string()).optional(),
+      endpoint: z.string().optional()
+    })
+  });
+  server.registerTool("preview_capability", {
+    description: "Free preview of a paid capability: checks whether useful data/analysis is available for a given input, before paying — proof of \"I have information for this request,\" never the paid analysis itself. No payment, charge or account is ever involved. Not every capability supports preview (status is \"unavailable\" when it doesn't). Recommended flow: discover -> preview -> evaluate -> pay -> execute.",
+    inputSchema: previewInputSchema, outputSchema: previewOutputSchema,
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
+  }, async (raw: unknown) => {
+    const start = performance.now();
+    let status = 200;
+    try {
+      const { capability, input } = previewInputSchema.parse(raw);
+      const data = await runCapabilityPreview(capability, input ?? {});
+      return { content: [{ type: "text" as const, text: JSON.stringify(data) }], structuredContent: data };
+    } catch (error) {
+      const result = publicError(error);
+      status = result.status;
+      return { isError: true, content: [{ type: "text" as const, text: JSON.stringify({ success: false, error: result.error }) }] };
+    } finally {
+      logger({ timestamp: new Date().toISOString(), requestId: randomUUID(), toolName: "preview_capability", status, durationMs: Math.round(performance.now() - start), dataSource: null });
+    }
+  });
   return server;
 }

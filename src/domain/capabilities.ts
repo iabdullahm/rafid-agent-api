@@ -3,35 +3,36 @@ import { analysisOutput, comparisonOutput, maintenanceOutput } from "../schemas/
 import { analyzeProperty, compareProperties, estimateMaintenance } from "../services/property.js";
 import { omanPropertyInput } from "../schemas/omanInputs.js";
 import { omanPropertyOutput } from "../schemas/omanOutputs.js";
-import { analyzeOmanProperty } from "../services/omanProperty.js";
+import { analyzeOmanProperty, previewOmanProperty } from "../services/omanProperty.js";
 import { searchOmanCompanyInput, getOmanCompanyProfileInput, analyzeOmanCompanyInput, dueDiligenceOmanCompanyInput } from "../schemas/businessInputs.js";
 import { searchOmanCompanyOutput, getOmanCompanyProfileOutput, analyzeOmanCompanyOutput, dueDiligenceOmanCompanyOutput } from "../schemas/businessOutputs.js";
 import { searchOmanCompany, getOmanCompanyProfile, analyzeOmanCompany, dueDiligenceOmanCompany } from "../services/omanBusiness.js";
 import { researchCompanyInput, findCompaniesInput, analyzeCompanyRiskInput } from "../schemas/intelligenceInputs.js";
 import { researchCompanyOutput, findCompaniesOutput, analyzeCompanyRiskOutput } from "../schemas/intelligenceOutputs.js";
-import { researchCompany, findCompanies, analyzeCompanyRisk } from "../services/companyIntelligence.js";
+import { researchCompany, findCompanies, analyzeCompanyRisk, previewResearchCompany } from "../services/companyIntelligence.js";
 import { omanSupplierCheckInput } from "../schemas/supplierCheckInputs.js";
 import { omanSupplierCheckOutput } from "../schemas/supplierCheckOutputs.js";
-import { omanSupplierCheck } from "../services/omanSupplierCheck.js";
+import { omanSupplierCheck, previewOmanSupplierCheckCapability } from "../services/omanSupplierCheck.js";
 import { OMAN_SUPPLIER_CHECK_EXAMPLE_OUTPUT } from "./examples/omanSupplierCheckExample.js";
 import { companyReputationCheckInput } from "../schemas/companyReputationInputs.js";
 import { companyReputationCheckOutput } from "../schemas/companyReputationOutputs.js";
-import { companyReputationCheck } from "../services/companyReputationCheck.js";
+import { companyReputationCheck, previewCompanyReputationCheckCapability } from "../services/companyReputationCheck.js";
 import { COMPANY_REPUTATION_CHECK_EXAMPLE_OUTPUT } from "./examples/companyReputationCheckExample.js";
 import { businessRiskScoreInput } from "../schemas/businessRiskInputs.js";
 import { businessRiskScoreOutput } from "../schemas/businessRiskOutputs.js";
-import { businessRiskScore } from "../services/businessRiskScore.js";
+import { businessRiskScore, previewBusinessRiskScoreCapability } from "../services/businessRiskScore.js";
 import { BUSINESS_RISK_SCORE_EXAMPLE_OUTPUT } from "./examples/businessRiskScoreExample.js";
 import { documentFactsExtractInput } from "../schemas/documentFactsInputs.js";
 import { documentFactsExtractOutput } from "../schemas/documentFactsOutputs.js";
-import { documentFactsExtract } from "../services/documentFactsExtract.js";
+import { documentFactsExtract, previewDocumentFactsExtractCapability } from "../services/documentFactsExtract.js";
 import { DOCUMENT_FACTS_EXAMPLE_INPUT, DOCUMENT_FACTS_EXAMPLE_OUTPUT } from "./examples/documentFactsExtractExample.js";
 import { DOCUMENT_FACTS_LIMITS } from "../document-facts/config.js";
 import { invoiceAnomalyCheckInput } from "../schemas/invoiceAnomalyInputs.js";
 import { invoiceAnomalyCheckOutput } from "../schemas/invoiceAnomalyOutputs.js";
-import { invoiceAnomalyCheck } from "../services/invoiceAnomalyCheck.js";
+import { invoiceAnomalyCheck, previewInvoiceAnomalyCheckCapability } from "../services/invoiceAnomalyCheck.js";
 import { INVOICE_ANOMALY_EXAMPLE_INPUT, INVOICE_ANOMALY_EXAMPLE_OUTPUT } from "./examples/invoiceAnomalyCheckExample.js";
 import { INVOICE_ANOMALY_LIMITS } from "../invoice-anomaly/config.js";
+import type { CapabilityPreviewBody } from "../preview/types.js";
 import type { z } from "zod";
 
 /** The one currency every capability is priced in today. A single constant, not a literal
@@ -135,6 +136,16 @@ export interface AgentCapability {
     limitations: readonly string[];
     sampleQueries: readonly { query: string; guidance: string }[];
   };
+  /** Free Preview (src/preview/): an optional, FREE, cheap check of whether this capability has
+   *  useful data/analysis available for a given input — "I have information for this request,"
+   *  never "here is the information." Never runs `execute()`, never triggers x402/L402/MPP
+   *  payment, never charges. Returns everything except `fullResult` (which
+   *  runCapabilityPreview() in src/preview/service.ts always attaches from THIS registry entry's
+   *  own `price`/`currency`, so pricing can never drift between preview and paid). Optional: most
+   *  capabilities have no `preview` today, and callers must handle that (GET /api/v1/capabilities'
+   *  `preview.available` field, or a preview call's own `status: "unavailable"`) rather than
+   *  assume every capability supports it. */
+  preview?: (input: unknown) => Promise<CapabilityPreviewBody>;
 }
 
 // Hand-verified against a live call with the exact example below (see the "async architecture"
@@ -681,6 +692,7 @@ export const capabilities = [
     // final — its provider mode/caching/freshness fields depend on the rest of this phase's work.
     exampleOutput: OMAN_EXAMPLE_OUTPUT,
     execute: (input: unknown) => analyzeOmanProperty(input),
+    preview: (input: unknown) => previewOmanProperty(input),
     price: 0.25, currency: CURRENCY, paymentProtocol: "x402",
     idempotent: true, sideEffects: false,
     // RESTORED 2026-09-21 (see the Cardify import investigation report) after an accidental
@@ -803,6 +815,7 @@ export const capabilities = [
     example: { company: "Acme Corporation", website: "https://acme.example.com", country: "United States", depth: "standard" },
     exampleOutput: RESEARCH_COMPANY_EXAMPLE_OUTPUT,
     execute: (input: unknown) => researchCompany(input),
+    preview: (input: unknown) => previewResearchCompany(input),
     price: 0.15, currency: CURRENCY, paymentProtocol: "x402",
     idempotent: true, sideEffects: false,
     limitations: [
@@ -880,6 +893,7 @@ export const capabilities = [
     example: { companyName: "Example Technical Services LLC", website: "https://example.om", email: "sales@example.om", requiredProductOrService: "HVAC maintenance" },
     exampleOutput: OMAN_SUPPLIER_CHECK_EXAMPLE_OUTPUT,
     execute: (input: unknown) => omanSupplierCheck(input),
+    preview: (input: unknown) => previewOmanSupplierCheckCapability(input),
     price: 0.50, currency: CURRENCY, paymentProtocol: "x402",
     // Idempotent: the same normalized input never creates duplicate records — provider evidence
     // is UPSERTED into the evidence cache on (provider, normalized key) and the final result is
@@ -938,6 +952,7 @@ export const capabilities = [
     example: { companyName: "Example Technologies Ltd", country: "United Kingdom", website: "https://example.com", registrationNumber: "01234567" },
     exampleOutput: COMPANY_REPUTATION_CHECK_EXAMPLE_OUTPUT,
     execute: (input: unknown) => companyReputationCheck(input),
+    preview: (input: unknown) => previewCompanyReputationCheckCapability(input),
     price: 0.40, currency: CURRENCY, paymentProtocol: "x402",
     // Idempotent: no state a caller can observe changes; provider evidence is upserted into an
     // internal cache keyed by (provider, normalized identity) and the result is recomputed from it.
@@ -995,6 +1010,7 @@ export const capabilities = [
     example: { companyName: "Example Trading Ltd", country: "GB", website: "https://example.com" },
     exampleOutput: BUSINESS_RISK_SCORE_EXAMPLE_OUTPUT,
     execute: (input: unknown) => businessRiskScore(input),
+    preview: (input: unknown) => previewBusinessRiskScoreCapability(input),
     price: 0.50, currency: CURRENCY, paymentProtocol: "x402",
     // Idempotent: no state a caller can observe changes. Provider evidence is upserted into the shared
     // evidence cache and a deduplicated audit record is kept; the result is a pure function of the
@@ -1059,6 +1075,7 @@ export const capabilities = [
     example: DOCUMENT_FACTS_EXAMPLE_INPUT,
     exampleOutput: DOCUMENT_FACTS_EXAMPLE_OUTPUT,
     execute: (input: unknown) => documentFactsExtract(input),
+    preview: (input: unknown) => previewDocumentFactsExtractCapability(input),
     price: 0.25, currency: CURRENCY, paymentProtocol: "x402",
     // Deterministic for the same document content: no state changes, no timestamps in the output.
     idempotent: true, sideEffects: false,
@@ -1115,6 +1132,7 @@ export const capabilities = [
     example: INVOICE_ANOMALY_EXAMPLE_INPUT,
     exampleOutput: INVOICE_ANOMALY_EXAMPLE_OUTPUT,
     execute: (input: unknown) => invoiceAnomalyCheck(input),
+    preview: (input: unknown) => previewInvoiceAnomalyCheckCapability(input),
     price: 0.25, currency: CURRENCY, paymentProtocol: "x402",
     // Pure function of the input (plus the as-of day when options.asOfDate is omitted): no state, no
     // external calls, nothing stored or logged.

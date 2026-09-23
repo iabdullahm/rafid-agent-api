@@ -28,6 +28,7 @@ import { INSUFFICIENT_DATA_RECOMMENDATION, recommend } from "./recommendation.js
 import { computeScore, signalPoints } from "./scoring.js";
 import { detectCompliance, detectCorporate, detectDigital, detectFinancial, detectOperational, detectReputation, type DetectionContext } from "./signals.js";
 import { RISK_CATEGORIES, providerStage, type BusinessRiskProvider, type BusinessRiskQuery, type CoverageLevel, type RiskCategory, type RiskSignal, type RoleRun } from "./types.js";
+import type { CapabilityPreviewBody } from "../preview/types.js";
 
 /**
  * business_risk_score orchestration:
@@ -85,6 +86,41 @@ export function getDefaultBusinessRiskDependencies(): BusinessRiskDependencies {
     };
   }
   return defaultDeps;
+}
+
+/** Free Preview (src/preview/) for business_risk_score. Same design as
+ *  company_reputation_check's preview (whose evidence infrastructure this capability reuses — see
+ *  this file's own top-of-file doc comment): calls every configured provider's own
+ *  `applicability(query)` (a synchronous, zero-network method every BusinessRiskProvider/
+ *  ReputationProvider already implements) instead of running STAGE 1/STAGE 2 collection, entity
+ *  resolution, the six risk-signal detectors, or the scoring engine. Reports how much of the
+ *  six-category risk analysis this deployment can actually perform — never a risk score, a risk
+ *  level, a component score, a risk flag, a sanctions match or a recommendation, all of which
+ *  require the real pipeline this preview intentionally skips. */
+export async function previewBusinessRiskScore(rawInput: unknown, deps: BusinessRiskDependencies = getDefaultBusinessRiskDependencies()): Promise<CapabilityPreviewBody> {
+  const input = businessRiskScoreInput.parse(rawInput);
+  const query = buildBusinessRiskQuery(input);
+  const configuredProviders = deps.providers.filter(p =>
+    !deps.disabled.has(p.id.toLowerCase()) && !deps.disabled.has(p.category) && !deps.disabled.has(p.role) && p.applicability(query).status === "ready"
+  );
+  const configuredCount = configuredProviders.length;
+  const totalCount = deps.providers.length;
+  const coverageScore = totalCount > 0 ? Math.round((configuredCount / totalCount) * 100) / 100 : 0;
+  // Real `components`/RISK_CATEGORIES keys (schemas/businessRiskOutputs.ts) the paid result
+  // populates for every category — a static list, independent of this call's input.
+  const availableSections = ["corporateRisk", "financialRisk", "complianceRisk", "reputationRisk", "operationalRisk", "digitalRisk", "overallRiskAssessment"];
+
+  return {
+    capability: "business_risk_score",
+    status: configuredCount > 0 ? "available" : "limited",
+    inputRecognized: true,
+    preview: {
+      entity: input.companyName, entityType: "company",
+      coverageScore, dataCoverage: coverageScore >= 0.66 ? "high" : coverageScore >= 0.33 ? "medium" : "low",
+      availableSections,
+      signals: { configuredSourceCategories: configuredCount, totalSourceCategories: totalCount }
+    }
+  };
 }
 
 const checked = (r: RoleRun) => r.status === "ok" || r.status === "stale_cache";

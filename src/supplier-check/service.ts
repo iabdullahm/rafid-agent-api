@@ -15,6 +15,7 @@ import { assessPublicRisk } from "./analysis/publicRisk.js";
 import { findPotentialMatches, type SanctionsMatch } from "./sanctionsMatcher.js";
 import { RISK_THRESHOLDS, procurementSuitability, scoreSupplier } from "./scoring.js";
 import type { EvidenceSource, SanctionsStatus, SupplierRiskFlag } from "./types.js";
+import type { CapabilityPreviewBody } from "../preview/types.js";
 
 /**
  * oman_supplier_check orchestration. Flow:
@@ -230,6 +231,48 @@ export async function runOmanSupplierCheck(rawInput: unknown, deps: SupplierChec
     },
     confidence: scored.confidence,
     limitations
+  };
+}
+
+/** Free Preview (src/preview/) for oman_supplier_check. Runs ONLY step 2 of the real pipeline
+ *  above — identity resolution against the canonical Oman company registry, cache-first via the
+ *  exact same `cachedProviderCall`/evidence store the paid capability uses (so a preview call
+ *  primes the cache for a following paid call, and vice versa; see evidenceStore.ts). Skips
+ *  website inspection, sanctions screening, public-web risk search and the weighted scoring
+ *  engine entirely — never a risk score, a suitability verdict, a sanctions result, or any risk
+ *  flag, all of which stay exclusively in the paid result. */
+export async function previewOmanSupplierCheck(rawInput: unknown, deps: SupplierCheckDependencies = getDefaultSupplierCheckDependencies()): Promise<CapabilityPreviewBody> {
+  const input = omanSupplierCheckInput.parse(rawInput);
+  const n = normalizeSupplierInput(input);
+  const now = deps.now();
+
+  const identityKey = supplierIdentityKey(n);
+  const identityResult = await cachedProviderCall(
+    deps.store, deps.identity.id, `${identityKey}|${n.nameVariants.join(",")}`, deps.ttls.identityMs, now,
+    () => deps.identity.searchCompany(n, now),
+    r => r.evidence?.candidates[0]?.companyId ?? null
+  );
+  const candidates = identityResult.evidence?.candidates ?? [];
+  const bestCandidate = candidates.find(c => c.nameScore >= 0.6 || c.crMatches) ?? null;
+  const topScore = candidates.length ? Math.max(...candidates.map(c => c.nameScore)) : 0;
+  // Real `checks` top-level keys from schemas/supplierCheckOutputs.ts — the checks the paid
+  // result runs, exactly what an invoice_anomaly_check-style `checksAvailable` field means here.
+  const availableSections = ["companyIdentity", "website", "businessActivity", "contactConsistency", "addressConsistency", "sanctions", "publicRisk"];
+
+  return {
+    capability: "oman_supplier_check", status: bestCandidate ? "available" : "limited", inputRecognized: true,
+    preview: {
+      entity: n.companyName, entityType: "company",
+      sourcesFound: candidates.length,
+      coverageScore: Math.round(topScore * 100) / 100,
+      dataCoverage: bestCandidate ? "high" : candidates.length > 0 ? "medium" : "low",
+      availableSections,
+      signals: {
+        registryCandidatesFound: candidates.length,
+        registryMatchFound: Boolean(bestCandidate),
+        demoDataOnly: Boolean(bestCandidate?.demoOnly)
+      }
+    }
   };
 }
 
