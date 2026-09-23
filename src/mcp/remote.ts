@@ -10,6 +10,7 @@ import type { AnalyticsRepository, DataSource } from "../analytics/types.js";
 import { mcpClientContext } from "../analytics/context.js";
 import { extractClientContext } from "../analytics/attribution.js";
 import { mapMcpMethod, recordMcpEvent, recordToolInvocation, recordDiscoveryHit, currentMcpClientContext } from "../analytics/recorder.js";
+import type { PaymentDiscoveryConfig } from "../billing/paymentMethods.js";
 
 /** Public path for the remote (Streamable HTTP) MCP transport. Mounted only when
  *  MCP_REMOTE_ENABLED=true (see api/app.ts); otherwise this path simply 404s, exactly like the
@@ -67,7 +68,7 @@ export function buildMcpStatus(config: Pick<Config, "mcpRemoteEnabled">) {
  * client attribution threaded through via mcpClientContext — see analytics/context.ts's doc
  * comment for why that indirection is necessary for a shared, stateless server instance.
  */
-export function createRemoteMcpHandler(billingService: BillingService, baseLogger: Logger, analyticsRepository: AnalyticsRepository): RequestHandler {
+export function createRemoteMcpHandler(billingService: BillingService, baseLogger: Logger, analyticsRepository: AnalyticsRepository, previewConfig?: PaymentDiscoveryConfig): RequestHandler {
   const logger: Logger = event => {
     baseLogger({ ...event, endpoint: mcpRemotePath });
     if (event.toolName) {
@@ -87,7 +88,7 @@ export function createRemoteMcpHandler(billingService: BillingService, baseLogge
       recordToolInvocation(analyticsRepository, { toolName: event.toolName, channel: "mcp-remote", success, durationMs: event.durationMs, dataSource: (event.dataSource ?? null) as DataSource | null, client });
     }
   };
-  const server = createMcpServer(logger);
+  const server = createMcpServer(logger, { previewConfig });
   const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   // start()/connect() do no real I/O for this transport (requests are handled per-call below,
   // not over a long-lived connection) — see WebStandardStreamableHTTPServerTransport's own doc

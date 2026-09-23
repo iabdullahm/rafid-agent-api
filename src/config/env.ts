@@ -62,7 +62,20 @@ const envSchema = z.object({
   ADMIN_SESSION_SECRET: z.string().default(""),
   ADMIN_SESSION_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
   ADMIN_LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(10),
-  ADMIN_LOGIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).max(3600000).default(15 * 60 * 1000)
+  ADMIN_LOGIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).max(3600000).default(15 * 60 * 1000),
+  // Free Preview hardening (src/preview/): a dedicated, isolated rate-limit budget so preview
+  // traffic can never starve paid-quota headroom; see src/preview/rateLimit.ts.
+  PREVIEW_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).max(100000).default(60),
+  PREVIEW_RATE_LIMIT_PER_HOUR: z.coerce.number().int().min(1).max(1000000).default(300),
+  // Centralized cache TTL override (seconds) — unset uses the per-capability defaults in
+  // src/preview/cache.ts (TTL_SECONDS_BY_CAPABILITY). Caching itself is not mandatory: preview
+  // routes work with no cache configured at all.
+  PREVIEW_CACHE_TTL_SECONDS: z.coerce.number().int().min(1).max(86400).optional(),
+  // Preview -> paid conversion attribution window (hours); see src/preview/analytics.ts.
+  PREVIEW_CONVERSION_WINDOW_HOURS: z.coerce.number().int().min(1).max(720).default(24),
+  // HMAC secret for preview cache-key/fingerprint hashing (src/preview/fingerprint.ts). Optional:
+  // falls back to a plain SHA-256 digest (still never raw input) when unset.
+  PREVIEW_FINGERPRINT_SECRET: z.string().optional()
 });
 /** Networks the free public x402.org facilitator actually settles for the EVM "exact" scheme.
  *  Anything else (Base mainnet included) requires an authenticated Coinbase Developer
@@ -178,6 +191,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options = { req
     adminEnabled, adminUsername: e.ADMIN_USERNAME, adminPasswordHash: e.ADMIN_PASSWORD_HASH, adminSessionSecret: e.ADMIN_SESSION_SECRET,
     adminSessionTtlMinutes: e.ADMIN_SESSION_TTL_MINUTES,
     adminLoginRateLimitMax: e.ADMIN_LOGIN_RATE_LIMIT_MAX, adminLoginRateLimitWindowMs: e.ADMIN_LOGIN_RATE_LIMIT_WINDOW_MS,
+    previewRateLimitPerMinute: e.PREVIEW_RATE_LIMIT_PER_MINUTE, previewRateLimitPerHour: e.PREVIEW_RATE_LIMIT_PER_HOUR,
+    previewCacheTtlSeconds: e.PREVIEW_CACHE_TTL_SECONDS ?? null, previewConversionWindowHours: e.PREVIEW_CONVERSION_WINDOW_HOURS,
+    previewFingerprintSecret: e.PREVIEW_FINGERPRINT_SECRET ?? null,
     mpp, billing };
 }
 export type Config = ReturnType<typeof loadConfig>;

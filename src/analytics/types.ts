@@ -25,7 +25,7 @@
 /** "l402" rows use the same funnel vocabulary as x402 (challenge / payment_failed /
  *  settlement_success) but a separate category, so the x402 funnel and every x402 aggregate stay
  *  exactly as they were. */
-export type AnalyticsCategory = "discovery" | "mcp" | "x402" | "l402" | "tool";
+export type AnalyticsCategory = "discovery" | "mcp" | "x402" | "l402" | "tool" | "preview";
 
 /** Discovery: always "hit" — which surface was hit is carried in `path`. */
 export type DiscoveryEventType = "hit";
@@ -45,7 +45,26 @@ export type X402EventType = "challenge" | "payment_verified" | "payment_failed" 
  *  X-API-Key, x402, remote MCP). */
 export type ToolEventType = "invocation";
 
-export type AnalyticsEventType = DiscoveryEventType | McpEventType | X402EventType | ToolEventType;
+/** Free Preview funnel + preview→paid conversion events (see preview/analytics.ts). One row per
+ *  step, across the whole discover -> preview -> evaluate -> pay -> execute flow:
+ *   - preview_requested: a POST /api/v1/preview/:capability request was received.
+ *   - preview_available / preview_limited / preview_unavailable / preview_invalid: the outcome of
+ *     that request — mirrors CapabilityPreviewStatus ("available"/"limited") plus two request-level
+ *     outcomes CapabilityPreviewStatus doesn't cover (capability has no preview implementation at
+ *     all, or the input failed validation).
+ *   - preview_rate_limited: the request was rejected by preview/rateLimit.ts before it ran at all.
+ *   - preview_cache_hit / preview_cache_miss: whether preview/cache.ts served a cached response.
+ *   - paid_capability_started: a paid execution of a capability began (any rail) — the "did they
+ *     come back and pay" half of the funnel.
+ *   - preview_converted: that paid execution's request fingerprint matched a preview seen within
+ *     the conversion window (see preview/analytics.ts's PreviewConversionIndex) — the business
+ *     metric the whole funnel exists to measure. */
+export type PreviewEventType =
+  | "preview_requested" | "preview_available" | "preview_limited" | "preview_unavailable" | "preview_invalid"
+  | "preview_rate_limited" | "preview_cache_hit" | "preview_cache_miss"
+  | "paid_capability_started" | "preview_converted";
+
+export type AnalyticsEventType = DiscoveryEventType | McpEventType | X402EventType | ToolEventType | PreviewEventType;
 
 /** How much of a tool invocation's result was backed by real (partner-fed/imported) data versus
  *  the honest demo/manual fallback — see src/analytics/dataSource.ts's classifyDataSource(),
@@ -114,6 +133,23 @@ export interface AnalyticsEvent {
   /** From X-Client-Name, falling back to X-Agent-Name — an unauthenticated, self-reported
    *  caller identity (never verified, never trusted for authorization decisions). */
   clientName: string | null;
+  /** Preview category only (see PreviewEventType) — a one-way SHA-256/HMAC digest of capability +
+   *  normalized input (preview/fingerprint.ts). NEVER raw input: this is the one field that joins
+   *  a preview_requested row to a later paid_capability_started/preview_converted row for the same
+   *  logical request, and it must never be reversible to what the caller actually sent. Optional
+   *  (unlike the pre-existing fields above) so every call site that predates this field keeps
+   *  compiling unchanged; absent/undefined means "not applicable to this event", same as null. */
+  requestFingerprint?: string | null;
+  /** paid_capability_started / preview_converted only — the actual payment rail the paid call
+   *  settled on (x402/l402/mpp-charge/mpp-session/api-key), read from the billing flow itself
+   *  (res.locals.channel in api/app.ts), never from a client-supplied header. */
+  paymentRail?: string | null;
+  /** paid_capability_started only — whether this paid call's request fingerprint had a qualifying
+   *  preview within the conversion window at the moment it started. null/absent for every other
+   *  event type. */
+  previewSeen?: boolean | null;
+  /** preview_converted only — milliseconds between the qualifying preview and this paid execution. */
+  conversionLatencyMs?: number | null;
   createdAt: string;
 }
 

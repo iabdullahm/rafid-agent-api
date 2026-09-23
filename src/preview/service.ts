@@ -1,6 +1,7 @@
 import { capabilities } from "../domain/capabilities.js";
 import { ApiError } from "../utils/errors.js";
-import type { CapabilityPreviewResult } from "./types.js";
+import type { CapabilityPreviewResult, CapabilityPreviewFullResult } from "./types.js";
+import { buildPaymentMethodDetails, type PaymentDiscoveryConfig } from "../billing/paymentMethods.js";
 
 /**
  * Free Preview — generic engine. One implementation for every capability: looks the capability up
@@ -28,15 +29,25 @@ export function isPreviewSupported(capabilityName: string): boolean {
   return Boolean(findCapability(capabilityName)?.preview);
 }
 
-export async function runCapabilityPreview(capabilityName: string, rawInput: unknown): Promise<CapabilityPreviewResult> {
+export interface PreviewRuntimeOptions {
+  /** Payment-rail config (x402Enabled/l402Enabled/mpp) — when supplied, fullResult.paymentMethods
+   *  is populated from the real, currently-enabled rails (billing/paymentMethods.ts). Omitted by
+   *  callers that don't have a Config in scope (e.g. a unit test constructing this directly), in
+   *  which case fullResult carries no paymentMethods field, exactly as before this option existed. */
+  config?: PaymentDiscoveryConfig;
+}
+
+export async function runCapabilityPreview(capabilityName: string, rawInput: unknown, options: PreviewRuntimeOptions = {}): Promise<CapabilityPreviewResult> {
   const capability = findCapability(capabilityName);
   if (!capability) {
     throw new ApiError(404, "CAPABILITY_NOT_FOUND", `No such capability "${capabilityName}". See GET /api/v1/capabilities for the full list of tools.`);
   }
-  const fullResult = {
+  const paymentMethods = options.config ? buildPaymentMethodDetails(options.config, capability) : [];
+  const fullResult: CapabilityPreviewFullResult = {
     capability: capability.name,
     price: { amount: capability.price.toFixed(2), currency: capability.currency },
-    endpoint: "/api/v1" + capability.path
+    endpoint: "/api/v1" + capability.path,
+    ...(paymentMethods.length ? { paymentMethods } : {})
   };
   if (!capability.preview) {
     // A real, callable capability that simply has no free-preview implementation yet — distinct

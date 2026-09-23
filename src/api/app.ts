@@ -10,6 +10,10 @@ import { buildX402Gate, buildX402Info, buildX402Status, x402BasePath } from "../
 import { capabilities } from "../domain/capabilities.js";
 import { agentBasePath, buildAgentInfo, buildCapabilitiesRegistry, buildPricingInfo, buildToolCatalog, capabilitiesBasePath, pricingBasePath, toolsBasePath } from "./agent.js";
 import { createPreviewRoutes, previewBasePath } from "./previewRoutes.js";
+import { createPreviewGlobalRateLimiters, createPreviewExpensiveTierRateLimiter } from "../preview/rateLimit.js";
+import { createInMemoryPreviewCache, type PreviewCache } from "../preview/cache.js";
+import { createInMemoryPreviewConversionIndex, recordPreviewEvent, type PreviewConversionIndex } from "../preview/analytics.js";
+import { hasFingerprintSupport, computePreviewFingerprint } from "../preview/fingerprint.js";
 import { buildAgentCard, buildAgentManifest, buildAiPluginManifest } from "./manifest.js";
 import { buildLlmsTxt } from "./llms-txt.js";
 import { landingHtml } from "./landing.js";
@@ -63,7 +67,7 @@ function maxCapabilityBodyLimit(): string {
 }
 function formatBytes(n: number): string { return n >= 1024 * 1024 ? `${Math.round(n / 1024 / 1024 * 10) / 10}mb` : `${Math.round(n / 1024)}kb`; }
 
-export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number; mppProvider?: MppProvider; mppSessions?: MppSessionRepository; mppRedemptions?: MppChargeRedemptionStore; mppKv?: MppKv; mppAudit?: MppAuditSink; mppNow?: () => Date; billingStore?: BillingStore; billingNow?: () => Date } = {}) {
+export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number; mppProvider?: MppProvider; mppSessions?: MppSessionRepository; mppRedemptions?: MppChargeRedemptionStore; mppKv?: MppKv; mppAudit?: MppAuditSink; mppNow?: () => Date; billingStore?: BillingStore; billingNow?: () => Date; previewCache?: PreviewCache; previewConversionIndex?: PreviewConversionIndex } = {}) {
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
   const store = config.authMode === "postgres" ? options.store : undefined;
   const app = express();
@@ -104,6 +108,13 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         now: options.billingNow
       })
     : null;
+  // Free Preview (src/preview/): a bounded in-memory cache and a bounded in-memory
+  // preview->paid conversion index, unless a caller (tests, or a future durable backend) injects
+  // its own. Neither is mandatory for preview to function — see preview/cache.ts and
+  // preview/analytics.ts: both are used strictly best-effort/fail-open below.
+  const previewCache: PreviewCache = options.previewCache ?? createInMemoryPreviewCache();
+  const previewConversionIndex: PreviewConversionIndex = options.previewConversionIndex ?? createInMemoryPreviewConversionIndex();
+  const previewConversionWindowMs = config.previewConversionWindowHours * 60 * 60 * 1000;
   const openapiDoc = buildOpenapi(config);
   app.disable("x-powered-by");
   app.use((req, res, next) => {
@@ -169,6 +180,31 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
           dataSource: (res.locals.dataSource as DataSource | undefined) ?? null,
           client: extractClientContext(req)
         });
+        // Free Preview conversion analytics (src/preview/analytics.ts): this `finish` handler is
+        // the single point every paid rail (REST/x402/L402/MPP) already funnels through via
+        // res.locals.toolName, so it is also the single correct place to detect "a preview was
+        // seen for the same input, then the caller paid" — no per-rail plumbing needed. Never
+        // touches billing/execution: this runs after the response has already been sent, is
+        // wrapped so it can never affect an already-completed request, and never gates anything.
+        try {
+          if (res.statusCode < 400 && hasFingerprintSupport(toolName)) {
+            const paymentRail = accessMode === "api-key" ? "api_key" : accessMode;
+            const fingerprint = computePreviewFingerprint(toolName, req.body ?? {}, config.previewFingerprintSecret);
+            const nowMs = Date.now();
+            const seenAtMs = previewConversionIndex.findQualifyingPreviewAt(toolName, fingerprint, nowMs, previewConversionWindowMs);
+            const client = extractClientContext(req);
+            recordPreviewEvent(analyticsRepository, {
+              eventType: "paid_capability_started", toolName, requestFingerprint: fingerprint,
+              paymentRail, previewSeen: seenAtMs !== null, client
+            });
+            if (seenAtMs !== null) {
+              recordPreviewEvent(analyticsRepository, {
+                eventType: "preview_converted", toolName, requestFingerprint: fingerprint,
+                paymentRail, previewSeen: true, conversionLatencyMs: nowMs - seenAtMs, client
+              });
+            }
+          }
+        } catch { /* Free Preview conversion tracking must never affect a real (already-completed) request. */ }
       }
     });
     if (req.method === "OPTIONS") { res.status(204).end(); return; }
@@ -186,10 +222,28 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   const l402Limiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   const mppLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   const ingestionLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
-  // Free Preview (src/preview/): its own independent rate-limiter instance, exactly like every
-  // other route group above — an unauthenticated preview burst can never exhaust another group's
-  // budget (or vice versa).
-  const previewLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
+  // Free Preview (src/preview/): its own independent rate-limit budget, exactly like every other
+  // route group above — an unauthenticated preview burst can never exhaust another group's budget
+  // (or vice versa) — plus a per-minute/per-hour pair (not just one window) and an additional
+  // per-capability tier for the "expensive" previews (document_facts_extract,
+  // invoice_anomaly_check — see preview/classification.ts) so a caller can't cheaply hammer the
+  // costliest preview paths within the generous global budget. See preview/rateLimit.ts.
+  const onPreviewRateLimited = (req: express.Request, _retryAfterSeconds: number) => {
+    recordPreviewEvent(analyticsRepository, {
+      eventType: "preview_rate_limited",
+      toolName: typeof req.params.capability === "string" ? req.params.capability : null,
+      client: extractClientContext(req)
+    });
+  };
+  const previewLimiters: RequestHandler[] = config.rateLimitEnabled
+    ? [
+        ...createPreviewGlobalRateLimiters(
+          { perMinute: config.previewRateLimitPerMinute, perHour: config.previewRateLimitPerHour, apiKeys: config.apiKeys },
+          onPreviewRateLimited
+        ),
+        createPreviewExpensiveTierRateLimiter({ apiKeys: config.apiKeys }, onPreviewRateLimited)
+      ]
+    : [];
   // Vercel's Node runtime does not set Express's "trust proxy", so req.protocol stays "http"
   // behind TLS termination; read X-Forwarded-Proto directly instead so /agent.json and the
   // two /.well-known manifests always report the URL the caller actually reached us on.
@@ -227,13 +281,13 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   app.get(agentBasePath, discoveryLimiter, (_req, res) => send(res, buildAgentInfo(config)));
   app.get(pricingBasePath, discoveryLimiter, (_req, res) => send(res, buildPricingInfo(config)));
   app.get(toolsBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, toolsBasePath); send(res, buildToolCatalog()); });
+  // Machine-first capability registry (Section 8/13): the same data /agent.json's `tools`
+  // field carries, exposed on its own path so a caller that only wants tool metadata doesn't
+  // have to fetch the full manifest.
   // Unified payment discovery: every ENABLED rail, how to select it (X-Rafid-Payment-Method) and
   // how to authenticate. Always mounted, like /api/v1/x402 — even when billing is disabled it
   // still truthfully lists whichever of x402 / L402 / MPP are live.
   app.get(paymentMethodsPath, discoveryLimiter, (_req, res) => send(res, buildPaymentMethods(config)));
-  // Machine-first capability registry (Section 8/13): the same data /agent.json's `tools`
-  // field carries, exposed on its own path so a caller that only wants tool metadata doesn't
-  // have to fetch the full manifest.
   app.get(capabilitiesBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, capabilitiesBasePath); send(res, buildCapabilitiesRegistry(config)); });
   // Top-level agent discovery manifests. Unauthenticated, GET-only, and — like every other
   // discovery endpoint here — read straight from the shared capability registry.
@@ -330,7 +384,15 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // comment). Mounted once, independent of X402_ENABLED/L402_ENABLED/MPP — a capability's preview
   // is available whenever that capability itself defines one, regardless of which paid rails are
   // turned on for this deployment.
-  app.use(createPreviewRoutes({ limiter: previewLimiter }));
+  app.use(createPreviewRoutes({
+    limiters: previewLimiters,
+    cache: previewCache,
+    cacheTtlOverrideSeconds: config.previewCacheTtlSeconds,
+    fingerprintSecret: config.previewFingerprintSecret,
+    analyticsRepository,
+    previewOptions: { config },
+    onPreviewSeen: (capabilityName, fingerprint) => previewConversionIndex.recordPreviewSeen(capabilityName, fingerprint)
+  }));
   // Pay-per-call via x402: a separate, unauthenticated route family. A valid on-chain
   // payment (X-PAYMENT header) is the sole authorization; no API key or customer account
   // is checked or metered here. Mounted only when X402_ENABLED=true; otherwise these
@@ -475,7 +537,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     // free /mcp endpoint is untouched. See billing/mpp/mcp.ts.
     if (config.mpp.mcpEnabled && config.mcpRemoteEnabled) {
       app.post(mppMcpPath, mcpLimiter, express.json({ limit: maxCapabilityBodyLimit() }),
-        createMppMcpHandler({ service: mppService, delegate: createRemoteMcpHandler(billingService, logger, analyticsRepository) }));
+        createMppMcpHandler({ service: mppService, delegate: createRemoteMcpHandler(billingService, logger, analyticsRepository, config) }));
     }
   } else {
     app.use(createMppDisabledRoutes());
@@ -489,7 +551,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     app.post(mcpCreditsPath, mcpLimiter, express.json({ limit: maxCapabilityBodyLimit() }), createCreditsMcpHandler({
       engine: billingEngine, config, capabilities,
       priceUsd: tool => billingService.getToolPrice(tool as CapabilityName),
-      delegate: createRemoteMcpHandler(billingService, logger, analyticsRepository),
+      delegate: createRemoteMcpHandler(billingService, logger, analyticsRepository, config),
       onToolCall: (event, req) => {
         void billingService.recordUsage({ requestId: randomUUID(), keyIdentifier: "mcp-credits", toolName: event.toolName as CapabilityName, accessMode: "mcp-credits", status: event.status, durationMs: event.durationMs, billableAmount: event.status < 400 ? billingService.getToolPrice(event.toolName as CapabilityName) : 0, currency: "USD" });
         recordToolInvocation(analyticsRepository, { toolName: event.toolName, channel: "mcp-remote", success: event.status < 400, durationMs: event.durationMs, dataSource: event.data === undefined ? null : classifyDataSource(event.toolName as CapabilityName, event.data), client: extractClientContext(req) });
@@ -510,7 +572,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     // through untouched.
     // The MCP endpoint carries every tool's arguments, so it accepts the largest per-tool body limit.
     app.use(mcpRemotePath, express.json({ limit: maxCapabilityBodyLimit() }));
-    app.all(mcpRemotePath, createRemoteMcpHandler(billingService, logger, analyticsRepository));
+    app.all(mcpRemotePath, createRemoteMcpHandler(billingService, logger, analyticsRepository, config));
   }
   // Partner Data Feed layer (Section 3/4/9/11) — deliberately outside the `capabilities` registry
   // above, so it never appears in /agent.json, the tool catalog, remote MCP, or the x402 route

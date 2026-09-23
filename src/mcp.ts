@@ -9,4 +9,4 @@ const config = loadConfig(process.env, { requireApiKeys: false });
 // API and billed to that key's account (API credits / subscription). See mcp/hosted.ts.
 const apiKey = process.env.RAFID_API_KEY?.trim();
 const execute = apiKey ? createHostedExecutor({ apiKey, baseUrl: process.env.RAFID_API_URL, paymentMethod: process.env.RAFID_PAYMENT_METHOD }) : undefined;
-serveStdio(() => createMcpServer(createLogger(config.logLevel), { execute }));
+serveStdio(() => createMcpServer(createLogger(config.logLevel), { execute, previewConfig: config }));

@@ -8,6 +8,14 @@ export interface RateLimitOptions {
   max: number;
   /** Defaults to the caller's IP address (X-Forwarded-For's first hop, or the socket address). */
   keyGenerator?: (req: Request) => string;
+  /** Overrides the default `next(new ApiError(429, "RATE_LIMITED", ...))` behavior for a limited
+   *  request — used by preview/rateLimit.ts to return the Free Preview's own documented 429 body
+   *  shape (`{"error":"preview_rate_limited","retryAfterSeconds":N}`) instead of this app's
+   *  generic `{"error":{"code":...}}` envelope. Standard rate-limit headers (X-RateLimit-*,
+   *  Retry-After) are already set on `res` before this is called; the hook is responsible for
+   *  actually sending the response (or calling `next(...)` itself) — this function does nothing
+   *  further once `onLimited` returns. */
+  onLimited?: (req: Request, res: import("express").Response, info: { limit: number; windowMs: number; retryAfterSeconds: number }) => void;
 }
 
 /**
@@ -43,7 +51,9 @@ export function createRateLimiter(options: RateLimitOptions): RequestHandler {
     res.setHeader("X-RateLimit-Remaining", String(Math.max(0, max - entry.count)));
     res.setHeader("X-RateLimit-Reset", String(Math.ceil(entry.resetAt / 1000)));
     if (entry.count > max) {
-      res.setHeader("Retry-After", String(Math.max(1, Math.ceil((entry.resetAt - now) / 1000))));
+      const retryAfterSeconds = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+      res.setHeader("Retry-After", String(retryAfterSeconds));
+      if (options.onLimited) { options.onLimited(req, res, { limit: max, windowMs, retryAfterSeconds }); return; }
       next(new ApiError(429, "RATE_LIMITED", "Too many requests; slow down and retry later"));
       return;
     }
