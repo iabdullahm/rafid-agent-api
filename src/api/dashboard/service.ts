@@ -3,7 +3,7 @@ import type { AnalyticsEvent, AnalyticsRepository } from "../../analytics/types.
 import {
   WINDOW_MS, percentile,
   summarizeAllTime, summarizeDiscoveryAllTime, summarizeToolsAllTime, summarizeX402AllTime,
-  type ToolsWindow
+  type ToolsWindow, type X402Window
 } from "../../analytics/aggregate.js";
 import type { RevenueLedger, RevenueSettlement } from "../../revenue/types.js";
 import {
@@ -300,6 +300,120 @@ export interface ToolConversionRow {
   averageRevenuePerSettledCall: number | null;
   p50LatencyMs: number | null;
   p95LatencyMs: number | null;
+}
+
+// -----------------------------------------------------------------------------------------------
+// All Capabilities Overview (dashboard section added 2026-09-23) — every registered capability,
+// including ones with zero activity. Unlike toolConversion above (which only lists a tool with
+// some real signal this period), this section's entire purpose is complete visibility: it starts
+// from the capability REGISTRY (domain/capabilities.ts — the same canonical list revenueByTool
+// already unions in) in its own declared order, never from analytics/revenue keys, so a
+// capability with calls = 0 / challenges = 0 / settled = 0 still gets a row, and a capability
+// newly added to the registry appears automatically with no code change here. No new analytics
+// system and no new query: this reuses the exact same already-fetched, already period-scoped
+// `toolsWindow`, `x402Window` and `toolRevenue` buildDashboardData() already computed for
+// toolConversion/revenueByTool above — merged per capability instead of filtered/unioned.
+// -----------------------------------------------------------------------------------------------
+
+export type CapabilityOverviewSortKey = "registry" | "calls" | "revenue" | "settled" | "conversion";
+export const CAPABILITY_OVERVIEW_SORT_KEYS: readonly CapabilityOverviewSortKey[] = ["registry", "calls", "revenue", "settled", "conversion"];
+
+export interface CapabilityOverviewRow {
+  toolName: string;
+  /** The capability's current public price, read straight off the registry (domain/
+   *  capabilities.ts) — the single source of truth billing/catalog.ts's `prices` is itself
+   *  derived from — never a second literal. */
+  price: number;
+  priceCurrency: string;
+  /** This capability's position in the registry array — what "Registry order" (the default sort)
+   *  sorts by; never recomputed from anything else, so registry order is always exactly the
+   *  registry's own declared order. */
+  registryIndex: number;
+  calls: number;
+  successCount: number;
+  failureCount: number;
+  challenges: number;
+  settledCalls: number;
+  /** null when challenges === 0 — no opportunity to convert, never a fabricated 0%. 0 (a real
+   *  number, not null) when challenges > 0 but settledCalls === 0 — see conversionPct below. */
+  conversionPct: number | null;
+  /** Per-currency breakdown of this capability's settled revenue — authoritative, never blended
+   *  across currencies/assets (see revenue/aggregate.ts's revenueByCurrency()). */
+  revenueByCurrency: Record<string, number>;
+  /** Single-currency convenience: null when zero settled, or when settled rows for this
+   *  capability span more than one currency — same rule as RevenueToolStats.revenue. Read
+   *  revenueByCurrency for the always-correct, never-combined breakdown. */
+  revenue: number | null;
+  currency: string | null;
+  averageRevenuePerSettledCall: number | null;
+  p50LatencyMs: number | null;
+  p95LatencyMs: number | null;
+}
+
+/** Builds one row per REGISTERED capability (domain/capabilities.ts's `capabilities` array),
+ *  in registry order — deliberately `capabilities.map(...)`, never `Object.keys(toolsWindow.byTool)`
+ *  or any other analytics-derived key set, so a capability with zero activity this period (or
+ *  ever) still gets a row, and the capability list itself is never hardcoded here: adding a
+ *  capability to the registry is the only change needed for it to appear. `toolsWindow`,
+ *  `x402Window` and `toolRevenue` are the exact same already-fetched, already period-scoped
+ *  aggregates buildDashboardData() computes once and also feeds to toolConversion/revenueByTool —
+ *  this performs no additional query. */
+export function buildCapabilityOverview(args: {
+  toolsWindow: ToolsWindow;
+  x402Window: X402Window;
+  toolRevenue: Record<string, RevenueToolStats>;
+}): CapabilityOverviewRow[] {
+  const { toolsWindow, x402Window, toolRevenue } = args;
+  return capabilities.map((capability, registryIndex): CapabilityOverviewRow => {
+    const callStats = toolsWindow.byTool[capability.name];
+    const x402Stats = x402Window.byTool[capability.name];
+    const revStats: RevenueToolStats = toolRevenue[capability.name] ?? {
+      settledCalls: 0, failedSettlements: 0, revenueByCurrency: {}, revenue: null, currency: null
+    };
+    const challenges = x402Stats?.challenges ?? 0;
+    // Deliberately settledCalls (revenue ledger) / challenges (analytics), the exact same
+    // conversion definition toolConversion uses above — never analytics' own settlement_success
+    // event count, so this number can never drift from what Reconciliation would also catch.
+    // challenges === 0 -> null ("—" in the UI); challenges > 0 && settledCalls === 0 -> a real 0,
+    // never fabricated, never hidden.
+    const conversionPct = challenges === 0 ? null : round((revStats.settledCalls / challenges) * 100, 1);
+    return {
+      toolName: capability.name,
+      price: capability.price,
+      priceCurrency: capability.currency,
+      registryIndex,
+      calls: callStats?.calls ?? 0,
+      successCount: callStats?.successCount ?? 0,
+      failureCount: callStats?.failureCount ?? 0,
+      challenges,
+      settledCalls: revStats.settledCalls,
+      conversionPct,
+      revenueByCurrency: revStats.revenueByCurrency,
+      revenue: revStats.revenue,
+      currency: revStats.currency,
+      averageRevenuePerSettledCall: revStats.revenue !== null && revStats.settledCalls > 0
+        ? round(revStats.revenue / revStats.settledCalls, 4) : null,
+      p50LatencyMs: callStats?.p50LatencyMs ?? null,
+      p95LatencyMs: callStats?.p95LatencyMs ?? null
+    };
+  });
+}
+
+/** Pure, exported, directly unit-tested — same "descending-only, revenue-descending tie-break"
+ *  discipline as sortToolConversionRows() above, plus the "registry" key this section defaults
+ *  to (ascending by registryIndex — the registry's own order, not a ranking). page.ts's
+ *  client-side sort control reimplements this same ordering inline (no import mechanism in a
+ *  dependency-free browser script) — keep the two in sync when changing either. */
+export function sortCapabilityOverviewRows(rows: readonly CapabilityOverviewRow[], key: CapabilityOverviewSortKey): CapabilityOverviewRow[] {
+  const byRevenue = (a: CapabilityOverviewRow, b: CapabilityOverviewRow) =>
+    (b.revenue ?? -1) - (a.revenue ?? -1) || b.settledCalls - a.settledCalls;
+  const sorted = [...rows];
+  if (key === "registry") sorted.sort((a, b) => a.registryIndex - b.registryIndex);
+  else if (key === "calls") sorted.sort((a, b) => b.calls - a.calls || byRevenue(a, b));
+  else if (key === "settled") sorted.sort((a, b) => b.settledCalls - a.settledCalls || byRevenue(a, b));
+  else if (key === "conversion") sorted.sort((a, b) => (b.conversionPct ?? -1) - (a.conversionPct ?? -1) || byRevenue(a, b));
+  else sorted.sort(byRevenue);
+  return sorted;
 }
 
 export interface X402FunnelReport {
@@ -629,6 +743,11 @@ export interface DashboardData {
    *  full always-list-every-capability convention revenueByTool uses, since the empty state here
    *  is "No tool usage recorded in this period," not a full zeroed table. */
   toolConversion: ToolConversionRow[];
+  /** "All Capabilities Overview" — one row per REGISTERED capability, registry order, including
+   *  zero-activity capabilities (see buildCapabilityOverview()'s doc comment). Deliberately the
+   *  full always-list-every-capability convention revenueByTool uses, not toolConversion's
+   *  activity-filtered one. */
+  capabilityOverview: CapabilityOverviewRow[];
   x402Funnel: X402FunnelReport;
   usage: UsageReport;
   transactions: TransactionRow[];
@@ -757,6 +876,12 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
     // the empty-state rule in the doc comment above.
     .filter(row => row.calls > 0 || row.challenges > 0 || row.settledCalls > 0)
     .sort((a, b) => (b.revenue ?? -1) - (a.revenue ?? -1) || b.settledCalls - a.settledCalls);
+
+  // ---- All Capabilities Overview — every registered capability, registry order, zero-activity
+  // rows included. Reuses toolsWindow/x402Window/toolRevenue exactly as computed above for
+  // toolConversion — no new query, no new aggregation source. ----
+  const capabilityOverview = buildCapabilityOverview({ toolsWindow, x402Window, toolRevenue });
+
   const toolDurations = events.filter(e => e.category === "tool" && typeof e.durationMs === "number").map(e => e.durationMs!);
   const usage: UsageReport = {
     discoveryHits: discoveryWindow.totalHits,
@@ -820,7 +945,8 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   };
 
   return {
-    period, generatedAt: now.toISOString(), revenue, paidCalls, revenueTrend, revenueByTool, toolConversion, x402Funnel, usage,
+    period, generatedAt: now.toISOString(), revenue, paidCalls, revenueTrend, revenueByTool, toolConversion,
+    capabilityOverview, x402Funnel, usage,
     transactions, reconciliation: { anomalyCount: anomalies.length, anomalies }, systemStatus,
     agents, activityFeed, systemHealth, sparklines
   };

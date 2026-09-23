@@ -9,12 +9,15 @@ import { hashAdminPassword } from "../src/middleware/adminAuth.js";
 import { buildSettlementDedupeKey } from "../src/revenue/idempotency.js";
 import {
   abbreviateTxHash, explorerUrlFor, buildRevenueTrend, sortToolConversionRows,
-  buildAgentStatuses, buildActivityFeed, buildSystemHealthScore, buildCountSparkline, buildSettlementCountSparkline
+  buildAgentStatuses, buildActivityFeed, buildSystemHealthScore, buildCountSparkline, buildSettlementCountSparkline,
+  buildCapabilityOverview, sortCapabilityOverviewRows
 } from "../src/api/dashboard/service.js";
 import type { RevenueSettlement, RevenueSettlementInput, RevenueLedger } from "../src/revenue/types.js";
 import type { AnalyticsEvent, AnalyticsEventInput } from "../src/analytics/types.js";
-import type { ToolConversionRow, SystemStatusReport, X402FunnelReport } from "../src/api/dashboard/service.js";
-import type { ToolsWindow } from "../src/analytics/aggregate.js";
+import type { ToolConversionRow, SystemStatusReport, X402FunnelReport, CapabilityOverviewRow } from "../src/api/dashboard/service.js";
+import type { ToolsWindow, X402Window } from "../src/analytics/aggregate.js";
+import type { RevenueToolStats } from "../src/revenue/aggregate.js";
+import { capabilities } from "../src/domain/capabilities.js";
 
 const apiKey = "test-only-not-a-real-credential-12345";
 const adminUsername = "ops-admin";
@@ -134,6 +137,28 @@ function x402FunnelFixture(overrides: Partial<X402FunnelReport> = {}): X402Funne
     conversion: { challengeToVerifiedPct: null, verifiedToSettledPct: null, challengeToSettledPct: null },
     ...overrides
   };
+}
+
+/** Fixture for pure-function tests of buildCapabilityOverview() — an X402Window with only the
+ *  named tools' challenge/settlement counts populated (every other tool defaults to "no
+ *  challenges", exactly as summarizeX402AllTime() would leave a tool with no x402 activity). */
+function x402WindowFixture(byTool: Record<string, { challenges: number; settlementSuccess?: number; settlementFailure?: number }>): X402Window {
+  const built: X402Window["byTool"] = {};
+  for (const [name, stats] of Object.entries(byTool)) {
+    built[name] = { challenges: stats.challenges, settlementSuccess: stats.settlementSuccess ?? 0, settlementFailure: stats.settlementFailure ?? 0 };
+  }
+  return {
+    challenges: Object.values(built).reduce((a, s) => a + s.challenges, 0),
+    paymentVerified: 0, paymentFailed: 0, settlementSuccess: 0, settlementFailure: 0,
+    settledAmountByCurrency: {}, byTool: built, recentSettlements: []
+  };
+}
+
+/** Fixture for one entry of the `toolRevenue: Record<string, RevenueToolStats>` map
+ *  buildCapabilityOverview() takes — the exact shape summarizeRevenueByTool() (revenue/
+ *  aggregate.ts) produces per tool. */
+function revenueToolStatsFixture(overrides: Partial<RevenueToolStats> = {}): RevenueToolStats {
+  return { settledCalls: 0, failedSettlements: 0, revenueByCurrency: {}, revenue: null, currency: null, ...overrides };
 }
 
 function systemStatusFixture(overrides: Partial<SystemStatusReport> = {}): SystemStatusReport {
@@ -732,6 +757,189 @@ test("sortToolConversionRows: sorting by total calls and by settled calls each r
   ];
   assert.deepEqual(sortToolConversionRows(rows, "calls").map(r => r.toolName), ["many-calls-no-revenue", "few-calls-high-revenue"]);
   assert.deepEqual(sortToolConversionRows(rows, "settled").map(r => r.toolName), ["few-calls-high-revenue", "many-calls-no-revenue"]);
+});
+
+// -------------------------------------------------------------------------------------------
+// All Capabilities Overview (dashboard section added 2026-09-23) — every registered capability,
+// registry order, zero-activity rows included. buildCapabilityOverview() is a pure merge over the
+// SAME already-fetched toolsWindow/x402Window/toolRevenue every other section above already uses
+// — no new query, no new aggregation source.
+// -------------------------------------------------------------------------------------------
+
+test("buildCapabilityOverview: the row list is always exactly capabilities.map(name), in registry order — never a hardcoded list, so a capability added to (or removed from) the registry automatically appears (or disappears) here with zero code changes", () => {
+  const rows = buildCapabilityOverview({
+    toolsWindow: toolsWindowFixture({}), x402Window: x402WindowFixture({}), toolRevenue: {}
+  });
+  assert.deepEqual(rows.map(r => r.toolName), capabilities.map(c => c.name));
+  assert.equal(rows.length, capabilities.length, "every registered capability must appear — none hidden, none invented");
+  rows.forEach((r, i) => assert.equal(r.registryIndex, i));
+});
+
+test("buildCapabilityOverview: a capability with zero calls, zero 402 challenges and zero settlements still gets a row, with real zeros (not nulls) for calls/success/failed/402/settled", () => {
+  const rows = buildCapabilityOverview({
+    toolsWindow: toolsWindowFixture({}), x402Window: x402WindowFixture({}), toolRevenue: {}
+  });
+  const idleCapability = capabilities[capabilities.length - 1]!;
+  const row = rows.find(r => r.toolName === idleCapability.name)!;
+  assert.ok(row, "a zero-activity capability must still appear");
+  assert.equal(row.calls, 0);
+  assert.equal(row.successCount, 0);
+  assert.equal(row.failureCount, 0);
+  assert.equal(row.challenges, 0);
+  assert.equal(row.settledCalls, 0);
+});
+
+test("buildCapabilityOverview: a zero-revenue capability reports revenue as null with an empty revenueByCurrency (never a fabricated 0), which the dashboard's shared renderRevenueCell contract renders as 0.00 USDC", () => {
+  const rows = buildCapabilityOverview({
+    toolsWindow: toolsWindowFixture({}), x402Window: x402WindowFixture({}), toolRevenue: {}
+  });
+  for (const row of rows) {
+    assert.equal(row.revenue, null);
+    assert.deepEqual(row.revenueByCurrency, {});
+    assert.equal(row.averageRevenuePerSettledCall, null);
+  }
+});
+
+test("buildCapabilityOverview: registry price and currency are read straight off the capability registry for every row", () => {
+  const rows = buildCapabilityOverview({
+    toolsWindow: toolsWindowFixture({}), x402Window: x402WindowFixture({}), toolRevenue: {}
+  });
+  for (const capability of capabilities) {
+    const row = rows.find(r => r.toolName === capability.name)!;
+    assert.equal(row.price, capability.price);
+    assert.equal(row.priceCurrency, capability.currency);
+  }
+});
+
+test("buildCapabilityOverview: calls/success/failure are merged from toolsWindow.byTool for the matching capability only, leaving every other capability at zero", () => {
+  const target = capabilities[0]!.name;
+  const rows = buildCapabilityOverview({
+    toolsWindow: toolsWindowFixture({ [target]: { calls: 12, successCount: 9, failureCount: 3 } }),
+    x402Window: x402WindowFixture({}), toolRevenue: {}
+  });
+  const targetRow = rows.find(r => r.toolName === target)!;
+  assert.equal(targetRow.calls, 12);
+  assert.equal(targetRow.successCount, 9);
+  assert.equal(targetRow.failureCount, 3);
+  for (const row of rows) {
+    if (row.toolName !== target) { assert.equal(row.calls, 0); assert.equal(row.successCount, 0); assert.equal(row.failureCount, 0); }
+  }
+});
+
+test("buildCapabilityOverview: revenue, settled calls and average-revenue-per-settled-call are merged from toolRevenue for the matching capability only", () => {
+  const target = capabilities[1]!.name;
+  const rows = buildCapabilityOverview({
+    toolsWindow: toolsWindowFixture({}), x402Window: x402WindowFixture({}),
+    toolRevenue: { [target]: revenueToolStatsFixture({ settledCalls: 3, revenue: 1.23, currency: "USDC", revenueByCurrency: { USDC: 1.23 } }) }
+  });
+  const targetRow = rows.find(r => r.toolName === target)!;
+  assert.equal(targetRow.settledCalls, 3);
+  assert.equal(targetRow.revenue, 1.23);
+  assert.equal(targetRow.currency, "USDC");
+  assert.equal(targetRow.averageRevenuePerSettledCall, Math.round((1.23 / 3) * 10000) / 10000);
+  for (const row of rows) {
+    if (row.toolName !== target) assert.equal(row.settledCalls, 0);
+  }
+});
+
+test("buildCapabilityOverview: conversion is settledCalls / challenges — null when challenges is 0 (never a fabricated 0%), a real 0 when challenges > 0 but nothing settled yet, and no divide-by-zero either way", () => {
+  const [noChallenges, withChallengesNoSettle, withChallengesAndSettle] = capabilities;
+  const rows = buildCapabilityOverview({
+    toolsWindow: toolsWindowFixture({}),
+    x402Window: x402WindowFixture({
+      [withChallengesNoSettle!.name]: { challenges: 5 },
+      [withChallengesAndSettle!.name]: { challenges: 4 }
+    }),
+    toolRevenue: { [withChallengesAndSettle!.name]: revenueToolStatsFixture({ settledCalls: 2, revenue: 0.8, currency: "USDC", revenueByCurrency: { USDC: 0.8 } }) }
+  });
+  assert.equal(rows.find(r => r.toolName === noChallenges!.name)!.conversionPct, null);
+  assert.equal(rows.find(r => r.toolName === withChallengesNoSettle!.name)!.conversionPct, 0);
+  assert.equal(rows.find(r => r.toolName === withChallengesAndSettle!.name)!.conversionPct, 50);
+});
+
+test("buildCapabilityOverview: settled rows spanning more than one currency for a capability are never combined into one number — revenue/currency are null, revenueByCurrency keeps each asset separate", () => {
+  const target = capabilities[2]!.name;
+  const rows = buildCapabilityOverview({
+    toolsWindow: toolsWindowFixture({}), x402Window: x402WindowFixture({}),
+    toolRevenue: { [target]: revenueToolStatsFixture({ settledCalls: 2, revenue: null, currency: null, revenueByCurrency: { USDC: 1, ETH: 0.0004 } }) }
+  });
+  const row = rows.find(r => r.toolName === target)!;
+  assert.equal(row.revenue, null, "must never guess/sum which currency to report when more than one is present");
+  assert.equal(row.currency, null);
+  assert.deepEqual(row.revenueByCurrency, { USDC: 1, ETH: 0.0004 });
+});
+
+test("sortCapabilityOverviewRows: 'registry' (the default) sorts ascending by registryIndex regardless of activity, reproducing the registry's own declared order", () => {
+  const rows: CapabilityOverviewRow[] = capabilities.map((c, i) => ({
+    toolName: c.name, price: c.price, priceCurrency: c.currency, registryIndex: i,
+    calls: 0, successCount: 0, failureCount: 0, challenges: 0, settledCalls: 0, conversionPct: null,
+    revenueByCurrency: {}, revenue: null, currency: null, averageRevenuePerSettledCall: null, p50LatencyMs: null, p95LatencyMs: null
+  }));
+  const shuffled = [rows[2]!, rows[0]!, rows[1]!];
+  const sorted = sortCapabilityOverviewRows(shuffled, "registry");
+  assert.deepEqual(sorted.map(r => r.registryIndex), [0, 1, 2]);
+});
+
+test("sortCapabilityOverviewRows: sorts by revenue/calls/settled/conversion each on their own column, with the same descending + revenue-tie-break discipline as sortToolConversionRows", () => {
+  function row(overrides: Partial<CapabilityOverviewRow>): CapabilityOverviewRow {
+    return {
+      toolName: "x", price: 0, priceCurrency: "USD", registryIndex: 0,
+      calls: 0, successCount: 0, failureCount: 0, challenges: 0, settledCalls: 0, conversionPct: null,
+      revenueByCurrency: {}, revenue: null, currency: null, averageRevenuePerSettledCall: null, p50LatencyMs: null, p95LatencyMs: null,
+      ...overrides
+    };
+  }
+  const rows = [
+    row({ toolName: "a", revenue: 1, settledCalls: 1, calls: 50, conversionPct: 10 }),
+    row({ toolName: "b", revenue: 5, settledCalls: 2, calls: 2, conversionPct: 80 }),
+    row({ toolName: "c", revenue: null, settledCalls: 0, calls: 0, conversionPct: null })
+  ];
+  assert.deepEqual(sortCapabilityOverviewRows(rows, "revenue").map(r => r.toolName), ["b", "a", "c"]);
+  assert.deepEqual(sortCapabilityOverviewRows(rows, "calls").map(r => r.toolName), ["a", "b", "c"]);
+  assert.deepEqual(sortCapabilityOverviewRows(rows, "settled").map(r => r.toolName), ["b", "a", "c"]);
+  assert.deepEqual(sortCapabilityOverviewRows(rows, "conversion").map(r => r.toolName), ["b", "a", "c"]);
+});
+
+test("dashboard All Capabilities Overview: the real HTTP payload lists every registered capability with the registry price, merges real calls/revenue for an active capability, and keeps every zero-activity capability visible even under a narrow period filter", async t => {
+  const { server, base, analyticsRepository, revenueLedger } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const activeCapability = capabilities[0]!.name;
+  await analyticsRepository.record(analyticsEvent({ toolName: activeCapability, channel: "x402", success: true }));
+  await analyticsRepository.record(analyticsEvent({ category: "x402", eventType: "challenge", toolName: activeCapability, success: null }));
+  revenueLedger.record(settlementRow({ toolName: activeCapability, amountDecimal: 0.25, currency: "USDC" }));
+  const cookie = await loginAndGetSessionCookie(base);
+
+  // A narrow, just-now period: the active capability's own activity is still inside it, but this
+  // also proves every OTHER capability keeps its row even though it truly has zero activity ever.
+  const res = await fetch(base + "/internal/dashboard/data?period=24h", { headers: { Cookie: cookie } });
+  const body = await res.json();
+  const overview: CapabilityOverviewRow[] = body.data.capabilityOverview;
+
+  assert.equal(overview.length, capabilities.length, "every registered capability must be present, none hidden for lack of activity");
+  assert.deepEqual(overview.map(r => r.toolName), capabilities.map(c => c.name), "default payload order is registry order");
+
+  const activeRow = overview.find(r => r.toolName === activeCapability)!;
+  assert.equal(activeRow.calls, 1);
+  assert.equal(activeRow.challenges, 1);
+  assert.equal(activeRow.settledCalls, 1);
+  assert.equal(activeRow.revenue, 0.25);
+  assert.equal(activeRow.price, capabilities[0]!.price);
+
+  const idleRow = overview.find(r => r.toolName === capabilities[capabilities.length - 1]!.name)!;
+  assert.equal(idleRow.calls, 0);
+  assert.equal(idleRow.challenges, 0);
+  assert.equal(idleRow.settledCalls, 0);
+  assert.equal(idleRow.revenue, null);
+  assert.equal(idleRow.conversionPct, null);
+});
+
+test("dashboard UI: the All Capabilities Overview panel and its sort control are present in the rendered page", async t => {
+  const { server, base } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const cookie = await loginAndGetSessionCookie(base);
+  const html = await (await fetch(base + "/internal/dashboard", { headers: { Cookie: cookie } })).text();
+  assert.ok(html.includes("All Capabilities Overview"));
+  assert.ok(html.includes('id="capability-overview-sort"'));
 });
 
 // -------------------------------------------------------------------------------------------

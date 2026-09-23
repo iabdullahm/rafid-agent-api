@@ -223,6 +223,7 @@ tr.row-new { animation: rowFlashIn .9s ease-out; }
 @keyframes rowFlashIn { 0% { background:rgba(52,224,161,0.22); } 100% { background:transparent; } }
 tr.row-new.failed { animation-name: rowFlashInRed; }
 @keyframes rowFlashInRed { 0% { background:rgba(255,107,122,0.22); } 100% { background:transparent; } }
+tr.row-idle td { opacity:0.5; }
 
 /* ---------------------------------------------------------------- Bars (Revenue by capability) */
 .bar-list { display:flex; flex-direction:column; gap:9px; }
@@ -775,6 +776,70 @@ const CLIENT_SCRIPT = `
   }
 
   // =============================================================================================
+  // All Capabilities Overview — every registered capability (server sends registry order, zero-
+  // activity rows included — see service.ts's buildCapabilityOverview()). Default sort is
+  // "registry" (registryIndex ascending, i.e. exactly the registry's own declared order); the
+  // other keys mirror sortCapabilityOverviewRows() in service.ts exactly (kept in sync manually —
+  // this is a dependency-free browser script with no import mechanism).
+  // =============================================================================================
+  function sortCapabilityOverview(rows, key) {
+    var sorted = rows.slice();
+    var byRevenue = function (a, b) { return (b.revenue !== null ? b.revenue : -1) - (a.revenue !== null ? a.revenue : -1) || b.settledCalls - a.settledCalls; };
+    if (key === "calls") sorted.sort(function (a, b) { return b.calls - a.calls || byRevenue(a, b); });
+    else if (key === "settled") sorted.sort(function (a, b) { return b.settledCalls - a.settledCalls || byRevenue(a, b); });
+    else if (key === "conversion") sorted.sort(function (a, b) { return (b.conversionPct !== null ? b.conversionPct : -1) - (a.conversionPct !== null ? a.conversionPct : -1) || byRevenue(a, b); });
+    else if (key === "revenue") sorted.sort(byRevenue);
+    else sorted.sort(function (a, b) { return a.registryIndex - b.registryIndex; }); // "registry" (default)
+    return sorted;
+  }
+
+  function fmtPrice(r) {
+    // Every capability is priced in USD today (domain/capabilities.ts's CURRENCY const) — the "$"
+    // prefix matches the existing convention in landing.ts/llms-txt.ts (a "$" + fixed-2 price).
+    // Falls back to "<amount> <currency>" rather than assuming "$" for any future non-USD price.
+    return r.priceCurrency === "USD" ? "$" + Number(r.price).toFixed(2) : Number(r.price).toFixed(2) + " " + esc(r.priceCurrency);
+  }
+
+  function renderCapabilityOverview(data) {
+    lastDashboardData = data;
+    var el = document.getElementById("capability-overview");
+    var sortSelect = document.getElementById("capability-overview-sort");
+    var key = sortSelect ? sortSelect.value : "registry";
+    var rows = sortCapabilityOverview(data.capabilityOverview || [], key);
+    el.innerHTML = table(
+      [
+        { header: "Capability", render: function (r) { return esc(r.toolName); } },
+        { header: "Price", right: true, render: function (r) { return fmtPrice(r); } },
+        { header: "Calls", right: true, render: function (r) { return fmtNum(r.calls); } },
+        { header: "Success", right: true, render: function (r) { return fmtNum(r.successCount); } },
+        { header: "Failed", right: true, render: function (r) { return fmtNum(r.failureCount); } },
+        { header: "402", right: true, render: function (r) { return fmtNum(r.challenges); } },
+        { header: "Settled", right: true, render: function (r) { return fmtNum(r.settledCalls); } },
+        { header: "Conversion", right: true, render: function (r) { return r.conversionPct === null ? "—" : r.conversionPct + "%"; } },
+        { header: "Revenue", right: true, render: function (r) { return renderRevenueCell(r); } },
+        { header: "Avg / Paid", right: true, render: function (r) { return renderAvgCell(r); } },
+        { header: "p50", right: true, render: function (r) { return fmtMs(r.p50LatencyMs); } },
+        { header: "p95", right: true, render: function (r) { return fmtMs(r.p95LatencyMs); } }
+      ],
+      rows,
+      "No registered capabilities.",
+      function (r) {
+        // Existing visual styling only: row-highlight (already used for settled-revenue rows in
+        // Top Tools) for a capability with real settled revenue; row-idle (a plain opacity dim,
+        // no new color) for a capability with zero calls AND zero 402 challenges this period;
+        // otherwise the default row style (an "active calls, not yet settled" capability).
+        var cls = "clickable";
+        if (r.settledCalls > 0) cls += " row-highlight";
+        else if (r.calls === 0 && r.challenges === 0) cls += " row-idle";
+        return ' class="' + cls + '" data-tool="' + esc(r.toolName) + '"';
+      }
+    );
+    el.querySelectorAll("tbody tr").forEach(function (tr) {
+      tr.addEventListener("click", function () { openCapabilityDrawer(tr.getAttribute("data-tool")); });
+    });
+  }
+
+  // =============================================================================================
   // Latest Settlements — success glow / failure pulse on newly-arrived rows
   // =============================================================================================
   var knownSettlementKeys = null;
@@ -936,6 +1001,7 @@ const CLIENT_SCRIPT = `
     renderRevenueKpis(data);
     renderTrend(data);
     renderRevenueByTool(data);
+    renderCapabilityOverview(data);
     renderX402Funnel(data);
     renderUsage(data);
     renderToolConversion(data);
@@ -999,6 +1065,10 @@ const CLIENT_SCRIPT = `
     var searchInput = document.getElementById("tool-search");
     if (searchInput) {
       searchInput.addEventListener("input", function () { toolSearchQuery = searchInput.value; if (lastDashboardData) renderToolConversion(lastDashboardData); });
+    }
+    var capabilitySortSelect = document.getElementById("capability-overview-sort");
+    if (capabilitySortSelect) {
+      capabilitySortSelect.addEventListener("change", function () { if (lastDashboardData) renderCapabilityOverview(lastDashboardData); });
     }
     var drawerClose = document.getElementById("drawer-close");
     if (drawerClose) drawerClose.addEventListener("click", closeCapabilityDrawer);
@@ -1131,6 +1201,23 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
       <div class="panel">
         <h2>Revenue by Capability</h2>
         <div id="revenue-by-tool"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head">
+          <h2>All Capabilities Overview</h2>
+          <label class="sort-control">Sort by
+            <select id="capability-overview-sort">
+              <option value="registry">Registry Order</option>
+              <option value="calls">Calls</option>
+              <option value="revenue">Revenue</option>
+              <option value="settled">Settled Payments</option>
+              <option value="conversion">Conversion</option>
+            </select>
+          </label>
+        </div>
+        <p class="panel-desc">Every registered capability &mdash; including ones with zero activity yet. The row list comes from the capability registry, not from analytics or revenue.</p>
+        <div id="capability-overview"></div>
       </div>
 
       <div class="grid-2">
