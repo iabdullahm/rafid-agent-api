@@ -52,7 +52,7 @@ import { MemoryL402RedemptionStore, PostgresL402RedemptionStore, type L402Redemp
 import { buildL402SettlementRecord } from "../billing/l402/settlement.js";
 import { recordL402Event } from "../analytics/recorder.js";
 import { createMppMcpHandler, mppMcpPath } from "../billing/mpp/mcp.js";
-import { buildMppService, buildMppInfo, buildMppStatus, createMppDisabledRoutes, createMppRoutes, mppBasePath, type MppAuditSink, type MppProvider, type MppSessionRepository, type MppChargeRedemptionStore, type MppKv } from "../billing/mpp/index.js";
+import { buildMppService, buildMppInfo, buildMppStatus, createMppDisabledRoutes, createMppRoutes, createMppSessionCreateLimiter, mppBasePath, type MppAuditSink, type MppProvider, type MppSessionRepository, type MppChargeRedemptionStore, type MppKv, type MppService } from "../billing/mpp/index.js";
 export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number; mppProvider?: MppProvider; mppSessions?: MppSessionRepository; mppRedemptions?: MppChargeRedemptionStore; mppKv?: MppKv; mppAudit?: MppAuditSink; mppNow?: () => Date } = {}) {
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
   const store = config.authMode === "postgres" ? options.store : undefined;
@@ -226,7 +226,12 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   app.get(l402BasePath + "/status", (_req, res) => send(res, buildL402Status(config)));
   // MPP info + status: always mounted, independent of MPP_ENABLED, exactly like x402/L402 above.
   app.get(mppBasePath, mppLimiter, (_req, res) => send(res, buildMppInfo(config.mpp, t => billingService.getToolPrice(t))));
-  app.get(mppBasePath + "/status", mppLimiter, (_req, res) => send(res, buildMppStatus(config.mpp)));
+  // When the rail is enabled the status also reports provider reachability (cached eth_chainId
+  // probe — never a payment) and database readiness.
+  let mppServiceRef: MppService | null = null;
+  app.get(mppBasePath + "/status", mppLimiter, async (_req, res, next) => {
+    try { send(res, mppServiceRef ? { ...buildMppStatus(config.mpp), ...(await mppServiceRef.status()) } : buildMppStatus(config.mpp)); } catch (error) { next(error); }
+  });
   const authenticate: RequestHandler = store ? async (req, res, next) => {
     try {
       const principal = await store.authenticate(req.header("x-api-key") ?? "");
@@ -398,7 +403,8 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       x402: { facilitatorUrl: config.x402FacilitatorUrl, cdpConfigured: config.cdpConfigured, cdpApiKeyId: config.cdpApiKeyId, cdpApiKeySecret: config.cdpApiKeySecret },
       provider: options.mppProvider, sessions: options.mppSessions, redemptions: options.mppRedemptions, kv: options.mppKv, now: options.mppNow
     });
-    app.use(createMppRoutes({ service: mppService, limiter: mppLimiter }));
+    mppServiceRef = mppService;
+    app.use(createMppRoutes({ service: mppService, limiter: mppLimiter, sessionCreateLimiter: config.rateLimitEnabled ? createMppSessionCreateLimiter(config.mpp) : disabledRateLimiter }));
     // Optional MPP-over-MCP payment layer (MPP_MCP_ENABLED=true): the MPP MCP transport binding
     // on its own path, delegating everything but tools/call to the standard MCP handler, so the
     // free /mcp endpoint is untouched. See billing/mpp/mcp.ts.

@@ -129,6 +129,10 @@ export interface OpenedSession {
 
 export interface SettlementResult {
   reference: string;
+  /** Serialized receipt the SDK returned (the payer's client validates it on close). */
+  receiptHeader?: string;
+  /** True when the channel itself was closed/finalized (payer close), false for a settle. */
+  finalized?: boolean;
   /** Cumulative amount captured on-chain for this channel after this operation. */
   settledMicros: number;
   /** Amount newly captured by this operation. */
@@ -184,4 +188,10 @@ export interface MppProvider {
   /** Accepts the payer's `close` credential: closes the channel on-chain, capturing exactly the
    *  metered spend and refunding the rest of the deposit. */
   closeSession(authorization: string, args: { channelId: string; scope: string }): Promise<SettlementResult>;
+  /** Reads the channel's authoritative on-chain state (deposit/settled). No transaction. */
+  readOnChainChannel(channelId: string): Promise<{ depositMicros: number; settledMicros: number; closeRequested: boolean } | null>;
+  /** Cheap reachability check of the payment network (e.g. eth_chainId). Never a payment. */
+  probe(timeoutMs?: number): Promise<{ reachable: boolean; chainId: number | null; reason: string | null }>;
+  /** Optional listener for settlements the SDK confirms (see MppxProvider.onSettlement). */
+  onSettlement?: ((event: { channelId: string; reference: string; settledMicros: number; deltaMicros: number; trigger: string }) => void) | undefined;
 }

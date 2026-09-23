@@ -772,18 +772,47 @@ To add another MPP method later (Stripe SPT, Solana, another EVM chain), write a
    The response is the normal tool output plus `usage: { sessionId, tool, charge, spent, remaining, calls, status }` (kept outside `data`). A failed tool call is never charged. Retrying the same `Idempotency-Key` returns the stored result and charges nothing. The same key with a different tool or input returns `422 MPP_IDEMPOTENCY_CONFLICT`.
 3. **Meter.** `GET /api/v1/mpp/sessions/{id}` returns status, `spent`, `remaining`, `calls`, `usageByTool`, and the channel view (deposit, accepted voucher, metered, settled on-chain).
 4. **Close.** `POST /api/v1/mpp/sessions/{id}/close` is idempotent. It stops calls, finalizes metering and settles:
-   - With the payer's channel `close` credential, the channel closes on-chain capturing **exactly the metered spend**, and the rest of the deposit is refunded.
+   - With the payer's channel `close` credential, the channel closes on-chain capturing **exactly the metered spend**, and the rest of the deposit is refunded. The response carries the SDK's `Payment-Receipt`. mppx's `sessionManager.close()` sends this credential as a body-less POST to the last URL it used (often a tool route), so every session route accepts a `close` credential before body parsing and never runs a tool for it. `topUp` credentials are refused (`400`): open a new session instead.
    - Without it, the server calls `tempo.session.settle()`, but only when the signed voucher equals the metered spend. That function captures the signed voucher, so it is never used when that would over-capture. Otherwise `settlement.status` is `pending_payer_close`.
    - Settled amounts are written to the revenue ledger once, as `toolName: "mpp_session"`. The per-tool reconciliation leaves these rows out because they are not per-call settlements.
 5. **States.** A session is one of `pending`, `active`, `exhausted`, `closed`, `expired` (`MPP_SESSION_TTL_SECONDS`) or `failed`. Calls are rejected unless the session is `active`: `exhausted` → `402`, `closed` → `409`, `expired` → `410`.
+6. **Settlement states.** `settlement.status` is one of:
+
+   | Status | Meaning |
+   |---|---|
+   | `not_started` | Not attempted yet |
+   | `pending` | An attempt holds a lease (`MPP_SETTLEMENT_LEASE_SECONDS`), or its outcome is unknown (RPC failure after broadcast). Never reported as success |
+   | `pending_payer_close` | No safe server settle exists; only the payer's close credential can capture exactly the spend |
+   | `settled` | The settle/close transaction's receipt was confirmed, or the chain already shows `settled ≥ spent` |
+   | `nothing_to_settle` | Nothing was metered |
+   | `failed` | A definitive failure (`settlement_error` holds the reason); the reconciler retries |
+
+   Every attempt first claims the row with a conditional `UPDATE` (a lease), so concurrent closes and maintenance runs can never both submit. On-chain settlement is cumulative, so even a retry after an unknown outcome cannot capture twice, and the ledger only records the delta the chain reports. The settlement reference (tx hash), attempt count and last error are stored on the session.
+
+**Pending-session cleanup and abuse limits.**
+
+- A pending session expires at challenge TTL + `MPP_PENDING_GRACE_SECONDS` (default 300 + 60 s). After that it can never be activated: activation is a conditional `UPDATE … WHERE status = 'pending' AND expires_at > now`. If a channel opens on-chain after expiry, the session is marked `failed` with the orphan channel id recorded, the payer gets `410 MPP_SESSION_EXPIRED` with the `channelId`, and nothing is metered (close the channel to recover the deposit).
+- `POST /api/v1/mpp/sessions` is limited per client address (`MPP_SESSION_CREATE_RATE_LIMIT_MAX` per minute, the existing fixed-window limiter, on when `RATE_LIMIT_ENABLED=true`). Each client may also hold at most `MPP_MAX_PENDING_SESSIONS_PER_CLIENT` unpaid pending sessions (`429 MPP_TOO_MANY_PENDING_SESSIONS`). The client key is `HMAC(MPP_SECRET_KEY, IP)`: the raw IP isn't stored, and a wallet address is never used because it is unproven before the channel opens.
+- **Maintenance** (`GET` or `POST /api/v1/mpp/internal/maintenance`, `Authorization: Bearer <MPP_MAINTENANCE_SECRET or CRON_SECRET>`, not in OpenAPI) does four things. Each is idempotent and safe on several instances at once (`FOR UPDATE SKIP LOCKED`, leases):
+  1. expire overdue pending sessions
+  2. expire active sessions past their TTL with nothing in flight (the channel is untouched)
+  3. reconcile settlements (read the chain first, then settle only if it can't over-capture)
+  4. delete expired never-opened sessions older than `MPP_PENDING_RETENTION_DAYS` (audit rows of opened sessions are kept)
+
+  Without a secret it answers `503`. There is no in-process scheduler. To schedule it on Vercel, set `CRON_SECRET` and add a cron to `vercel.json`, for example `{"crons":[{"path":"/api/v1/mpp/internal/maintenance","schedule":"*/10 * * * *"}]}`. Hobby plans only allow daily crons, so this repository doesn't ship one; any external scheduler that sends the bearer header works too. Lazy expiry on each request still applies in between runs.
+- `GET /api/v1/mpp/status`, when MPP is enabled, also reports:
+  - `configured`
+  - `provider.reachable` (a cached `eth_chainId` probe; never a payment)
+  - `database.ready`, plus session and settlement counts
+  - `charge`, `session`, `network` (`chainId`, `observedChainId`, `testnet`)
 
 **Persistence.** Tables are created automatically, like every other store in this repository, in one DDL transaction under an advisory lock:
 
 | Table | Holds | Keys and constraints |
 |---|---|---|
-| `mpp_sessions` | sessions | unique `external_session_id` (the channel id); a budget-invariant `CHECK` |
+| `mpp_sessions` | sessions | unique `external_session_id` (one channel backs one session); named `CHECK`s: `spent + reserved ≤ max`, `spent ≤ max`, `remaining ≥ 0`, `max ≤ requested`, non-negative counters, valid settlement status, a channel required once active/exhausted/closed |
 | `mpp_usage_events` | usage events | unique `(session_id, request_id)` = idempotency |
-| `mpp_charge_redemptions` | single-use charge credentials | — |
+| `mpp_charge_redemptions` | single-use charge credentials | primary key on the challenge id; `in_flight` / `redeemed` / `settlement_unknown` (only a stale `in_flight` claim is ever re-claimable) |
 | `mpp_kv` | the SDK's own channel state and replay markers | a linearizable read-modify-write under a per-key advisory lock |
 
 MPP uses `MPP_DATABASE_URL` if set and falls back to `DATABASE_URL`. Production refuses to start MPP without a database.
@@ -796,7 +825,13 @@ MPP uses `MPP_DATABASE_URL` if set and falls back to `DATABASE_URL`. Production 
 - Vouchers must come from the session's own channel.
 - Budget enforcement is atomic.
 - Settlement never captures unmetered authorization.
-- Structured audit events are emitted: `mpp.charge.created|verified|settled`, `mpp.session.created|opened|call|usage_recorded|exhausted|closed|expired|settled` and `mpp.payment.failed`. They never contain credentials, signatures, receipts or keys, and anything that looks like one is dropped.
+- Structured audit events (one JSON line each) are emitted:
+  - `mpp.charge.challenge|verified|settled|replay_rejected`
+  - `mpp.session.pending|pending_rejected|activated|call|usage_recorded|exhausted|budget_rejected|expired|closed|settlement_pending|settled|settlement_failed`
+  - `mpp.payment.failed` and `mpp.maintenance.run`
+
+  They carry only allow-listed public fields (ids, amounts, tx hashes, reasons). Credentials, signed vouchers, receipts, raw payment headers, keys and secrets are never logged, and anything that looks like one is dropped.
+- A charge whose settlement outcome is unknown (network failure while broadcasting) keeps its credential claimed (`settlement_unknown`), withholds the result and answers `502 MPP_SETTLEMENT_UNCONFIRMED`. It is never reported as success or as "not charged".
 
 **MCP.** Normal MCP stays at `/mcp`, free and unchanged: MCP handles tool discovery and invocation, and MPP handles payment. With `MPP_MCP_ENABLED=true`, `/mcp/mpp` serves the MPP MCP transport binding:
 

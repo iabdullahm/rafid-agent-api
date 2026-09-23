@@ -1,7 +1,9 @@
 import { Challenge, Credential, Errors, Receipt, type Store } from "mppx";
 import { Mppx, evm, tempo } from "mppx/server";
+import { Session as TempoSession } from "mppx/tempo";
 import { Assets } from "mppx/evm";
 import { createClient, http, type Client } from "viem";
+import { getChainId } from "viem/actions";
 import { privateKeyToAccount } from "viem/accounts";
 import { tempo as tempoMainnetChain, tempoModerato } from "viem/chains";
 import type { MppConfig } from "./config.js";
@@ -41,6 +43,9 @@ export class MppxProvider implements MppProvider {
   private readonly sessionStore: Store.AtomicStore | null;
   private readonly tempoClient: (args: { chainId?: number | undefined }) => Client;
   private readonly account: ReturnType<typeof privateKeyToAccount> | null;
+  /** Set by the service: receives every on-chain settle/close the SDK confirms (including ones
+   *  it triggers itself), so settlement references are always recorded. */
+  onSettlement: ((event: { channelId: string; reference: string; settledMicros: number; deltaMicros: number; trigger: string }) => void) | undefined;
 
   constructor(private readonly config: MppConfig, deps: {
     chargeStore: Store.AtomicStore;
@@ -75,6 +80,10 @@ export class MppxProvider implements MppProvider {
       methods.push(tempo.session({
         chainId: config.tempo.chainId, currency: config.tempo.currency, recipient: config.tempo.recipient!, decimals: 6,
         unitType: "request", store: deps.sessionStore, getClient: this.tempoClient,
+        onSessionSettlement: (ctx: { txHash: string; channelId: string; trigger: string; amount: bigint; delta: bigint }) => {
+          try { this.onSettlement?.({ channelId: ctx.channelId.toLowerCase(), reference: ctx.txHash, settledMicros: Number(ctx.amount), deltaMicros: Number(ctx.delta), trigger: ctx.trigger }); }
+          catch { /* recording must never affect the settlement itself */ }
+        },
         ...(this.account ? { account: this.account } : {})
       } as never));
     }
@@ -294,7 +303,7 @@ export class MppxProvider implements MppProvider {
       const txHash = await tempo.session.settle(this.sessionStore, this.tempoClient({}) as never, channelId.toLowerCase() as `0x${string}`, { account: this.account });
       const after = await this.getChannel(channelId);
       const settledMicros = after?.settledMicros ?? before.spentMicros;
-      return { reference: txHash, settledMicros, deltaMicros: settledMicros - before.settledMicros, ...this.sessionSettlementTarget() };
+      return { reference: txHash, settledMicros, deltaMicros: settledMicros - before.settledMicros, finalized: false, ...this.sessionSettlementTarget() };
     } catch (error) { throw this.mapError(error); }
   }
 
@@ -305,14 +314,39 @@ export class MppxProvider implements MppProvider {
     if (preview.channelId !== args.channelId.toLowerCase()) throw new MppPaymentFailure("invalid", "channel-mismatch");
     const before = await this.getChannel(args.channelId);
     try {
-      // A close credential may answer any challenge issued for this channel; the SDK re-checks
-      // the challenge HMAC, expiry and the voucher itself. The route amount is irrelevant to a
-      // management action, so the challenge's own request is used as-is.
+      // A close credential may answer any challenge issued for this channel (mppx's session
+      // manager answers the last one it saw); the SDK re-checks the challenge HMAC, expiry and the
+      // close voucher itself, and the payee-submitted close captures max(spent, settled).
       const receipt = await this.server.broadcastCredential(credential) as Receipt.Receipt & { txHash?: string };
       const after = await this.getChannel(args.channelId);
       const settledMicros = after?.settledMicros ?? before?.spentMicros ?? 0;
-      return { reference: receipt.txHash ?? receipt.reference, settledMicros, deltaMicros: settledMicros - (before?.settledMicros ?? 0), ...this.sessionSettlementTarget() };
+      return {
+        reference: receipt.txHash ?? receipt.reference, settledMicros, deltaMicros: settledMicros - (before?.settledMicros ?? 0),
+        receiptHeader: Receipt.serialize(receipt), finalized: after?.finalized ?? true, ...this.sessionSettlementTarget()
+      };
     } catch (error) { throw this.mapError(error); }
+  }
+
+  async readOnChainChannel(channelId: string): Promise<{ depositMicros: number; settledMicros: number; closeRequested: boolean } | null> {
+    if (!this.sessionStore) return null;
+    const raw = await this.sessionStore.get(channelId.toLowerCase()) as Record<string, unknown> | null;
+    const escrow = typeof raw?.escrowContract === "string" ? raw.escrowContract as `0x${string}` : undefined;
+    try {
+      const state = await TempoSession.Precompile.Chain.getChannelState(this.tempoClient({}) as never, channelId.toLowerCase() as `0x${string}`, escrow);
+      return { depositMicros: Number(state.deposit), settledMicros: Number(state.settled), closeRequested: Number(state.closeRequestedAt) !== 0 };
+    } catch { throw new MppPaymentFailure("unavailable", "rpc-read-failed"); }
+  }
+
+  async probe(timeoutMs = 3000): Promise<{ reachable: boolean; chainId: number | null; reason: string | null }> {
+    try {
+      const chainId = await Promise.race([
+        getChainId(this.tempoClient({}) as never),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs))
+      ]);
+      return { reachable: true, chainId, reason: chainId === this.config.tempo.chainId ? null : "chain-id-mismatch" };
+    } catch (error) {
+      return { reachable: false, chainId: null, reason: error instanceof Error && error.message === "timeout" ? "timeout" : "rpc-error" };
+    }
   }
 
   private sessionSettlementTarget() {

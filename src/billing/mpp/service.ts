@@ -6,7 +6,7 @@ import type { MppConfig } from "./config.js";
 import { MppError, mppErrors, type MppErrorCode } from "./errors.js";
 import { mppAudit, type MppAuditSink } from "./audit.js";
 import { parseIdempotencyKey, presentSession, remainingMicros, requestHash, termsDigest } from "./metering.js";
-import { MppPaymentFailure, type MppProvider, type PaymentChallenge } from "./provider.js";
+import { MppPaymentFailure, type MppProvider, type PaymentChallenge, type SettlementResult } from "./provider.js";
 import type { MppChargeRedemptionStore, MppSessionRepository } from "./sessions.js";
 import { buildMppChargeSettlementRecord, buildMppSessionSettlementRecord } from "./settlement.js";
 import { microsToUsd, usdToMicros, type MppSession } from "./types.js";
@@ -70,7 +70,15 @@ function problemBody(code: MppErrorCode | "INVALID_INPUT" | "INTERNAL_ERROR", me
 
 export class MppService {
   private readonly now: () => Date;
-  constructor(private readonly deps: MppServiceDeps) { this.now = deps.now ?? (() => new Date()); }
+  constructor(private readonly deps: MppServiceDeps) {
+    this.now = deps.now ?? (() => new Date());
+    // Every on-chain settle/close the SDK confirms — including ones it triggers on its own — is
+    // recorded against the session bound to that channel, so a settlement reference is never lost
+    // even if the request that caused it dies before writing its own result.
+    deps.provider.onSettlement = event => {
+      void deps.sessions.recordChannelSettlement(event.channelId, event.reference, event.settledMicros).catch(() => process.stderr.write("MPP recordChannelSettlement failed\n"));
+    };
+  }
 
   get config() { return this.deps.config; }
 
@@ -142,7 +150,7 @@ export class MppService {
     const challenge = async (error?: { code: MppErrorCode; message: string }): Promise<MppResult> => {
       try {
         const c = await this.deps.provider.createCharge(terms);
-        mppAudit(this.deps.audit, "mpp.charge.created", { requestId, tool: tool.name, amountUsd: microsToUsd(priceMicros), challengeId: c.challenges[0]?.id });
+        mppAudit(this.deps.audit, "mpp.charge.challenge", { requestId, tool: tool.name, amountUsd: microsToUsd(priceMicros), challengeId: c.challenges[0]?.id });
         return this.paymentRequired(c, describe, requestId, error);
       } catch { return this.errorResult(mppErrors.providerUnavailable(), requestId); }
     };
@@ -153,7 +161,7 @@ export class MppService {
     try { verified = await this.deps.provider.verifyCharge(args.authorization, terms); }
     catch (error) {
       const f = error instanceof MppPaymentFailure ? error : new MppPaymentFailure("unavailable", "provider-error");
-      mppAudit(this.deps.audit, "mpp.payment.failed", { requestId, tool: tool.name, reason: f.reason, status: f.kind });
+      mppAudit(this.deps.audit, f.kind === "replayed" ? "mpp.charge.replay_rejected" : "mpp.payment.failed", { requestId, tool: tool.name, reason: f.reason, status: f.kind });
       if (f.kind === "unavailable") return this.errorResult(mppErrors.providerUnavailable(), requestId);
       return challenge(this.failureToError(f));
     }
@@ -161,7 +169,7 @@ export class MppService {
     try { claimed = await this.deps.redemptions.claim(verified.challengeId, tool.name); }
     catch { return this.errorResult(mppErrors.storageUnavailable(), requestId); }
     if (!claimed) {
-      mppAudit(this.deps.audit, "mpp.payment.failed", { requestId, tool: tool.name, challengeId: verified.challengeId, reason: "replayed" });
+      mppAudit(this.deps.audit, "mpp.charge.replay_rejected", { requestId, tool: tool.name, challengeId: verified.challengeId, reason: "already_redeemed" });
       return challenge({ code: "MPP_PAYMENT_REPLAYED", message: "This payment credential was already used (or is in use by another request); a fresh challenge is attached." });
     }
     mppAudit(this.deps.audit, "mpp.charge.verified", { requestId, tool: tool.name, challengeId: verified.challengeId, method: verified.method });
@@ -178,8 +186,20 @@ export class MppService {
     try { settled = await this.deps.provider.settleCharge(args.authorization, terms); }
     catch (error) {
       const f = error instanceof MppPaymentFailure ? error : new MppPaymentFailure("unavailable", "provider-error");
+      if (f.kind === "unavailable") {
+        // Outcome unknown (e.g. network failure while the payment was being broadcast): the money
+        // may already have moved. Keep the credential claimed (it can never run the tool twice),
+        // withhold the result and report it as unconfirmed — never as success, never as "not charged".
+        await this.deps.redemptions.markSettlementUnknown(verified.challengeId, f.reason).catch(() => undefined);
+        mppAudit(this.deps.audit, "mpp.payment.failed", { requestId, tool: tool.name, challengeId: verified.challengeId, reason: f.reason, status: "settlement_unknown" });
+        return {
+          status: 502, headers: [],
+          body: problemBody("MPP_SETTLEMENT_UNCONFIRMED", "Settlement could not be confirmed (payment network unreachable). The tool result was withheld; check your wallet before paying again. Challenge id: " + verified.challengeId, requestId, { challengeId: verified.challengeId }),
+          executed: { tool: tool.name, success: false, channel: "mpp" }
+        };
+      }
       await this.deps.redemptions.release(verified.challengeId).catch(() => undefined);
-      mppAudit(this.deps.audit, "mpp.payment.failed", { requestId, tool: tool.name, challengeId: verified.challengeId, reason: f.reason, status: "settlement_failed" });
+      mppAudit(this.deps.audit, f.kind === "replayed" ? "mpp.charge.replay_rejected" : "mpp.payment.failed", { requestId, tool: tool.name, challengeId: verified.challengeId, reason: f.reason, status: "settlement_failed" });
       // Same rule as x402: the result of an unsettled call is withheld.
       const r = await challenge({ code: f.kind === "replayed" ? "MPP_PAYMENT_REPLAYED" : "MPP_SETTLEMENT_FAILED", message: `Payment settlement failed (${f.reason}); the tool result was withheld and nothing was charged.` });
       return { ...r, executed: { tool: tool.name, success: false, channel: "mpp" } };
@@ -203,7 +223,7 @@ export class MppService {
   // session — reusable authorization + metered usage
   // ==========================================================================================
 
-  async createSession(args: { body: unknown; authorization: string | undefined; url: string; requestId: string }): Promise<MppResult> {
+  async createSession(args: { body: unknown; authorization: string | undefined; url: string; requestId: string; clientKey?: string | null }): Promise<MppResult> {
     const { requestId } = args;
     const config = this.deps.config;
     if (!this.hasMode("session")) return this.errorResult(new MppError(404, "MPP_MODE_DISABLED", "MPP session mode is not enabled on this deployment."), requestId);
@@ -237,15 +257,29 @@ export class MppService {
 
     // ---- 1. No credential: create a pending session + an open-channel challenge ----------
     if (!args.authorization || !PAYMENT_SCHEME.test(args.authorization)) {
+      // Abuse cap: a client (hashed IP — never a wallet, which is unproven at this point) may hold
+      // only a few unpaid pending sessions at once. Combined with the per-route rate limiter and
+      // the pending TTL, unpaid probes can't grow the table without bound.
+      if (args.clientKey) {
+        let pending: number;
+        try { pending = await this.deps.sessions.countPendingForClient(args.clientKey, this.now()); }
+        catch { return this.errorResult(mppErrors.storageUnavailable(), requestId); }
+        if (pending >= config.maxPendingSessionsPerClient) {
+          mppAudit(this.deps.audit, "mpp.session.pending_rejected", { requestId, reason: "too_many_pending", status: String(pending) });
+          return this.errorResult(new MppError(429, "MPP_TOO_MANY_PENDING_SESSIONS", `Too many unpaid pending sessions from this client (limit ${config.maxPendingSessionsPerClient}); open one of them or wait for them to expire.`, { limit: config.maxPendingSessionsPerClient }), requestId, [["Retry-After", String(config.challengeTtlSeconds)]]);
+        }
+      }
       let session: MppSession;
       try {
         session = await this.deps.sessions.createPending({
           requestedBudgetMicros: budgetMicros, maxBudgetMicros: budgetMicros, allowedTools, paymentProvider: this.deps.provider.name,
-          paymentMethod: "tempo/session", termsDigest: digest,
-          expiresAt: new Date(this.now().getTime() + config.challengeTtlSeconds * 1000).toISOString(), metadata: {}
+          paymentMethod: "tempo/session", termsDigest: digest, clientKey: args.clientKey ?? null,
+          // The pending row outlives its open challenge by a small grace, so a credential the SDK
+          // accepted just before the challenge expired still finds its session pending.
+          expiresAt: new Date(this.now().getTime() + (config.challengeTtlSeconds + config.pendingGraceSeconds) * 1000).toISOString(), metadata: {}
         });
       } catch { return this.errorResult(mppErrors.storageUnavailable(), requestId); }
-      mppAudit(this.deps.audit, "mpp.session.created", { requestId, sessionId: session.id, amountUsd: microsToUsd(budgetMicros), status: "pending" });
+      mppAudit(this.deps.audit, "mpp.session.pending", { requestId, sessionId: session.id, amountUsd: microsToUsd(budgetMicros), status: "pending" });
       return challengeFor(session);
     }
 
@@ -271,6 +305,7 @@ export class MppService {
     if (session.status !== "pending") return this.errorResult(new MppError(409, "MPP_SESSION_NOT_ACTIVE", `This session is ${session.status} and can no longer be opened.`, { status: session.status }), requestId);
     if (Date.parse(session.expiresAt) <= this.now().getTime()) {
       await this.deps.sessions.expireIfDue(session.id, this.now()).catch(() => undefined);
+      mppAudit(this.deps.audit, "mpp.session.expired", { requestId, sessionId: session.id, status: "pending" });
       return this.errorResult(new MppError(410, "MPP_SESSION_EXPIRED", "The session-open challenge expired; request a new session."), requestId);
     }
 
@@ -287,12 +322,22 @@ export class MppService {
       externalSessionId: opened.channelId, maxBudgetMicros: effectiveMicros, authorizationReference: opened.reference,
       expiresAt: new Date(this.now().getTime() + config.sessionTtlSeconds * 1000).toISOString(),
       metadata: { depositMicros: opened.depositMicros }
-    }).catch(() => null);
+    }, this.now()).catch(() => null);
     if (!activated) {
+      const current = await this.deps.sessions.get(session.id).catch(() => null);
+      if (current && current.status !== "active" && !current.externalSessionId) {
+        // The channel opened on-chain but the pending session expired (or was expired by
+        // maintenance) in between: it must NOT become active. Record the orphan channel so an
+        // operator can see it; nothing was metered, and the payer recovers the whole deposit by
+        // closing the channel (mppx `sessions close` / requestClose + withdraw).
+        await this.deps.sessions.markFailed(session.id, "opened_after_expiry", { orphanChannelId: opened.channelId, orphanOpenReference: opened.reference }).catch(() => null);
+        mppAudit(this.deps.audit, "mpp.payment.failed", { requestId, sessionId: session.id, channelId: opened.channelId, reference: opened.reference, reason: "opened_after_expiry" });
+        return this.errorResult(new MppError(410, "MPP_SESSION_EXPIRED", "The session expired before its channel opened; nothing was charged. Close the channel to recover the deposit, then request a new session.", { channelId: opened.channelId }), requestId);
+      }
       mppAudit(this.deps.audit, "mpp.payment.failed", { requestId, sessionId: session.id, channelId: opened.channelId, reason: "channel_already_bound" });
       return this.errorResult(new MppError(409, "MPP_PAYMENT_REPLAYED", "This payment channel is already bound to another session."), requestId);
     }
-    mppAudit(this.deps.audit, "mpp.session.opened", { requestId, sessionId: activated.id, channelId: opened.channelId, reference: opened.reference, amountUsd: microsToUsd(effectiveMicros), status: "active" });
+    mppAudit(this.deps.audit, "mpp.session.activated", { requestId, sessionId: activated.id, channelId: opened.channelId, reference: opened.reference, amountUsd: microsToUsd(effectiveMicros), status: "active" });
     return {
       status: 201,
       headers: [["Payment-Receipt", opened.receiptHeader]],
@@ -382,7 +427,7 @@ export class MppService {
         };
       }
       if (reserved.reason === "status") return this.errorResult(this.statusError(reserved.session), requestId);
-      mppAudit(this.deps.audit, "mpp.payment.failed", { requestId, sessionId: session.id, tool: tool.name, reason: "budget_exceeded", amountUsd: microsToUsd(priceMicros), remainingUsd: microsToUsd(remainingMicros(reserved.session)) });
+      mppAudit(this.deps.audit, "mpp.session.budget_rejected", { requestId, sessionId: session.id, tool: tool.name, reason: "budget_exceeded", amountUsd: microsToUsd(priceMicros), remainingUsd: microsToUsd(remainingMicros(reserved.session)) });
       return this.errorResult(mppErrors.budgetExceeded(priceMicros, remainingMicros(reserved.session)), requestId);
     }
     const event = reserved.event;
@@ -454,9 +499,48 @@ export class MppService {
     };
   }
 
-  async closeSession(args: { sessionId: string; authorization: string | undefined; requestId: string }): Promise<MppResult> {
+  // ==========================================================================================
+  // close + settlement
+  // ==========================================================================================
+
+  private settlementView(s: MppSession) {
+    return { status: s.settlementStatus, reference: s.settlementReference, settled: microsToUsd(s.settledMicros), attempts: s.settlementAttempts, error: s.settlementError };
+  }
+
+  private closeUrl(sessionId: string) { return `https://${this.deps.config.realm}/api/v1/mpp/sessions/${sessionId}/close`; }
+
+  /** A fresh challenge on the channel that the payer can answer with its `close` credential. */
+  private async closeChallenge(session: MppSession, url?: string): Promise<PaymentChallenge | null> {
+    if (!session.externalSessionId) return null;
+    return this.deps.provider.sessionCallChallenge({
+      channelId: session.externalSessionId, amountMicros: this.cheapestMicros(session.allowedTools), scope: `rafid:session:${session.id}`,
+      url: url ?? this.closeUrl(session.id), description: `Close Rafid MPP session ${session.id}`
+    }).catch(() => null);
+  }
+
+  /**
+   * Settlement state machine (per session, stored in mpp_sessions.settlement_status):
+   *
+   *   not_started ──claim──▶ pending ──▶ settled | nothing_to_settle | pending_payer_close | failed
+   *                            │  (outcome unknown: stays pending; its lease expires and the
+   *                            │   reconciler re-checks the chain before anything is resubmitted)
+   *
+   * Every attempt first CLAIMS the row (claimSettlement: a conditional UPDATE holding a lease),
+   * so two concurrent closes, or a close racing the maintenance reconciler, can never both submit.
+   * On-chain settlement is cumulative (vouchers are cumulative amounts), so even a resubmission
+   * after an unknown outcome can't capture twice; the ledger records only the delta the chain
+   * reports. A result is "settled" only after the settle/close transaction's receipt is confirmed.
+   */
+  async closeSession(args: { sessionId: string; authorization: string | undefined; requestId: string; url?: string }): Promise<MppResult> {
     const { requestId } = args;
+    const config = this.deps.config;
     if (!this.hasMode("session")) return this.errorResult(new MppError(404, "MPP_MODE_DISABLED", "MPP session mode is not enabled on this deployment."), requestId);
+    const credential = args.authorization && PAYMENT_SCHEME.test(args.authorization) ? args.authorization : undefined;
+    const preview = credential ? this.deps.provider.previewCredential(credential) : null;
+    if (credential && (!preview || preview.intent !== "session" || preview.action !== "close")) {
+      return this.errorResult(new MppError(400, "MPP_INVALID_PAYMENT", "Only an MPP session 'close' credential is accepted here (or no credential, for a server-side settle)."), requestId);
+    }
+
     let closed;
     try {
       await this.deps.sessions.expireIfDue(args.sessionId, this.now());
@@ -468,44 +552,226 @@ export class MppService {
       return this.errorResult(this.statusError(closed.session), requestId);
     }
     let session = closed.session;
-    if (!closed.alreadyClosed) mppAudit(this.deps.audit, "mpp.session.closed", { requestId, sessionId: session.id, spentUsd: microsToUsd(session.spentMicros), status: "closed" });
+    if (!closed.alreadyClosed) mppAudit(this.deps.audit, "mpp.session.closed", { requestId, sessionId: session.id, channelId: session.externalSessionId, spentUsd: microsToUsd(session.spentMicros), status: "closed" });
+    const channelId = session.externalSessionId!;
+    if (preview && preview.channelId !== channelId.toLowerCase()) {
+      return this.errorResult(new MppError(400, "MPP_INVALID_PAYMENT", "The close credential is for a different payment channel than this session."), requestId);
+    }
 
-    // Settlement — separate from closing: metering is final the moment the session is closed.
     const headers: Array<[string, string]> = [];
-    if (session.settlementStatus !== "settled" && session.externalSessionId) {
-      const channelId = session.externalSessionId;
+    const respond = async (status = 200, extra: Record<string, unknown> = {}): Promise<MppResult> => {
+      const usageByTool = await this.deps.sessions.usageByTool(session.id).catch(() => ({}));
+      return { status, headers, body: { success: status < 400, data: { ...presentSession(session, { usageByTool }), settlement: this.settlementView(session) }, ...extra, ...(closed.alreadyClosed ? { idempotentReplay: true } : {}), meta: { requestId } } };
+    };
+
+    // Payer close of a channel that is already finalized: nothing left to do.
+    if (preview) {
+      const channel = await this.deps.provider.getChannel(channelId).catch(() => null);
+      if (channel?.finalized && session.settlementStatus === "settled") return respond();
+    } else if (session.settlementStatus === "settled" || session.settlementStatus === "nothing_to_settle") {
+      return respond();
+    } else if (session.spentMicros === 0 || session.spentMicros <= session.settledMicros) {
+      session = (await this.deps.sessions.finishSettlement(session.id, { settlementStatus: session.spentMicros === 0 ? "nothing_to_settle" : "settled" }).catch(() => null)) ?? session;
+      return respond();
+    }
+
+    const before = session.settlementStatus;
+    const claimed = await this.deps.sessions.claimSettlement(session.id, this.now(), config.settlementLeaseSeconds, { allowSettled: Boolean(preview) }).catch(() => null);
+    if (!claimed) {
+      // Another request (or the maintenance reconciler) holds the settlement lease.
+      session = (await this.deps.sessions.get(session.id).catch(() => null)) ?? session;
+      if (!preview) return respond();
+      return this.errorResult(new MppError(409, "MPP_SESSION_BUSY", "Settlement of this session is already in progress; retry shortly.", { sessionId: session.id, settlement: this.settlementView(session) }), requestId, [["Retry-After", "5"]]);
+    }
+    session = claimed;
+    mppAudit(this.deps.audit, "mpp.session.settlement_pending", { requestId, sessionId: session.id, channelId, attempts: session.settlementAttempts, reason: preview ? "payer_close" : "server_settle" });
+
+    let result: SettlementResult | null;
+    try {
+      result = preview
+        ? await this.deps.provider.closeSession(credential!, { channelId, scope: `rafid:session:${session.id}` })
+        : await this.deps.provider.settleSession(channelId);
+    } catch (error) {
+      const f = error instanceof MppPaymentFailure ? error : new MppPaymentFailure("unavailable", "provider-error");
+      if (f.kind === "unavailable") {
+        // Outcome unknown (the transaction may have been broadcast). Leave it `pending`: the lease
+        // expires and the reconciler reads the channel on-chain before anything is resubmitted.
+        mppAudit(this.deps.audit, "mpp.session.settlement_pending", { requestId, sessionId: session.id, channelId, reason: `outcome_unknown:${f.reason}`, attempts: session.settlementAttempts });
+        return this.errorResult(new MppError(502, "MPP_SETTLEMENT_UNCONFIRMED", "Settlement could not be confirmed (payment network unreachable). The session is closed; settlement will be reconciled.", { sessionId: session.id }), requestId);
+      }
+      if (preview && (f.kind === "payment_required" || f.kind === "invalid" || f.kind === "replayed")) {
+        // The close credential itself was rejected — not a settlement failure. Restore the prior
+        // state and hand the payer a fresh challenge to sign a new close credential for.
+        session = (await this.deps.sessions.finishSettlement(session.id, { settlementStatus: before === "pending" ? "not_started" : before, settlementError: `close_credential_rejected:${f.reason}` }).catch(() => null)) ?? session;
+        mppAudit(this.deps.audit, "mpp.payment.failed", { requestId, sessionId: session.id, channelId, reason: f.reason, status: "close_rejected" });
+        const c = await this.closeChallenge(session, args.url);
+        if (!c) return this.errorResult(mppErrors.providerUnavailable(), requestId);
+        return this.paymentRequired(c, { mode: "session", sessionId: session.id, action: "close" }, requestId, this.failureToError(f));
+      }
+      session = (await this.deps.sessions.finishSettlement(session.id, { settlementStatus: "failed", settlementError: f.reason }).catch(() => null)) ?? session;
+      mppAudit(this.deps.audit, "mpp.session.settlement_failed", { requestId, sessionId: session.id, channelId, reason: f.reason, attempts: session.settlementAttempts });
+      return respond();
+    }
+
+    if (!result) {
+      // No safe server-side settle (the accepted voucher exceeds the metered spend, or no payee
+      // key): only the payer's close credential can capture exactly the spend.
+      session = (await this.deps.sessions.finishSettlement(session.id, { settlementStatus: "pending_payer_close" }).catch(() => null)) ?? session;
+      const c = await this.closeChallenge(session, args.url);
+      if (c) headers.push(...c.headers);
+      return respond();
+    }
+    session = (await this.deps.sessions.finishSettlement(session.id, { settlementStatus: "settled", settlementReference: result.reference, settledMicros: result.settledMicros }).catch(() => null)) ?? session;
+    const record = buildMppSessionSettlementRecord({ result, sessionId: session.id, requestId });
+    if (record) this.deps.recordSettlement(record);
+    mppAudit(this.deps.audit, "mpp.session.settled", { requestId, sessionId: session.id, channelId, reference: result.reference, amountUsd: microsToUsd(result.deltaMicros), spentUsd: microsToUsd(session.spentMicros), status: result.finalized ? "channel_closed" : "settled" });
+    if (result.receiptHeader) headers.push(["Payment-Receipt", result.receiptHeader]);
+    return respond();
+  }
+
+  /**
+   * Session management credentials (`close`) the mppx client sends as a body-less POST to the
+   * last URL it used — often a tool route, not /close. Routes call this before body parsing;
+   * it returns null for anything that isn't a management credential. A management credential
+   * never runs a tool. `topUp` is not supported yet and is refused explicitly.
+   */
+  async sessionManagement(args: { sessionId?: string; authorization: string | undefined; url: string; requestId: string }): Promise<MppResult | null> {
+    if (!args.authorization || !PAYMENT_SCHEME.test(args.authorization)) return null;
+    const preview = this.deps.provider.previewCredential(args.authorization);
+    if (!preview || preview.intent !== "session" || (preview.action !== "close" && preview.action !== "topUp")) return null;
+    const { requestId } = args;
+    if (!this.hasMode("session")) return this.errorResult(new MppError(404, "MPP_MODE_DISABLED", "MPP session mode is not enabled on this deployment."), requestId);
+    if (preview.action === "topUp") {
+      return this.errorResult(new MppError(400, "MPP_INVALID_REQUEST", "Channel top-up is not supported; close this session and open a new one with a larger budget."), requestId);
+    }
+    let session: MppSession | null;
+    try {
+      session = args.sessionId ? await this.deps.sessions.get(args.sessionId) : preview.channelId ? await this.deps.sessions.getByExternalId(preview.channelId) : null;
+    } catch { return this.errorResult(mppErrors.storageUnavailable(), requestId); }
+    if (!session) return this.errorResult(mppErrors.sessionNotFound(), requestId);
+    return this.closeSession({ sessionId: session.id, authorization: args.authorization, requestId, url: args.url });
+  }
+
+  /**
+   * Reconciles sessions whose settlement isn't final (closed/expired with a channel; status
+   * not_started, failed, pending_payer_close, or pending with an expired lease). Each one is
+   * claimed first (lease), then the chain is READ: if the channel's on-chain settled amount
+   * already covers the metered spend it is marked settled (nothing resubmitted); otherwise a
+   * server settle is attempted only when it can't over-capture. Never reports success it didn't
+   * observe.
+   */
+  async reconcileSettlements(limit = 25): Promise<{ checked: number; settled: number; pendingPayerClose: number; failed: number; unknown: number; skipped: number }> {
+    const now = this.now();
+    const config = this.deps.config;
+    const out = { checked: 0, settled: 0, pendingPayerClose: 0, failed: 0, unknown: 0, skipped: 0 };
+    const candidates = await this.deps.sessions.settlementCandidates(now, config.settlementLeaseSeconds, limit);
+    for (const candidate of candidates) {
+      out.checked++;
+      if (candidate.spentMicros === 0) {
+        await this.deps.sessions.finishSettlement(candidate.id, { settlementStatus: "nothing_to_settle" }).catch(() => null);
+        continue;
+      }
+      const s = await this.deps.sessions.claimSettlement(candidate.id, now, config.settlementLeaseSeconds).catch(() => null);
+      if (!s) { out.skipped++; continue; }
+      const channelId = s.externalSessionId!;
+      const requestId = `maintenance:${randomUUID()}`;
       try {
-        let result = null;
-        if (args.authorization && PAYMENT_SCHEME.test(args.authorization)) {
-          // Payer-initiated close: captures exactly the metered spend, refunds the rest.
-          result = await this.deps.provider.closeSession(args.authorization, { channelId, scope: `rafid:session:${session.id}` });
-        } else if (session.spentMicros > session.settledMicros) {
-          // Server-initiated settle (only submitted by the provider when it can't over-capture).
-          result = await this.deps.provider.settleSession(channelId);
+        const chain = await this.deps.provider.readOnChainChannel(channelId);
+        const onChainSettled = chain?.settledMicros ?? 0;
+        if (chain && onChainSettled >= s.spentMicros) {
+          // Already captured on-chain (e.g. a close whose response was lost). Record it; the
+          // reference comes from the SDK's settlement hook when it was observed.
+          await this.deps.sessions.finishSettlement(s.id, { settlementStatus: "settled", settledMicros: onChainSettled });
+          mppAudit(this.deps.audit, "mpp.session.settled", { requestId, sessionId: s.id, channelId, reference: s.settlementReference, spentUsd: microsToUsd(s.spentMicros), status: "reconciled_onchain" });
+          out.settled++;
+          continue;
         }
-        if (result) {
-          const record = buildMppSessionSettlementRecord({ result, sessionId: session.id, requestId });
-          if (record) this.deps.recordSettlement(record);
-          session = (await this.deps.sessions.updateSettlement(session.id, { settlementStatus: "settled", settlementReference: result.reference, settledMicros: result.settledMicros })) ?? session;
-          mppAudit(this.deps.audit, "mpp.session.settled", { requestId, sessionId: session.id, channelId, reference: result.reference, amountUsd: microsToUsd(result.deltaMicros) });
-        } else {
-          const status = session.spentMicros === 0 || session.spentMicros <= session.settledMicros ? "nothing_to_settle" : "pending_payer_close";
-          session = (await this.deps.sessions.updateSettlement(session.id, { settlementStatus: status })) ?? session;
-          if (status === "pending_payer_close") {
-            // Offer the payer a challenge to answer with its channel `close` credential.
-            const c = await this.deps.provider.sessionCallChallenge({ channelId, amountMicros: this.cheapestMicros(session.allowedTools), scope: `rafid:session:${session.id}`, url: "https://" + this.deps.config.realm + `/api/v1/mpp/sessions/${session.id}/close`, description: `Close Rafid MPP session ${session.id}` }).catch(() => null);
-            if (c) headers.push(...c.headers);
-          }
+        const result = await this.deps.provider.settleSession(channelId);
+        if (!result) {
+          await this.deps.sessions.finishSettlement(s.id, { settlementStatus: "pending_payer_close" });
+          out.pendingPayerClose++;
+          continue;
         }
+        await this.deps.sessions.finishSettlement(s.id, { settlementStatus: "settled", settlementReference: result.reference, settledMicros: result.settledMicros });
+        const record = buildMppSessionSettlementRecord({ result, sessionId: s.id, requestId });
+        if (record) this.deps.recordSettlement(record);
+        mppAudit(this.deps.audit, "mpp.session.settled", { requestId, sessionId: s.id, channelId, reference: result.reference, amountUsd: microsToUsd(result.deltaMicros), status: "reconciled_settle" });
+        out.settled++;
       } catch (error) {
         const f = error instanceof MppPaymentFailure ? error : new MppPaymentFailure("unavailable", "provider-error");
-        session = (await this.deps.sessions.updateSettlement(session.id, { settlementStatus: "failed" }).catch(() => null)) ?? session;
-        mppAudit(this.deps.audit, "mpp.payment.failed", { requestId, sessionId: session.id, reason: f.reason, status: "settlement_failed" });
+        if (f.kind === "unavailable") {
+          // Leave `pending`; the lease expires and a later run re-reads the chain.
+          mppAudit(this.deps.audit, "mpp.session.settlement_pending", { requestId, sessionId: s.id, channelId, reason: `outcome_unknown:${f.reason}`, attempts: s.settlementAttempts });
+          out.unknown++;
+        } else {
+          await this.deps.sessions.finishSettlement(s.id, { settlementStatus: "failed", settlementError: f.reason }).catch(() => null);
+          mppAudit(this.deps.audit, "mpp.session.settlement_failed", { requestId, sessionId: s.id, channelId, reason: f.reason, attempts: s.settlementAttempts });
+          out.failed++;
+        }
       }
-    } else if (!session.externalSessionId) {
-      session = (await this.deps.sessions.updateSettlement(session.id, { settlementStatus: "nothing_to_settle" }).catch(() => null)) ?? session;
     }
-    const usageByTool = await this.deps.sessions.usageByTool(session.id).catch(() => ({}));
-    return { status: 200, headers, body: { success: true, data: presentSession(session, { usageByTool }), ...(closed.alreadyClosed ? { idempotentReplay: true } : {}), meta: { requestId } } };
+    return out;
+  }
+
+  /** Marks every pending session past its expiry as `expired` (batch, multi-instance safe,
+   *  idempotent). Expired pending sessions can never be activated afterwards. */
+  async expirePendingSessions(limit = 500): Promise<string[]> {
+    const ids = await this.deps.sessions.expirePending(this.now(), limit);
+    for (const id of ids) mppAudit(this.deps.audit, "mpp.session.expired", { requestId: "maintenance", sessionId: id, status: "pending" });
+    return ids;
+  }
+
+  /** One maintenance pass (called by the cron endpoint). Each step is independent and safe to
+   *  run concurrently on several instances. */
+  async maintenance(): Promise<Record<string, unknown>> {
+    const config = this.deps.config;
+    const started = Date.now();
+    const result: Record<string, unknown> = {};
+    const step = async (name: string, fn: () => Promise<unknown>) => {
+      try { result[name] = await fn(); } catch { result[name] = { error: "failed" }; }
+    };
+    await step("expiredPending", async () => (await this.expirePendingSessions()).length);
+    await step("expiredActive", async () => {
+      const ids = await this.deps.sessions.expireDue(this.now(), 500);
+      for (const id of ids) mppAudit(this.deps.audit, "mpp.session.expired", { requestId: "maintenance", sessionId: id, status: "active" });
+      return ids.length;
+    });
+    await step("settlement", () => this.reconcileSettlements());
+    await step("purgedPending", () => this.deps.sessions.purgeExpiredPending(new Date(this.now().getTime() - config.pendingRetentionDays * 86_400_000), 1000));
+    result.durationMs = Date.now() - started;
+    mppAudit(this.deps.audit, "mpp.maintenance.run", { requestId: "maintenance", count: typeof result.expiredPending === "number" ? result.expiredPending : 0, status: Object.values(result).some(v => typeof v === "object" && v !== null && "error" in v) ? "partial" : "ok" });
+    return result;
+  }
+
+  private probeCache: { at: number; value: Awaited<ReturnType<MppProvider["probe"]>> } | null = null;
+
+  /** Operational status for GET /api/v1/mpp/status — reads only; never a payment. The network
+   *  probe (eth_chainId) is cached for 30 s so the endpoint can't be used to hammer the RPC. */
+  async status(): Promise<Record<string, unknown>> {
+    const config = this.deps.config;
+    const nowMs = Date.now();
+    if (!this.probeCache || nowMs - this.probeCache.at > 30_000) {
+      this.probeCache = { at: nowMs, value: await this.deps.provider.probe(3000).catch(() => ({ reachable: false, chainId: null, reason: "rpc-error" })) };
+    }
+    const probe = this.probeCache.value;
+    const repo = this.deps.sessions as MppSessionRepository & { ping?: () => Promise<void> };
+    let database: Record<string, unknown>;
+    if (!repo.ping) database = { ready: true, kind: "memory" };
+    else {
+      try {
+        await repo.ping();
+        const stats = await this.deps.sessions.stats(this.now());
+        database = { ready: true, kind: "postgres", sessions: stats.byStatus, pendingOverdue: stats.pendingOverdue, settlement: stats.settlement };
+      } catch { database = { ready: false, kind: "postgres", error: "unreachable" }; }
+    }
+    return {
+      configured: config.enabled,
+      provider: { name: this.deps.provider.name, configured: true, reachable: probe.reachable, reason: probe.reason },
+      database,
+      charge: { enabled: this.hasMode("charge"), methods: config.chargeMethods },
+      session: { enabled: this.hasMode("session"), method: this.hasMode("session") ? "tempo/session" : null, pendingTtlSeconds: config.challengeTtlSeconds + config.pendingGraceSeconds, maxPendingPerClient: config.maxPendingSessionsPerClient },
+      network: { name: config.tempo.network, chainId: config.tempo.chainId, observedChainId: probe.chainId, testnet: config.tempo.testnet },
+      maintenance: { configured: Boolean(config.maintenanceSecret) }
+    };
   }
 }

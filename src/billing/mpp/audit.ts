@@ -6,18 +6,27 @@
  * a signature/credential is dropped defensively as well.
  */
 export type MppAuditEvent =
-  | "mpp.charge.created"
+  // charge intent
+  | "mpp.charge.challenge"
   | "mpp.charge.verified"
   | "mpp.charge.settled"
-  | "mpp.session.created"
-  | "mpp.session.opened"
+  | "mpp.charge.replay_rejected"
+  // session intent
+  | "mpp.session.pending"
+  | "mpp.session.pending_rejected"
+  | "mpp.session.activated"
+  | "mpp.session.expired"
   | "mpp.session.call"
   | "mpp.session.usage_recorded"
   | "mpp.session.exhausted"
+  | "mpp.session.budget_rejected"
   | "mpp.session.closed"
-  | "mpp.session.expired"
+  | "mpp.session.settlement_pending"
   | "mpp.session.settled"
-  | "mpp.payment.failed";
+  | "mpp.session.settlement_failed"
+  // shared
+  | "mpp.payment.failed"
+  | "mpp.maintenance.run";
 
 export interface MppAuditFields {
   requestId?: string;
@@ -34,12 +43,16 @@ export interface MppAuditFields {
   status?: string;
   reason?: string;
   idempotentReplay?: boolean;
+  settlementStatus?: string;
+  attempts?: number;
+  count?: number;
 }
 
 export type MppAuditSink = (entry: Record<string, unknown>) => void;
 
 const ALLOWED: ReadonlyArray<keyof MppAuditFields> = [
-  "requestId", "tool", "sessionId", "channelId", "challengeId", "reference", "method", "amountUsd", "spentUsd", "remainingUsd", "status", "reason", "idempotentReplay"
+  "requestId", "tool", "sessionId", "channelId", "challengeId", "reference", "method", "amountUsd", "spentUsd", "remainingUsd", "status", "reason", "idempotentReplay",
+  "settlementStatus", "attempts", "count"
 ];
 // Hex blobs longer than a 32-byte hash (signatures are 65 bytes), base64 credential blobs, and
 // the Payment auth scheme itself never belong in an audit line.

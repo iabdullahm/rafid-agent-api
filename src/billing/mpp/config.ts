@@ -79,7 +79,22 @@ export const mppEnvSchema = z.object({
   MPP_REQUIRE_IDEMPOTENCY: z.enum(["true", "false"]).default("true"),
   /** How long an unpaid charge/session-open challenge stays valid. */
   MPP_CHALLENGE_TTL_SECONDS: z.coerce.number().int().min(30).max(3600).default(300),
-  MPP_MCP_ENABLED: z.enum(["true", "false"]).default("false")
+  MPP_MCP_ENABLED: z.enum(["true", "false"]).default("false"),
+  // ---- production hardening -------------------------------------------------------------
+  /** Grace added to a pending session's expiry beyond its open challenge's expiry, so an open
+   *  credential that was valid when the SDK accepted it always finds its session still pending. */
+  MPP_PENDING_GRACE_SECONDS: z.coerce.number().int().min(0).max(3600).default(60),
+  /** Unpaid pending sessions one client (hashed IP) may hold at once. */
+  MPP_MAX_PENDING_SESSIONS_PER_CLIENT: z.coerce.number().int().min(1).max(1000).default(5),
+  /** POST /api/v1/mpp/sessions requests per client per minute (per instance, like every limiter here). */
+  MPP_SESSION_CREATE_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(100000).default(10),
+  /** Expired pending sessions that never opened a channel are purged after this many days. */
+  MPP_PENDING_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(30),
+  /** Lease on an in-flight settlement attempt; a crashed attempt becomes retryable after it. */
+  MPP_SETTLEMENT_LEASE_SECONDS: z.coerce.number().int().min(10).max(3600).default(120),
+  /** Bearer secret for GET /api/v1/mpp/internal/maintenance. Falls back to Vercel's CRON_SECRET. */
+  MPP_MAINTENANCE_SECRET: z.string().default(""),
+  CRON_SECRET: z.string().default("")
 });
 
 export interface MppConfig {
@@ -98,6 +113,13 @@ export interface MppConfig {
   requireIdempotency: boolean;
   challengeTtlSeconds: number;
   mcpEnabled: boolean;
+  pendingGraceSeconds: number;
+  maxPendingSessionsPerClient: number;
+  sessionCreateRateLimitMax: number;
+  pendingRetentionDays: number;
+  settlementLeaseSeconds: number;
+  /** Secret for the maintenance endpoint ("" = endpoint answers 503). Never exposed. */
+  maintenanceSecret: string;
 }
 
 export class MppConfigError extends Error {}
@@ -147,7 +169,13 @@ export function loadMppConfig(
     minSessionBudgetUsd: e.MPP_MIN_SESSION_BUDGET_USD,
     requireIdempotency: e.MPP_REQUIRE_IDEMPOTENCY === "true",
     challengeTtlSeconds: e.MPP_CHALLENGE_TTL_SECONDS,
-    mcpEnabled: e.MPP_MCP_ENABLED === "true"
+    mcpEnabled: e.MPP_MCP_ENABLED === "true",
+    pendingGraceSeconds: e.MPP_PENDING_GRACE_SECONDS,
+    maxPendingSessionsPerClient: e.MPP_MAX_PENDING_SESSIONS_PER_CLIENT,
+    sessionCreateRateLimitMax: e.MPP_SESSION_CREATE_RATE_LIMIT_MAX,
+    pendingRetentionDays: e.MPP_PENDING_RETENTION_DAYS,
+    settlementLeaseSeconds: e.MPP_SETTLEMENT_LEASE_SECONDS,
+    maintenanceSecret: (e.MPP_MAINTENANCE_SECRET || e.CRON_SECRET).trim()
   };
   if (!enabled) return config;
 
@@ -158,6 +186,7 @@ export function loadMppConfig(
   if (e.MPP_CURRENCY.trim().toUpperCase() !== "USD") fail("MPP_CURRENCY must be USD (every Rafid capability is priced in USD and MPP settles in USD stablecoins 1:1)");
   if (Buffer.byteLength(e.MPP_SECRET_KEY, "utf8") < 32 || /replace|changeme/i.test(e.MPP_SECRET_KEY)) fail("MPP_SECRET_KEY must be at least 32 random bytes (e.g. openssl rand -base64 32) when MPP_ENABLED=true");
   if (!config.realm) fail("MPP_REALM must not be empty");
+  if (config.maintenanceSecret && Buffer.byteLength(config.maintenanceSecret, "utf8") < 16) fail("MPP_MAINTENANCE_SECRET / CRON_SECRET must be at least 16 characters when set");
   if (e.MPP_TEMPO_CURRENCY.trim() && !evmAddress.test(e.MPP_TEMPO_CURRENCY.trim())) fail("MPP_TEMPO_CURRENCY must be a 0x-prefixed TIP-20 token address");
   if (config.tempo.rpcUrl) {
     let u: URL | null = null;

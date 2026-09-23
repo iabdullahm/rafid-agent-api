@@ -33,7 +33,8 @@ const res = await mppx.fetch("https://api.rafidsystem.com/api/v1/mpp/charge/oman
 1. `POST /api/v1/mpp/sessions` with `{ maxBudget, currency: "USD", allowedTools }`. `mppx.fetch` answers the open challenge by opening a channel. The suggested deposit equals `maxBudget`, capped by the client's `maxDeposit`. The response is `201` with `sessionId`.
 2. `POST /api/v1/mpp/sessions/{sessionId}/tools/{tool}` with `Idempotency-Key: <unique per logical call>`. `mppx.fetch` answers each voucher challenge. Read `usage.remaining` from the response.
 3. `GET /api/v1/mpp/sessions/{sessionId}` returns spend, remaining budget and `usageByTool`.
-4. `POST /api/v1/mpp/sessions/{sessionId}/close` stops the session and settles. Only metered spend is captured, and the rest of the deposit returns to the payer when the channel closes (`mppx sessions close` or the SDK's session manager).
+4. Close. `sessionManager.close()` (mppx) sends the payer's `close` credential; Rafid accepts it on any session route, closes the channel capturing exactly the metered spend, refunds the rest and returns a `Payment-Receipt`. Without a credential, `POST /api/v1/mpp/sessions/{sessionId}/close` stops the session and settles server-side when that can't over-capture (otherwise `settlement.status = pending_payer_close`).
+5. Unpaid sessions expire after the challenge TTL plus a short grace and can never be opened afterwards. A client may hold only a few unpaid sessions at once (`429 MPP_TOO_MANY_PENDING_SESSIONS`).
 
 Error codes an agent should handle:
 
@@ -46,6 +47,10 @@ Error codes an agent should handle:
 | `MPP_TOOL_NOT_ALLOWED` | 403 | The tool isn't in `allowedTools` | Use an allowed tool |
 | `MPP_IDEMPOTENCY_CONFLICT` | 422 | The same key was reused for a different call | Use a fresh key |
 | `MPP_IDEMPOTENCY_IN_PROGRESS` | 409 | A call with this key is still running | Retry later with the same key |
+| `MPP_TOO_MANY_PENDING_SESSIONS` | 429 | Too many unpaid sessions from this client | Open one of them, or wait `Retry-After` |
+| `MPP_SESSION_EXPIRED` (on open) | 410 | The session expired before its channel opened; nothing was metered | Close the returned `channelId` to recover the deposit; create a new session |
+| `MPP_SETTLEMENT_UNCONFIRMED` | 502 | Settlement was broadcast but couldn't be confirmed | Don't pay again; check your wallet. Sessions are reconciled automatically |
+| `MPP_SESSION_BUSY` | 409 | A call or a settlement attempt is in progress | Retry shortly |
 
 ## MCP agents
 
@@ -63,3 +68,9 @@ MCP handles tool discovery and invocation. MPP handles payment authorization and
   3. Answer the voucher challenge in `org.paymentauth/credential`.
 
   Budget, allowed tools and idempotency behave exactly as on the HTTP session route, because both call the same service.
+
+## Operations
+
+- **Status:** `GET /api/v1/mpp/status` returns `configured`, `provider.reachable` (a cached chain-id probe, never a payment), `database.ready`, `charge`, `session` and `network`.
+- **Maintenance:** `GET /api/v1/mpp/internal/maintenance` with `Authorization: Bearer $CRON_SECRET` (or `MPP_MAINTENANCE_SECRET`). It expires overdue sessions, reconciles settlements and purges old unpaid rows. Schedule it with Vercel Cron or any scheduler. It is idempotent and safe to run concurrently.
+- **Testnet end-to-end check:** `examples/mpp-client`, `npm run e2e:session`, against a deployment with `MPP_NETWORK=tempo-testnet`. See that folder's README.

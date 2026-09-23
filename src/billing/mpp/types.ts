@@ -29,7 +29,19 @@ export function microsToDecimalString(micros: number | bigint): string {
 export type MppSessionStatus = "pending" | "active" | "exhausted" | "closed" | "expired" | "failed";
 export const MPP_SESSION_STATUSES: readonly MppSessionStatus[] = ["pending", "active", "exhausted", "closed", "expired", "failed"];
 
-export type MppSettlementStatus = "not_started" | "pending_payer_close" | "settled" | "nothing_to_settle" | "failed";
+/**
+ * Settlement lifecycle (separate from the session status):
+ *  - not_started          nothing attempted yet (session open, or closed with nothing tried)
+ *  - pending              an attempt is in flight (leased; a crashed attempt is retried by the
+ *                         maintenance job once the lease expires) — outcome not yet known
+ *  - pending_payer_close  metered spend exists but the only safe capture is the payer's close
+ *                         credential (a server settle would capture unmetered voucher headroom)
+ *  - settled              on-chain settlement confirmed (tx receipt, or on-chain state read back)
+ *  - nothing_to_settle    no metered spend (or already fully settled on-chain)
+ *  - failed               the last attempt failed definitively; retryable by maintenance/close
+ */
+export type MppSettlementStatus = "not_started" | "pending" | "pending_payer_close" | "settled" | "nothing_to_settle" | "failed";
+export const MPP_SETTLEMENT_STATUSES: readonly MppSettlementStatus[] = ["not_started", "pending", "pending_payer_close", "settled", "nothing_to_settle", "failed"];
 
 export interface MppSession {
   id: string;
@@ -55,6 +67,13 @@ export interface MppSession {
   settlementStatus: MppSettlementStatus;
   settlementReference: string | null;
   settledMicros: number;
+  settlementAttempts: number;
+  settlementAttemptedAt: string | null;
+  /** Short, safe reason of the last failed settlement attempt (never a raw SDK message). */
+  settlementError: string | null;
+  /** HMAC of the creating client's IP (never the raw IP) — only used to cap unpaid pending
+   *  sessions per client. Null once irrelevant or when unknown. */
+  clientKey: string | null;
   createdAt: string;
   updatedAt: string;
   expiresAt: string;

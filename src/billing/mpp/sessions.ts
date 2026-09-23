@@ -39,16 +39,41 @@ export type CloseResult =
   | { ok: false; reason: "not_found" }
   | { ok: false; reason: "busy" | "pending"; session: MppSession };
 
+export interface SettlementFinish {
+  settlementStatus: Exclude<MppSettlementStatus, "pending">;
+  settlementReference?: string | null;
+  settledMicros?: number;
+  settlementError?: string | null;
+}
+
+export interface MppSessionStats {
+  byStatus: Record<string, number>;
+  pendingOverdue: number;
+  settlement: Record<string, number>;
+}
+
 export interface MppSessionRepository {
-  createPending(input: Pick<MppSession, "requestedBudgetMicros" | "maxBudgetMicros" | "allowedTools" | "paymentProvider" | "paymentMethod" | "termsDigest" | "expiresAt" | "metadata">): Promise<MppSession>;
+  createPending(input: Pick<MppSession, "requestedBudgetMicros" | "maxBudgetMicros" | "allowedTools" | "paymentProvider" | "paymentMethod" | "termsDigest" | "expiresAt" | "metadata"> & { clientKey?: string | null }): Promise<MppSession>;
   get(id: string): Promise<MppSession | null>;
   getByExternalId(externalSessionId: string): Promise<MppSession | null>;
-  /** pending → active, binding the MPP channel. Returns null when the session isn't pending
-   *  (already activated, failed, expired) — the caller re-reads it. */
-  activate(id: string, fields: { externalSessionId: string; maxBudgetMicros: number; authorizationReference: string | null; expiresAt: string; metadata?: Record<string, unknown> }): Promise<MppSession | null>;
-  markFailed(id: string, reason: string): Promise<MppSession | null>;
-  /** Lazily expires a session whose expires_at has passed (active/exhausted/pending → expired). */
+  /** Unexpired pending sessions created by one client (abuse cap). */
+  countPendingForClient(clientKey: string, now: Date): Promise<number>;
+  /** pending → active, binding the MPP channel. Only a session that is still pending AND not
+   *  yet expired at `now` can be activated — an expired pending session can never become active.
+   *  Returns null otherwise (or when the channel is already bound to another session). */
+  activate(id: string, fields: { externalSessionId: string; maxBudgetMicros: number; authorizationReference: string | null; expiresAt: string; metadata?: Record<string, unknown> }, now: Date): Promise<MppSession | null>;
+  markFailed(id: string, reason: string, metadata?: Record<string, unknown>): Promise<MppSession | null>;
+  /** Lazily expires one session whose expires_at has passed (active/exhausted/pending → expired). */
   expireIfDue(id: string, now: Date): Promise<MppSession | null>;
+  /** Batch: pending sessions past expires_at → expired. Multi-instance safe (row locks with SKIP
+   *  LOCKED) and idempotent (an expired row is never matched again). Returns the expired ids. */
+  expirePending(now: Date, limit: number): Promise<string[]>;
+  /** Batch: active/exhausted sessions past their TTL with nothing in flight → expired. The
+   *  payment channel itself is untouched; settlement still happens via close/maintenance. */
+  expireDue(now: Date, limit: number): Promise<string[]>;
+  /** Deletes expired sessions that never opened a channel and never metered a call, created
+   *  before `before` (audit retention). Returns the number deleted. */
+  purgeExpiredPending(before: Date, limit: number): Promise<number>;
   reserve(args: ReserveArgs): Promise<ReserveResult>;
   /** reserved → charged: moves the held amount into spent, increments calls, stores the response
    *  for idempotent replay, and flips the session to "exhausted" when the budget left after
@@ -58,7 +83,20 @@ export interface MppSessionRepository {
   /** reserved → failed | released: returns the held amount to the budget; nothing is charged. */
   release(eventId: string, status: "failed" | "released", metadata?: Record<string, unknown>): Promise<void>;
   close(id: string, now: Date): Promise<CloseResult>;
+  /** Atomically claims the right to attempt settlement (settlement_status → "pending",
+   *  attempts+1). Fails (null) when another attempt holds an unexpired lease, or when the session
+   *  is already settled (unless `allowSettled`, used only for the payer's own channel close).
+   *  This is what makes concurrent close calls / maintenance runs unable to double-settle. */
+  claimSettlement(id: string, now: Date, leaseSeconds: number, opts?: { allowSettled?: boolean }): Promise<MppSession | null>;
+  finishSettlement(id: string, fields: SettlementFinish): Promise<MppSession | null>;
+  /** Closed/expired sessions bound to a channel whose settlement isn't final: not_started,
+   *  failed, or pending with an expired lease. */
+  settlementCandidates(now: Date, leaseSeconds: number, limit: number): Promise<MppSession[]>;
+  /** Records an on-chain settlement reference reported by the SDK (onSessionSettlement). */
+  recordChannelSettlement(externalSessionId: string, reference: string, settledMicros: number): Promise<void>;
+  /** @deprecated use claimSettlement/finishSettlement — kept for simple status transitions. */
   updateSettlement(id: string, fields: { settlementStatus: MppSettlementStatus; settlementReference?: string | null; settledMicros?: number }): Promise<MppSession | null>;
+  stats(now: Date): Promise<MppSessionStats>;
   usageByTool(sessionId: string): Promise<UsageByTool>;
   events(sessionId: string): Promise<MppUsageEvent[]>;
 }
@@ -113,6 +151,7 @@ export class MemoryMppSessionRepository implements MppSessionRepository {
         spentMicros: 0, reservedMicros: 0, calls: 0, allowedTools: [...input.allowedTools],
         paymentProvider: input.paymentProvider, paymentMethod: input.paymentMethod, authorizationReference: null,
         termsDigest: input.termsDigest, settlementStatus: "not_started", settlementReference: null, settledMicros: 0,
+        settlementAttempts: 0, settlementAttemptedAt: null, settlementError: null, clientKey: input.clientKey ?? null,
         createdAt: now, updatedAt: now, expiresAt: input.expiresAt, closedAt: null, metadata: { ...input.metadata }
       };
       this.sessions.set(s.id, s);
@@ -124,21 +163,26 @@ export class MemoryMppSessionRepository implements MppSessionRepository {
     for (const s of this.sessions.values()) if (s.externalSessionId === ext) return this.clone(s);
     return null;
   }
-  async activate(id: string, f: Parameters<MppSessionRepository["activate"]>[1]) {
+  async countPendingForClient(clientKey: string, now: Date) {
+    let n = 0;
+    for (const s of this.sessions.values()) if (s.status === "pending" && s.clientKey === clientKey && Date.parse(s.expiresAt) > now.getTime()) n++;
+    return n;
+  }
+  async activate(id: string, f: Parameters<MppSessionRepository["activate"]>[1], now: Date) {
     return this.locked(() => {
       const s = this.sessions.get(id);
-      if (!s || s.status !== "pending") return null;
+      if (!s || s.status !== "pending" || Date.parse(s.expiresAt) <= now.getTime()) return null;
       for (const other of this.sessions.values()) if (other.externalSessionId === f.externalSessionId && other.id !== id) return null;
       Object.assign(s, { status: "active", externalSessionId: f.externalSessionId, maxBudgetMicros: f.maxBudgetMicros, authorizationReference: f.authorizationReference, expiresAt: f.expiresAt, metadata: { ...s.metadata, ...(f.metadata ?? {}) } });
       return this.clone(this.touch(s));
     });
   }
-  async markFailed(id: string, reason: string) {
+  async markFailed(id: string, reason: string, metadata?: Record<string, unknown>) {
     return this.locked(() => {
       const s = this.sessions.get(id);
-      if (!s || s.status !== "pending") return s ? this.clone(s) : null;
+      if (!s || (s.status !== "pending" && s.status !== "expired") || s.externalSessionId) return s ? this.clone(s) : null;
       s.status = "failed";
-      s.metadata = { ...s.metadata, failureReason: reason };
+      s.metadata = { ...s.metadata, ...(metadata ?? {}), failureReason: reason };
       return this.clone(this.touch(s));
     });
   }
@@ -151,6 +195,37 @@ export class MemoryMppSessionRepository implements MppSessionRepository {
         this.touch(s);
       }
       return this.clone(s);
+    });
+  }
+  async expirePending(now: Date, limit: number) {
+    return this.locked(() => {
+      const out: string[] = [];
+      for (const s of this.sessions.values()) {
+        if (out.length >= limit) break;
+        if (s.status === "pending" && Date.parse(s.expiresAt) <= now.getTime()) { s.status = "expired"; this.touch(s); out.push(s.id); }
+      }
+      return out;
+    });
+  }
+  async expireDue(now: Date, limit: number) {
+    return this.locked(() => {
+      const out: string[] = [];
+      for (const s of this.sessions.values()) {
+        if (out.length >= limit) break;
+        if ((s.status === "active" || s.status === "exhausted") && s.reservedMicros === 0 && Date.parse(s.expiresAt) <= now.getTime()) { s.status = "expired"; this.touch(s); out.push(s.id); }
+      }
+      return out;
+    });
+  }
+  async purgeExpiredPending(before: Date, limit: number) {
+    return this.locked(() => {
+      let n = 0;
+      for (const s of [...this.sessions.values()]) {
+        if (n >= limit) break;
+        const hasEvents = [...this.usage.values()].some(e => e.sessionId === s.id);
+        if (s.status === "expired" && !s.externalSessionId && !hasEvents && Date.parse(s.createdAt) < before.getTime()) { this.sessions.delete(s.id); n++; }
+      }
+      return n;
     });
   }
   async reserve(a: ReserveArgs): Promise<ReserveResult> {
@@ -205,11 +280,54 @@ export class MemoryMppSessionRepository implements MppSessionRepository {
       const s = this.sessions.get(id);
       if (!s) return { ok: false, reason: "not_found" };
       if (s.status === "closed") return { ok: true, session: this.clone(s), alreadyClosed: true };
-      if (s.status === "pending" || s.status === "failed") return { ok: false, reason: "pending", session: this.clone(s) };
+      if (s.status === "pending" || s.status === "failed" || !s.externalSessionId) return { ok: false, reason: "pending", session: this.clone(s) };
       if (s.reservedMicros > 0) return { ok: false, reason: "busy", session: this.clone(s) };
       s.status = "closed";
       s.closedAt = now.toISOString();
       return { ok: true, session: this.clone(this.touch(s)), alreadyClosed: false };
+    });
+  }
+  async claimSettlement(id: string, now: Date, leaseSeconds: number, opts: { allowSettled?: boolean } = {}) {
+    return this.locked(() => {
+      const s = this.sessions.get(id);
+      if (!s || !s.externalSessionId || (s.status !== "closed" && s.status !== "expired")) return null;
+      const leaseActive = s.settlementStatus === "pending" && s.settlementAttemptedAt !== null && Date.parse(s.settlementAttemptedAt) > now.getTime() - leaseSeconds * 1000;
+      if (leaseActive) return null;
+      if (s.settlementStatus === "settled" && !opts.allowSettled) return null;
+      s.settlementStatus = "pending";
+      s.settlementAttempts += 1;
+      s.settlementAttemptedAt = now.toISOString();
+      return this.clone(this.touch(s));
+    });
+  }
+  async finishSettlement(id: string, f: SettlementFinish) {
+    return this.locked(() => {
+      const s = this.sessions.get(id);
+      if (!s) return null;
+      s.settlementStatus = f.settlementStatus;
+      if (f.settlementReference !== undefined && f.settlementReference !== null) s.settlementReference = f.settlementReference;
+      if (f.settledMicros !== undefined) s.settledMicros = Math.max(s.settledMicros, f.settledMicros);
+      s.settlementError = f.settlementError ?? null;
+      return this.clone(this.touch(s));
+    });
+  }
+  async settlementCandidates(now: Date, leaseSeconds: number, limit: number) {
+    const out: MppSession[] = [];
+    for (const s of this.sessions.values()) {
+      if (out.length >= limit) break;
+      if (!s.externalSessionId || (s.status !== "closed" && s.status !== "expired")) continue;
+      const stale = s.settlementStatus === "pending" && (!s.settlementAttemptedAt || Date.parse(s.settlementAttemptedAt) <= now.getTime() - leaseSeconds * 1000);
+      if (s.settlementStatus === "not_started" || s.settlementStatus === "failed" || s.settlementStatus === "pending_payer_close" || stale) out.push(this.clone(s));
+    }
+    return out;
+  }
+  async recordChannelSettlement(ext: string, reference: string, settledMicros: number) {
+    await this.locked(() => {
+      for (const s of this.sessions.values()) if (s.externalSessionId === ext) {
+        s.settlementReference = reference;
+        s.settledMicros = Math.max(s.settledMicros, settledMicros);
+        this.touch(s);
+      }
     });
   }
   async updateSettlement(id: string, f: Parameters<MppSessionRepository["updateSettlement"]>[1]) {
@@ -221,6 +339,15 @@ export class MemoryMppSessionRepository implements MppSessionRepository {
       if (f.settledMicros !== undefined) s.settledMicros = f.settledMicros;
       return this.clone(this.touch(s));
     });
+  }
+  async stats(now: Date): Promise<MppSessionStats> {
+    const byStatus: Record<string, number> = {}; const settlement: Record<string, number> = {}; let pendingOverdue = 0;
+    for (const s of this.sessions.values()) {
+      byStatus[s.status] = (byStatus[s.status] ?? 0) + 1;
+      if (s.externalSessionId) settlement[s.settlementStatus] = (settlement[s.settlementStatus] ?? 0) + 1;
+      if (s.status === "pending" && Date.parse(s.expiresAt) <= now.getTime()) pendingOverdue++;
+    }
+    return { byStatus, pendingOverdue, settlement };
   }
   async usageByTool(sessionId: string) { return aggregateUsage([...this.usage.values()].filter(e => e.sessionId === sessionId)); }
   async events(sessionId: string) { return [...this.usage.values()].filter(e => e.sessionId === sessionId).map(e => this.clone(e)); }
@@ -235,6 +362,7 @@ interface SessionRow {
   max_budget_micros: string; requested_budget_micros: string; spent_micros: string; reserved_micros: string; calls: number;
   allowed_tools: string[]; payment_provider: string; payment_method: string; authorization_reference: string | null;
   terms_digest: string; settlement_status: MppSettlementStatus; settlement_reference: string | null; settled_micros: string;
+  settlement_attempts: number | null; settlement_attempted_at: Date | null; settlement_error: string | null; client_key: string | null;
   created_at: Date; updated_at: Date; expires_at: Date; closed_at: Date | null; metadata: Record<string, unknown>;
 }
 interface EventRow {
@@ -249,6 +377,8 @@ const toSession = (r: SessionRow): MppSession => ({
   allowedTools: r.allowed_tools, paymentProvider: r.payment_provider, paymentMethod: r.payment_method,
   authorizationReference: r.authorization_reference, termsDigest: r.terms_digest,
   settlementStatus: r.settlement_status, settlementReference: r.settlement_reference, settledMicros: Number(r.settled_micros),
+  settlementAttempts: r.settlement_attempts ?? 0, settlementAttemptedAt: r.settlement_attempted_at ? r.settlement_attempted_at.toISOString() : null,
+  settlementError: r.settlement_error, clientKey: r.client_key,
   createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(), expiresAt: r.expires_at.toISOString(),
   closedAt: r.closed_at ? r.closed_at.toISOString() : null, metadata: r.metadata ?? {}
 });
@@ -258,6 +388,26 @@ const toEvent = (r: EventRow): MppUsageEvent => ({
   createdAt: r.created_at.toISOString(), updatedAt: r.updated_at.toISOString(), response: r.response ?? null, metadata: r.metadata ?? {}
 });
 
+/** Adds a named CHECK constraint once (idempotent across instances and restarts). */
+const addCheck = (table: string, name: string, expr: string) =>
+  `DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = '${name}') THEN ALTER TABLE ${table} ADD CONSTRAINT ${name} CHECK (${expr}); END IF; END $$`;
+
+/**
+ * Schema, applied in order inside one transaction under an advisory lock (ensureMppSchema).
+ * CREATE statements describe a fresh database; the ALTER/DO statements bring an existing one
+ * (created by the first MPP release, 72ce485) to the same shape. Every statement is idempotent.
+ *
+ * Invariants enforced by PostgreSQL itself (not just application code):
+ *  - spent + reserved <= max_budget          mpp_sessions_budget_invariant
+ *  - remaining = max - spent - reserved >= 0 mpp_sessions_remaining_nonnegative
+ *  - spent <= max_budget                     mpp_sessions_spent_within_budget
+ *  - max_budget <= requested budget          mpp_sessions_budget_within_request
+ *  - non-negative counters/amounts           *_nonnegative, amount_micros >= 0
+ *  - an active/exhausted/closed session is bound to a channel   mpp_sessions_channel_required
+ *  - one channel backs at most one session   UNIQUE mpp_sessions_external_session_id_key
+ *  - one usage event per (session, Idempotency-Key)   UNIQUE mpp_usage_events_idempotency_key
+ *  - one redemption per charge challenge     PRIMARY KEY mpp_charge_redemptions(challenge_id)
+ */
 export const MPP_SCHEMA_SQL = [
   `CREATE TABLE IF NOT EXISTS mpp_sessions (
     id text PRIMARY KEY,
@@ -284,10 +434,24 @@ export const MPP_SCHEMA_SQL = [
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     CONSTRAINT mpp_sessions_budget_invariant CHECK (spent_micros + reserved_micros <= max_budget_micros)
   )`,
+  `ALTER TABLE mpp_sessions ADD COLUMN IF NOT EXISTS settlement_attempts integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE mpp_sessions ADD COLUMN IF NOT EXISTS settlement_attempted_at timestamptz`,
+  `ALTER TABLE mpp_sessions ADD COLUMN IF NOT EXISTS settlement_error text`,
+  `ALTER TABLE mpp_sessions ADD COLUMN IF NOT EXISTS client_key text`,
+  addCheck("mpp_sessions", "mpp_sessions_remaining_nonnegative", "max_budget_micros - spent_micros - reserved_micros >= 0"),
+  addCheck("mpp_sessions", "mpp_sessions_spent_within_budget", "spent_micros <= max_budget_micros"),
+  addCheck("mpp_sessions", "mpp_sessions_budget_within_request", "max_budget_micros <= requested_budget_micros"),
+  addCheck("mpp_sessions", "mpp_sessions_counters_nonnegative", "calls >= 0 AND settled_micros >= 0 AND settlement_attempts >= 0"),
+  addCheck("mpp_sessions", "mpp_sessions_settlement_status_check", "settlement_status IN ('not_started','pending','pending_payer_close','settled','nothing_to_settle','failed')"),
+  addCheck("mpp_sessions", "mpp_sessions_channel_required", "status IN ('pending','failed','expired') OR external_session_id IS NOT NULL"),
   // One MPP channel backs at most one Rafid session (a replayed open credential can never create
   // a second session over the same deposit).
   `CREATE UNIQUE INDEX IF NOT EXISTS mpp_sessions_external_session_id_key ON mpp_sessions (external_session_id) WHERE external_session_id IS NOT NULL`,
   `CREATE INDEX IF NOT EXISTS mpp_sessions_status_expires_idx ON mpp_sessions (status, expires_at)`,
+  // Cleanup + per-client pending cap lookups touch only pending rows.
+  `CREATE INDEX IF NOT EXISTS mpp_sessions_pending_expiry_idx ON mpp_sessions (expires_at) WHERE status = 'pending'`,
+  `CREATE INDEX IF NOT EXISTS mpp_sessions_pending_client_idx ON mpp_sessions (client_key, expires_at) WHERE status = 'pending'`,
+  `CREATE INDEX IF NOT EXISTS mpp_sessions_settlement_idx ON mpp_sessions (settlement_status, settlement_attempted_at) WHERE external_session_id IS NOT NULL AND status IN ('closed','expired')`,
   `CREATE TABLE IF NOT EXISTS mpp_usage_events (
     id uuid PRIMARY KEY,
     session_id text NOT NULL REFERENCES mpp_sessions(id),
@@ -315,18 +479,22 @@ export const MPP_SCHEMA_SQL = [
   `CREATE TABLE IF NOT EXISTS mpp_charge_redemptions (
     challenge_id text PRIMARY KEY,
     tool_name text NOT NULL,
-    status text NOT NULL CHECK (status IN ('in_flight','redeemed')),
+    status text NOT NULL,
     claimed_at timestamptz NOT NULL DEFAULT now(),
     redeemed_at timestamptz,
     settlement_reference text
-  )`
+  )`,
+  `ALTER TABLE mpp_charge_redemptions ADD COLUMN IF NOT EXISTS error_reason text`,
+  `ALTER TABLE mpp_charge_redemptions ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now()`,
+  // The first release had an inline status CHECK without 'settlement_unknown'; replace it.
+  `ALTER TABLE mpp_charge_redemptions DROP CONSTRAINT IF EXISTS mpp_charge_redemptions_status_check`,
+  addCheck("mpp_charge_redemptions", "mpp_charge_redemptions_status_valid", "status IN ('in_flight','redeemed','settlement_unknown')")
 ];
 
 const schemaReady = new WeakMap<Pool, Promise<void>>();
-/** Creates the MPP tables once per pool. Concurrent CREATE TABLE IF NOT EXISTS statements can
- *  race inside Postgres's catalog (two serverless instances cold-starting together), so the DDL
- *  runs in one transaction under a fixed advisory lock (the same approach as the market store's
- *  migration lock). */
+/** Creates/migrates the MPP tables once per pool. Concurrent DDL can race inside Postgres's
+ *  catalog (two serverless instances cold-starting together), so it runs in one transaction
+ *  under a fixed advisory lock (the same approach as the market store's migration lock). */
 export function ensureMppSchema(pool: Pool): Promise<void> {
   let ready = schemaReady.get(pool);
   if (!ready) {
@@ -352,6 +520,9 @@ export class PostgresMppSessionRepository implements MppSessionRepository {
   private get ready(): Promise<void> { return ensureMppSchema(this.pool); }
   constructor(private readonly pool: Pool) { void this.ready.catch(() => undefined); }
 
+  /** Database readiness for /api/v1/mpp/status — schema applied and a round trip succeeds. */
+  async ping(): Promise<void> { await this.ready; await this.pool.query("SELECT 1"); }
+
   private async tx<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
     await this.ready;
     const c = await this.pool.connect();
@@ -369,9 +540,9 @@ export class PostgresMppSessionRepository implements MppSessionRepository {
   async createPending(input: Parameters<MppSessionRepository["createPending"]>[0]): Promise<MppSession> {
     await this.ready;
     const r = await this.pool.query<SessionRow>(
-      `INSERT INTO mpp_sessions (id, status, max_budget_micros, requested_budget_micros, allowed_tools, payment_provider, payment_method, terms_digest, expires_at, metadata)
-       VALUES ($1, 'pending', $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [newSessionId(), input.maxBudgetMicros, input.requestedBudgetMicros, input.allowedTools, input.paymentProvider, input.paymentMethod, input.termsDigest, input.expiresAt, input.metadata]
+      `INSERT INTO mpp_sessions (id, status, max_budget_micros, requested_budget_micros, allowed_tools, payment_provider, payment_method, terms_digest, expires_at, metadata, client_key)
+       VALUES ($1, 'pending', $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [newSessionId(), input.maxBudgetMicros, input.requestedBudgetMicros, input.allowedTools, input.paymentProvider, input.paymentMethod, input.termsDigest, input.expiresAt, input.metadata, input.clientKey ?? null]
     );
     return toSession(r.rows[0]!);
   }
@@ -385,14 +556,19 @@ export class PostgresMppSessionRepository implements MppSessionRepository {
     const r = await this.pool.query<SessionRow>("SELECT * FROM mpp_sessions WHERE external_session_id = $1", [ext]);
     return r.rows[0] ? toSession(r.rows[0]) : null;
   }
-  async activate(id: string, f: Parameters<MppSessionRepository["activate"]>[1]) {
+  async countPendingForClient(clientKey: string, now: Date) {
+    await this.ready;
+    const r = await this.pool.query<{ n: string }>("SELECT count(*) AS n FROM mpp_sessions WHERE status = 'pending' AND client_key = $1 AND expires_at > $2", [clientKey, now]);
+    return Number(r.rows[0]?.n ?? 0);
+  }
+  async activate(id: string, f: Parameters<MppSessionRepository["activate"]>[1], now: Date) {
     await this.ready;
     try {
       const r = await this.pool.query<SessionRow>(
         `UPDATE mpp_sessions SET status = 'active', external_session_id = $2, max_budget_micros = $3, authorization_reference = $4,
            expires_at = $5, metadata = metadata || $6::jsonb, updated_at = now()
-         WHERE id = $1 AND status = 'pending' RETURNING *`,
-        [id, f.externalSessionId, f.maxBudgetMicros, f.authorizationReference, f.expiresAt, JSON.stringify(f.metadata ?? {})]
+         WHERE id = $1 AND status = 'pending' AND expires_at > $7 RETURNING *`,
+        [id, f.externalSessionId, f.maxBudgetMicros, f.authorizationReference, f.expiresAt, JSON.stringify(f.metadata ?? {}), now]
       );
       return r.rows[0] ? toSession(r.rows[0]) : null;
     } catch (error) {
@@ -400,11 +576,11 @@ export class PostgresMppSessionRepository implements MppSessionRepository {
       throw error;
     }
   }
-  async markFailed(id: string, reason: string) {
+  async markFailed(id: string, reason: string, metadata?: Record<string, unknown>) {
     await this.ready;
     const r = await this.pool.query<SessionRow>(
-      `UPDATE mpp_sessions SET status = 'failed', metadata = metadata || jsonb_build_object('failureReason', $2::text), updated_at = now()
-       WHERE id = $1 AND status = 'pending' RETURNING *`, [id, reason]);
+      `UPDATE mpp_sessions SET status = 'failed', metadata = metadata || $3::jsonb || jsonb_build_object('failureReason', $2::text), updated_at = now()
+       WHERE id = $1 AND status IN ('pending','expired') AND external_session_id IS NULL RETURNING *`, [id, reason, JSON.stringify(metadata ?? {})]);
     return r.rows[0] ? toSession(r.rows[0]) : this.get(id);
   }
   async expireIfDue(id: string, now: Date) {
@@ -413,6 +589,33 @@ export class PostgresMppSessionRepository implements MppSessionRepository {
       `UPDATE mpp_sessions SET status = 'expired', updated_at = now()
        WHERE id = $1 AND status IN ('active','exhausted','pending') AND expires_at <= $2 AND reserved_micros = 0`, [id, now]);
     return this.get(id);
+  }
+  async expirePending(now: Date, limit: number) {
+    await this.ready;
+    const r = await this.pool.query<{ id: string }>(
+      `UPDATE mpp_sessions SET status = 'expired', updated_at = now()
+       WHERE id IN (SELECT id FROM mpp_sessions WHERE status = 'pending' AND expires_at <= $1 ORDER BY expires_at LIMIT $2 FOR UPDATE SKIP LOCKED)
+         AND status = 'pending'
+       RETURNING id`, [now, limit]);
+    return r.rows.map(x => x.id);
+  }
+  async expireDue(now: Date, limit: number) {
+    await this.ready;
+    const r = await this.pool.query<{ id: string }>(
+      `UPDATE mpp_sessions SET status = 'expired', updated_at = now()
+       WHERE id IN (SELECT id FROM mpp_sessions WHERE status IN ('active','exhausted') AND reserved_micros = 0 AND expires_at <= $1 ORDER BY expires_at LIMIT $2 FOR UPDATE SKIP LOCKED)
+         AND status IN ('active','exhausted') AND reserved_micros = 0
+       RETURNING id`, [now, limit]);
+    return r.rows.map(x => x.id);
+  }
+  async purgeExpiredPending(before: Date, limit: number) {
+    await this.ready;
+    const r = await this.pool.query(
+      `DELETE FROM mpp_sessions s WHERE s.id IN (
+         SELECT id FROM mpp_sessions WHERE status = 'expired' AND external_session_id IS NULL AND created_at < $1
+           AND NOT EXISTS (SELECT 1 FROM mpp_usage_events e WHERE e.session_id = mpp_sessions.id)
+         ORDER BY created_at LIMIT $2 FOR UPDATE SKIP LOCKED)`, [before, limit]);
+    return r.rowCount ?? 0;
   }
   async reserve(a: ReserveArgs): Promise<ReserveResult> {
     return this.tx(async c => {
@@ -467,11 +670,45 @@ export class PostgresMppSessionRepository implements MppSessionRepository {
       if (!sr.rows[0]) return { ok: false, reason: "not_found" } as const;
       const s = toSession(sr.rows[0]);
       if (s.status === "closed") return { ok: true, session: s, alreadyClosed: true } as const;
-      if (s.status === "pending" || s.status === "failed") return { ok: false, reason: "pending", session: s } as const;
+      if (s.status === "pending" || s.status === "failed" || !s.externalSessionId) return { ok: false, reason: "pending", session: s } as const;
       if (s.reservedMicros > 0) return { ok: false, reason: "busy", session: s } as const;
       const ur = await c.query<SessionRow>("UPDATE mpp_sessions SET status = 'closed', closed_at = $2, updated_at = now() WHERE id = $1 RETURNING *", [id, now]);
       return { ok: true, session: toSession(ur.rows[0]!), alreadyClosed: false } as const;
     });
+  }
+  async claimSettlement(id: string, now: Date, leaseSeconds: number, opts: { allowSettled?: boolean } = {}) {
+    await this.ready;
+    const r = await this.pool.query<SessionRow>(
+      `UPDATE mpp_sessions SET settlement_status = 'pending', settlement_attempts = settlement_attempts + 1, settlement_attempted_at = $2, updated_at = now()
+       WHERE id = $1 AND external_session_id IS NOT NULL AND status IN ('closed','expired')
+         AND NOT (settlement_status = 'pending' AND settlement_attempted_at > $2::timestamptz - make_interval(secs => $3))
+         AND ($4::boolean OR settlement_status <> 'settled')
+       RETURNING *`, [id, now, leaseSeconds, Boolean(opts.allowSettled)]);
+    return r.rows[0] ? toSession(r.rows[0]) : null;
+  }
+  async finishSettlement(id: string, f: SettlementFinish) {
+    await this.ready;
+    const r = await this.pool.query<SessionRow>(
+      `UPDATE mpp_sessions SET settlement_status = $2, settlement_reference = COALESCE($3, settlement_reference),
+         settled_micros = GREATEST(settled_micros, COALESCE($4, settled_micros)), settlement_error = $5, updated_at = now()
+       WHERE id = $1 RETURNING *`,
+      [id, f.settlementStatus, f.settlementReference ?? null, f.settledMicros ?? null, f.settlementError ?? null]);
+    return r.rows[0] ? toSession(r.rows[0]) : null;
+  }
+  async settlementCandidates(now: Date, leaseSeconds: number, limit: number) {
+    await this.ready;
+    const r = await this.pool.query<SessionRow>(
+      `SELECT * FROM mpp_sessions WHERE external_session_id IS NOT NULL AND status IN ('closed','expired')
+         AND (settlement_status IN ('not_started','failed','pending_payer_close')
+              OR (settlement_status = 'pending' AND (settlement_attempted_at IS NULL OR settlement_attempted_at <= $1::timestamptz - make_interval(secs => $2))))
+       ORDER BY updated_at LIMIT $3`, [now, leaseSeconds, limit]);
+    return r.rows.map(toSession);
+  }
+  async recordChannelSettlement(ext: string, reference: string, settledMicros: number) {
+    await this.ready;
+    await this.pool.query(
+      `UPDATE mpp_sessions SET settlement_reference = $2, settled_micros = GREATEST(settled_micros, $3), updated_at = now() WHERE external_session_id = $1`,
+      [ext, reference, settledMicros]);
   }
   async updateSettlement(id: string, f: Parameters<MppSessionRepository["updateSettlement"]>[1]) {
     await this.ready;
@@ -482,6 +719,17 @@ export class PostgresMppSessionRepository implements MppSessionRepository {
        WHERE id = $1 RETURNING *`,
       [id, f.settlementStatus, f.settlementReference ?? null, f.settledMicros ?? null]);
     return r.rows[0] ? toSession(r.rows[0]) : null;
+  }
+  async stats(now: Date): Promise<MppSessionStats> {
+    await this.ready;
+    const a = await this.pool.query<{ status: string; n: string }>("SELECT status, count(*) AS n FROM mpp_sessions GROUP BY status");
+    const b = await this.pool.query<{ n: string }>("SELECT count(*) AS n FROM mpp_sessions WHERE status = 'pending' AND expires_at <= $1", [now]);
+    const c = await this.pool.query<{ settlement_status: string; n: string }>("SELECT settlement_status, count(*) AS n FROM mpp_sessions WHERE external_session_id IS NOT NULL GROUP BY settlement_status");
+    return {
+      byStatus: Object.fromEntries(a.rows.map(r => [r.status, Number(r.n)])),
+      pendingOverdue: Number(b.rows[0]?.n ?? 0),
+      settlement: Object.fromEntries(c.rows.map(r => [r.settlement_status, Number(r.n)]))
+    };
   }
   async usageByTool(sessionId: string) { return aggregateUsage(await this.events(sessionId)); }
   async events(sessionId: string) {
@@ -506,13 +754,17 @@ export class PostgresMppSessionRepository implements MppSessionRepository {
 export interface MppChargeRedemptionStore {
   claim(challengeId: string, toolName: string): Promise<boolean>;
   markRedeemed(challengeId: string, reference: string): Promise<void>;
+  /** Settlement outcome unknown (network failure mid-broadcast): the claim is KEPT, so the same
+   *  credential can't run the tool again while its payment may already have moved. */
+  markSettlementUnknown(challengeId: string, reason: string): Promise<void>;
   release(challengeId: string): Promise<void>;
 }
 
 export class MemoryMppChargeRedemptionStore implements MppChargeRedemptionStore {
-  private readonly claimed = new Map<string, "in_flight" | "redeemed">();
+  readonly claimed = new Map<string, "in_flight" | "redeemed" | "settlement_unknown">();
   async claim(id: string) { if (this.claimed.has(id)) return false; this.claimed.set(id, "in_flight"); return true; }
   async markRedeemed(id: string) { this.claimed.set(id, "redeemed"); }
+  async markSettlementUnknown(id: string) { this.claimed.set(id, "settlement_unknown"); }
   async release(id: string) { if (this.claimed.get(id) === "in_flight") this.claimed.delete(id); }
 }
 
@@ -521,16 +773,22 @@ export class PostgresMppChargeRedemptionStore implements MppChargeRedemptionStor
   constructor(private readonly pool: Pool) { void this.ready.catch(() => undefined); }
   async claim(id: string, toolName: string) {
     await this.ready;
+    // A stale in_flight claim (the function was killed mid-call) becomes claimable again after 5
+    // minutes; redeemed and settlement_unknown claims never do.
     const r = await this.pool.query(
       `INSERT INTO mpp_charge_redemptions (challenge_id, tool_name, status) VALUES ($1, $2, 'in_flight')
-       ON CONFLICT (challenge_id) DO UPDATE SET status = 'in_flight', claimed_at = now()
+       ON CONFLICT (challenge_id) DO UPDATE SET status = 'in_flight', claimed_at = now(), updated_at = now()
          WHERE mpp_charge_redemptions.status = 'in_flight' AND mpp_charge_redemptions.claimed_at < now() - interval '5 minutes'
        RETURNING challenge_id`, [id, toolName]);
     return (r.rowCount ?? 0) === 1;
   }
   async markRedeemed(id: string, reference: string) {
     await this.ready;
-    await this.pool.query("UPDATE mpp_charge_redemptions SET status = 'redeemed', redeemed_at = now(), settlement_reference = $2 WHERE challenge_id = $1", [id, reference]);
+    await this.pool.query("UPDATE mpp_charge_redemptions SET status = 'redeemed', redeemed_at = now(), settlement_reference = $2, updated_at = now() WHERE challenge_id = $1", [id, reference]);
+  }
+  async markSettlementUnknown(id: string, reason: string) {
+    await this.ready;
+    await this.pool.query("UPDATE mpp_charge_redemptions SET status = 'settlement_unknown', error_reason = $2, updated_at = now() WHERE challenge_id = $1 AND status = 'in_flight'", [id, reason.slice(0, 200)]);
   }
   async release(id: string) {
     await this.ready;

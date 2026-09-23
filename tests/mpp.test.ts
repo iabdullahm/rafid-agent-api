@@ -258,7 +258,7 @@ test("MPP charge: valid payment → tool executes once, settles once, Payment-Re
   const anomalies = buildReconciliation({ settlements: rows, x402ToolExecutionCounts: { analyze_oman_property: 1 }, catalogPriceByTool: { ...prices } });
   assert.deepEqual(anomalies, []);
   // Audit trail, and no credential material in it.
-  for (const e of ["mpp.charge.created", "mpp.charge.verified", "mpp.charge.settled", "mpp.payment.failed"]) assert.ok(audit.some(a => a.event === e), e);
+  for (const e of ["mpp.charge.challenge", "mpp.charge.verified", "mpp.charge.settled", "mpp.charge.replay_rejected"]) assert.ok(audit.some(a => a.event === e), e);
   const auditText = JSON.stringify(audit);
   assert.equal(auditText.includes(credential.slice(8, 60)), false);
 });
@@ -342,6 +342,10 @@ class FakeChannelProvider implements MppProvider {
   readonly challenges = new Map<string, FakeChallenge>();
   readonly channels = new Map<string, FakeChannel>();
   settlements = 0;
+  /** Failure injection for settlement paths (consumed once). */
+  failNextSettle: MppPaymentFailure | null = null;
+  failNextClose: MppPaymentFailure | null = null;
+  probes = 0;
   private issue(c: Omit<FakeChallenge, "id">): PaymentChallenge {
     const id = randomUUID();
     this.challenges.set(id, { ...c, id });
@@ -411,6 +415,7 @@ class FakeChannelProvider implements MppProvider {
     return ch ? { channelId: id, depositMicros: ch.deposit, acceptedMicros: ch.accepted, spentMicros: ch.spent, settledMicros: ch.settled, finalized: ch.finalized, closeRequested: false } : null;
   }
   async settleSession(id: string): Promise<SettlementResult | null> {
+    if (this.failNextSettle) { const f = this.failNextSettle; this.failNextSettle = null; throw f; }
     const ch = this.channels.get(id);
     if (!ch || ch.finalized || ch.accepted !== ch.spent || ch.spent <= ch.settled) return null;
     const delta = ch.accepted - ch.settled;
@@ -421,13 +426,20 @@ class FakeChannelProvider implements MppProvider {
   async closeSession(auth: string, a: { channelId: string; scope: string }): Promise<SettlementResult> {
     const { payload } = this.issued(auth);
     if (payload.action !== "close" || payload.channelId !== a.channelId) throw new MppPaymentFailure("invalid", "not-close");
+    if (this.failNextClose) { const f = this.failNextClose; this.failNextClose = null; throw f; }
     const ch = this.channels.get(a.channelId)!;
+    if (ch.finalized) throw new MppPaymentFailure("closed", "channel-finalized");
     const before = ch.settled;
     ch.settled = Math.max(ch.spent, ch.settled);
     ch.finalized = true;
     this.settlements++;
-    return { reference: "0xclose" + this.settlements, settledMicros: ch.settled, deltaMicros: ch.settled - before, network: "tempo:42431", asset: "pathUSD", payTo: "0xpayee" };
+    return { reference: "0xclose" + this.settlements, settledMicros: ch.settled, deltaMicros: ch.settled - before, receiptHeader: "receipt-close-" + this.settlements, finalized: true, network: "tempo:42431", asset: "pathUSD", payTo: "0xpayee" };
   }
+  async readOnChainChannel(id: string) {
+    const ch = this.channels.get(id);
+    return ch ? { depositMicros: ch.deposit, settledMicros: ch.settled, closeRequested: false } : null;
+  }
+  async probe() { this.probes++; return { reachable: true, chainId: 42431, reason: null }; }
 }
 
 async function startSessionApp(t: { after(fn: () => void): void }, opts: { env?: Record<string, string>; now?: () => Date; sessions?: MppSessionRepository } = {}) {
@@ -716,7 +728,7 @@ test("MPP session: expired sessions reject calls (410) and closed sessions rejec
   const closeExpired = await post(base, `/api/v1/mpp/sessions/${id2}/close`, {});
   assert.equal(closeExpired.status, 200);
   assert.equal((await closeExpired.json()).data.settlement.status, "nothing_to_settle");
-  for (const e of ["mpp.session.created", "mpp.session.opened", "mpp.session.call", "mpp.session.usage_recorded", "mpp.session.closed", "mpp.session.settled", "mpp.session.expired"]) assert.ok(audit.some(a => a.event === e), e);
+  for (const e of ["mpp.session.pending", "mpp.session.activated", "mpp.session.call", "mpp.session.usage_recorded", "mpp.session.closed", "mpp.session.settlement_pending", "mpp.session.settled", "mpp.session.expired"]) assert.ok(audit.some(a => a.event === e), e);
 });
 
 test("MPP session: a payer close credential captures exactly the metered spend; unconsumed voucher headroom is never settled by the server", async t => {
@@ -791,11 +803,11 @@ test("MPP Postgres: schema, atomic budget reservation under concurrency, idempot
   const repo = new PostgresMppSessionRepository(pool);
   const s = await repo.createPending({ requestedBudgetMicros: 1_500_000, maxBudgetMicros: 1_500_000, allowedTools: ["oman_supplier_check"], paymentProvider: "test", paymentMethod: "tempo/session", termsDigest: "d", expiresAt: new Date(Date.now() + 60_000).toISOString(), metadata: {} });
   const channel = "0x" + randomBytes(32).toString("hex");
-  const active = await repo.activate(s.id, { externalSessionId: channel, maxBudgetMicros: 1_500_000, authorizationReference: null, expiresAt: new Date(Date.now() + 60_000).toISOString() });
+  const active = await repo.activate(s.id, { externalSessionId: channel, maxBudgetMicros: 1_500_000, authorizationReference: null, expiresAt: new Date(Date.now() + 60_000).toISOString() }, new Date());
   assert.equal(active?.status, "active");
   // A second session can never bind the same channel.
   const s2 = await repo.createPending({ requestedBudgetMicros: 1_000_000, maxBudgetMicros: 1_000_000, allowedTools: ["oman_supplier_check"], paymentProvider: "test", paymentMethod: "tempo/session", termsDigest: "d", expiresAt: new Date(Date.now() + 60_000).toISOString(), metadata: {} });
-  assert.equal(await repo.activate(s2.id, { externalSessionId: channel, maxBudgetMicros: 1_000_000, authorizationReference: null, expiresAt: new Date(Date.now() + 60_000).toISOString() }), null);
+  assert.equal(await repo.activate(s2.id, { externalSessionId: channel, maxBudgetMicros: 1_000_000, authorizationReference: null, expiresAt: new Date(Date.now() + 60_000).toISOString() }, new Date()), null);
 
   const results = await Promise.all(Array.from({ length: 20 }, (_, i) => repo.reserve({ sessionId: s.id, toolName: "oman_supplier_check", amountMicros: 500_000, idempotencyKey: `k${i}`, requestHash: "h", now: new Date() })));
   const won = results.filter(r => r.ok);
@@ -910,4 +922,373 @@ test("MPP charge: the official mppx fetch wrapper pays a Rafid 402 automatically
   assert.equal(body.payment.amount, 0.03);
   assert.equal(body.meta.tool, "compare_properties");
   assert.equal(facilitator.settles, 1);
+});
+
+// ===============================================================================================
+// Production hardening: pending cleanup, abuse limits, settlement reconciliation, status
+// ===============================================================================================
+
+function sessionService(opts: { env?: Record<string, string>; now?: () => Date; sessions?: MppSessionRepository; provider?: FakeChannelProvider } = {}) {
+  const config = loadConfig({ ...mppEnv, MPP_MODES: "session", ...(opts.env ?? {}) });
+  const provider = opts.provider ?? new FakeChannelProvider();
+  const sessions = opts.sessions ?? new MemoryMppSessionRepository();
+  const audit: Record<string, unknown>[] = [];
+  const ledger: unknown[] = [];
+  const executions: string[] = [];
+  const service = new MppService({
+    config: config.mpp, provider, sessions, redemptions: new MemoryMppChargeRedemptionStore(),
+    getTool: n => { const c = capabilities.find(x => x.name === n); return c ? { ...c, execute: async (i: unknown) => { executions.push(n); return c.execute(i as never); } } as never : undefined; },
+    priceUsd: n => prices[n as keyof typeof prices] ?? 0, audit: e => audit.push(e), recordSettlement: r => ledger.push(r), now: opts.now
+  });
+  const url = "https://api.test/api/v1/mpp/sessions";
+  async function pending(body: { maxBudget: number; allowedTools: string[] }, clientKey: string | null = null) {
+    const r = await service.createSession({ body, authorization: undefined, url, requestId: "p", clientKey });
+    return { r, id: (r.body.sessionId as string), challengeId: (r.body.challenges as { id: string }[] | undefined)?.[0]?.id };
+  }
+  async function open(body: { maxBudget: number; allowedTools: string[] }) {
+    const p = await pending(body);
+    const channelId = "0x" + randomBytes(32).toString("hex");
+    const opened = await service.createSession({ body, authorization: provider.credential(p.challengeId!, { action: "open", channelId, deposit: usdToMicros(body.maxBudget) }), url, requestId: "o" });
+    return { id: p.id, channelId, opened };
+  }
+  async function pay(id: string, name: string, input: unknown, idem: string) {
+    const probe = await service.callTool({ sessionId: id, tool: name, body: input, authorization: undefined, idempotencyKey: idem, url: "https://x", requestId: "c" });
+    if (probe.status !== 402 || !probe.body.challenges) return probe;
+    const c = (probe.body.challenges as { id: string; request: { channelId: string; amount: string } }[])[0]!;
+    const ch = provider.channels.get(c.request.channelId)!;
+    return service.callTool({ sessionId: id, tool: name, body: input, authorization: provider.credential(c.id, { action: "voucher", channelId: c.request.channelId, cumulative: ch.spent + Number(c.request.amount) }), idempotencyKey: idem, url: "https://x", requestId: "c" });
+  }
+  const close = (id: string, authorization?: string) => service.closeSession({ sessionId: id, authorization, requestId: "x" });
+  return { config, provider, sessions, service, audit, ledger, executions, pending, open, pay, close };
+}
+
+test("MPP cleanup: overdue pending sessions expire in a batch, idempotently, and can never be activated afterwards; active sessions are untouched", async () => {
+  let now = Date.now();
+  const f = sessionService({ now: () => new Date(now) });
+  const p1 = await f.pending({ maxBudget: 2, allowedTools: ["analyze_property"] });
+  const p2 = await f.pending({ maxBudget: 2, allowedTools: ["analyze_property"] });
+  const live = await f.open({ maxBudget: 2, allowedTools: ["analyze_property"] });
+  assert.equal(live.opened.status, 201);
+  // Pending expiry = challenge TTL + grace (300 + 60 s by default).
+  assert.equal(Date.parse((await f.sessions.get(p1.id))!.expiresAt) - now, (f.config.mpp.challengeTtlSeconds + f.config.mpp.pendingGraceSeconds) * 1000);
+  assert.deepEqual(await f.service.expirePendingSessions(), []); // nothing overdue yet
+  now += (f.config.mpp.challengeTtlSeconds + f.config.mpp.pendingGraceSeconds + 1) * 1000;
+  const expired = await f.service.expirePendingSessions();
+  assert.deepEqual(expired.sort(), [p1.id, p2.id].sort());
+  assert.deepEqual(await f.service.expirePendingSessions(), []); // idempotent
+  assert.equal((await f.sessions.get(p1.id))!.status, "expired");
+  assert.equal((await f.sessions.get(live.id))!.status, "active"); // active channel untouched
+  assert.equal(f.audit.filter(a => a.event === "mpp.session.expired").length, 2);
+  // The open credential for the expired session is refused BEFORE any channel is opened.
+  const channelId = "0x" + randomBytes(32).toString("hex");
+  const late = await f.service.createSession({ body: { maxBudget: 2, allowedTools: ["analyze_property"] }, authorization: f.provider.credential(p1.challengeId!, { action: "open", channelId, deposit: 2_000_000 }), url: "https://x", requestId: "l" });
+  assert.equal(late.status, 409);
+  assert.equal(f.provider.channels.has(channelId), false);
+  assert.equal((await f.sessions.get(p1.id))!.status, "expired");
+  // The repository refuses activation of an expired pending row outright.
+  assert.equal(await f.sessions.activate(p2.id, { externalSessionId: channelId, maxBudgetMicros: 1, authorizationReference: null, expiresAt: new Date(now + 60_000).toISOString() }, new Date(now)), null);
+  // The live session still works.
+  assert.equal((await f.pay(live.id, "analyze_property", analyzeProperty.example, "k1")).status, 200);
+});
+
+test("MPP cleanup: a channel that opens after its pending session expired is never activated — the session is marked failed with the orphan channel recorded", async () => {
+  let now = Date.now();
+  const provider = new FakeChannelProvider();
+  const f = sessionService({ now: () => new Date(now), provider });
+  const p = await f.pending({ maxBudget: 2, allowedTools: ["analyze_property"] });
+  const verify = provider.verifySession.bind(provider);
+  provider.verifySession = async (a, t) => { const r = await verify(a, t); now += 3600_000; return r; }; // expiry passes mid-open
+  const channelId = "0x" + randomBytes(32).toString("hex");
+  const r = await f.service.createSession({ body: { maxBudget: 2, allowedTools: ["analyze_property"] }, authorization: provider.credential(p.challengeId!, { action: "open", channelId, deposit: 2_000_000 }), url: "https://x", requestId: "r" });
+  assert.equal(r.status, 410);
+  assert.equal((r.body.error as { code: string }).code, "MPP_SESSION_EXPIRED");
+  assert.equal(r.body.channelId, channelId);
+  const s = (await f.sessions.get(p.id))!;
+  assert.equal(s.status, "failed");
+  assert.equal(s.externalSessionId, null);
+  assert.equal(s.metadata.orphanChannelId, channelId);
+  assert.equal((await f.pay(p.id, "analyze_property", analyzeProperty.example, "k")).status, 409);
+});
+
+test("MPP maintenance endpoint: 503 without a secret, 401 on a missing/wrong bearer, 200 with CRON_SECRET or MPP_MAINTENANCE_SECRET; expires overdue pending sessions", async t => {
+  const none = await startSessionApp(t);
+  assert.equal((await fetch(none.base + "/api/v1/mpp/internal/maintenance")).status, 503);
+  let now = Date.now();
+  const secret = "cron-" + randomBytes(16).toString("hex");
+  const app = await startSessionApp(t, { now: () => new Date(now), env: { CRON_SECRET: secret } });
+  const pending = await post(app.base, "/api/v1/mpp/sessions", { maxBudget: 2, allowedTools: ["analyze_property"] });
+  const sessionId = (await pending.json()).sessionId;
+  assert.equal((await fetch(app.base + "/api/v1/mpp/internal/maintenance")).status, 401);
+  assert.equal((await fetch(app.base + "/api/v1/mpp/internal/maintenance", { headers: { Authorization: "Bearer wrong-" + secret } })).status, 401);
+  now += 3600_000;
+  const ok = await fetch(app.base + "/api/v1/mpp/internal/maintenance", { headers: { Authorization: `Bearer ${secret}` } });
+  assert.equal(ok.status, 200);
+  const summary = (await ok.json()).data;
+  assert.equal(summary.expiredPending, 1);
+  assert.equal((await app.sessions.get(sessionId))!.status, "expired");
+  const again = await (await fetch(app.base + "/api/v1/mpp/internal/maintenance", { headers: { Authorization: `Bearer ${secret}` } })).json();
+  assert.equal(again.data.expiredPending, 0);
+  assert.ok(app.audit.some(a => a.event === "mpp.maintenance.run"));
+  // The maintenance route is internal: not in OpenAPI.
+  assert.ok(!JSON.stringify(buildOpenapi()).includes("internal/maintenance"));
+  // MPP_MAINTENANCE_SECRET takes precedence; a too-short secret fails config.
+  assert.throws(() => loadConfig({ ...mppEnv, MPP_MAINTENANCE_SECRET: "short" }));
+});
+
+test("MPP abuse: per-client pending-session cap (hashed IP, never a wallet) and the session-create rate limit", async t => {
+  let now = Date.now();
+  const app = await startSessionApp(t, { now: () => new Date(now), env: { MPP_MAX_PENDING_SESSIONS_PER_CLIENT: "2" } });
+  const body = { maxBudget: 2, allowedTools: ["analyze_property"] };
+  const as = (ip: string) => post(app.base, "/api/v1/mpp/sessions", body, { "X-Forwarded-For": ip });
+  assert.equal((await as("198.51.100.7")).status, 402);
+  assert.equal((await as("198.51.100.7")).status, 402);
+  const capped = await as("198.51.100.7");
+  assert.equal(capped.status, 429);
+  assert.equal((await capped.json()).error.code, "MPP_TOO_MANY_PENDING_SESSIONS");
+  assert.ok(capped.headers.get("retry-after"));
+  assert.equal((await as("198.51.100.8")).status, 402); // another client has its own cap
+  // The stored client key is an HMAC, not the IP.
+  const stored = [...(app.sessions as unknown as { sessions: Map<string, { clientKey: string | null }> }).sessions.values()].map(s => s.clientKey);
+  assert.ok(stored.every(k => k && /^[0-9a-f]{32}$/.test(k) && !k.includes("198")));
+  now += 3600_000; // pending sessions expired → the cap frees up
+  assert.equal((await as("198.51.100.7")).status, 402);
+  assert.ok(app.audit.some(a => a.event === "mpp.session.pending_rejected"));
+
+  const limited = await startSessionApp(t, { env: { RATE_LIMIT_ENABLED: "true", MPP_SESSION_CREATE_RATE_LIMIT_MAX: "3", MPP_MAX_PENDING_SESSIONS_PER_CLIENT: "100" } });
+  const statuses: number[] = [];
+  for (let i = 0; i < 4; i++) statuses.push((await post(limited.base, "/api/v1/mpp/sessions", body, { "X-Forwarded-For": "203.0.113.9" })).status);
+  assert.deepEqual(statuses, [402, 402, 402, 429]);
+  assert.equal((await post(limited.base, "/api/v1/mpp/sessions", body, { "X-Forwarded-For": "203.0.113.10" })).status, 402);
+});
+
+test("MPP settlement: concurrent closes settle exactly once and write one ledger row", async () => {
+  const f = sessionService();
+  const s = await f.open({ maxBudget: 5, allowedTools: ["oman_supplier_check"] });
+  assert.equal((await f.pay(s.id, "oman_supplier_check", supplier.example, "k1")).status, 200);
+  const results = await Promise.all(Array.from({ length: 10 }, () => f.close(s.id)));
+  assert.ok(results.every(r => r.status === 200));
+  assert.equal(f.provider.settlements, 1);
+  assert.equal(f.ledger.length, 1);
+  const final = (await f.sessions.get(s.id))!;
+  assert.equal(final.settlementStatus, "settled");
+  assert.equal(final.settledMicros, 500_000);
+  assert.equal(final.settlementAttempts, 1);
+  // Reconciliation finds nothing to do.
+  assert.deepEqual(await f.service.reconcileSettlements(), { checked: 0, settled: 0, pendingPayerClose: 0, failed: 0, unknown: 0, skipped: 0 });
+});
+
+test("MPP settlement: an unknown outcome stays pending (never reported as settled); the reconciler reads the chain before resubmitting", async () => {
+  let now = Date.now();
+  const f = sessionService({ now: () => new Date(now) });
+  // Case 1: the settle tx never landed → reconciler settles it after the lease expires.
+  const a = await f.open({ maxBudget: 5, allowedTools: ["oman_supplier_check"] });
+  await f.pay(a.id, "oman_supplier_check", supplier.example, "k");
+  f.provider.failNextSettle = new MppPaymentFailure("unavailable", "rpc-timeout");
+  const r = await f.close(a.id);
+  assert.equal(r.status, 502);
+  assert.equal((r.body.error as { code: string }).code, "MPP_SETTLEMENT_UNCONFIRMED");
+  assert.equal((await f.sessions.get(a.id))!.settlementStatus, "pending");
+  assert.equal(f.ledger.length, 0);
+  assert.deepEqual((await f.service.reconcileSettlements()).checked, 0); // lease still held
+  now += (f.config.mpp.settlementLeaseSeconds + 1) * 1000;
+  const rec = await f.service.reconcileSettlements();
+  assert.equal(rec.settled, 1);
+  assert.equal((await f.sessions.get(a.id))!.settlementStatus, "settled");
+  assert.equal(f.provider.channels.get(a.channelId)!.settled, 500_000);
+  assert.equal(f.ledger.length, 1);
+
+  // Case 2: the settle tx DID land before the error → reconciler records it without resubmitting.
+  const b = await f.open({ maxBudget: 5, allowedTools: ["oman_supplier_check"] });
+  await f.pay(b.id, "oman_supplier_check", supplier.example, "k");
+  f.provider.failNextSettle = new MppPaymentFailure("unavailable", "rpc-timeout");
+  await f.close(b.id);
+  f.provider.channels.get(b.channelId)!.settled = 500_000; // what the chain shows
+  const before = f.provider.settlements;
+  now += (f.config.mpp.settlementLeaseSeconds + 1) * 1000;
+  assert.equal((await f.service.reconcileSettlements()).settled, 1);
+  assert.equal(f.provider.settlements, before); // nothing resubmitted
+  assert.equal((await f.sessions.get(b.id))!.settlementStatus, "settled");
+  assert.ok(f.audit.some(e => e.event === "mpp.session.settlement_pending"));
+});
+
+test("MPP settlement: a definitive failure is recorded as failed and retried by the reconciler; payer close with a rejected credential gets a fresh 402", async () => {
+  const f = sessionService();
+  const s = await f.open({ maxBudget: 5, allowedTools: ["oman_supplier_check"] });
+  await f.pay(s.id, "oman_supplier_check", supplier.example, "k");
+  f.provider.failNextSettle = new MppPaymentFailure("invalid", "settle-reverted");
+  const r = await f.close(s.id);
+  assert.equal(r.status, 200);
+  const failed = (await f.sessions.get(s.id))!;
+  assert.equal(failed.settlementStatus, "failed");
+  assert.equal(failed.settlementError, "settle-reverted");
+  assert.ok(f.audit.some(e => e.event === "mpp.session.settlement_failed"));
+  assert.equal((await f.service.reconcileSettlements()).settled, 1);
+  assert.equal((await f.sessions.get(s.id))!.settlementStatus, "settled");
+
+  // Payer close: an invalid close credential → 402 with a fresh challenge, state restored.
+  const g = await f.open({ maxBudget: 5, allowedTools: ["oman_supplier_check"] });
+  await f.pay(g.id, "oman_supplier_check", supplier.example, "k");
+  const challengeId = [...f.provider.challenges.values()].filter(c => c.kind === "voucher").at(-1)!.id;
+  f.provider.failNextClose = new MppPaymentFailure("payment_required", "challenge-expired");
+  const rejected = await f.close(g.id, f.provider.credential(challengeId, { action: "close", channelId: g.channelId, cumulative: 500_000 }));
+  assert.equal(rejected.status, 402);
+  assert.ok((rejected.body.challenges as unknown[]).length > 0);
+  assert.notEqual((await f.sessions.get(g.id))!.settlementStatus, "pending");
+  const fresh = (rejected.body.challenges as { id: string }[])[0]!.id;
+  const ok = await f.close(g.id, f.provider.credential(fresh, { action: "close", channelId: g.channelId, cumulative: 500_000 }));
+  assert.equal(ok.status, 200);
+  assert.ok(ok.headers.some(([k, v]) => k === "Payment-Receipt" && v.startsWith("receipt-close")));
+  assert.equal((await f.sessions.get(g.id))!.settlementStatus, "settled");
+  // A close credential for another channel is refused.
+  const other = await f.close(s.id, f.provider.credential(fresh, { action: "close", channelId: g.channelId, cumulative: 1 }));
+  assert.equal(other.status, 400);
+});
+
+test("MPP session management: a body-less close credential POSTed to a tool route (what mppx's sessionManager.close() does) closes and settles without running the tool; topUp is refused", async t => {
+  const { agent, base, provider } = await startSessionApp(t);
+  const { opened, channelId } = await agent.open({ maxBudget: 5, allowedTools: ["oman_supplier_check"] });
+  const id = (await opened.json()).data.sessionId;
+  assert.equal((await agent.call(id, "oman_supplier_check", supplier.example, "k1")).status, 200);
+  const challengeId = [...provider.challenges.values()].filter(c => c.kind === "voucher").at(-1)!.id;
+  const topUp = await fetch(base + `/api/v1/mpp/sessions/${id}/tools/oman_supplier_check`, { method: "POST", headers: { Authorization: provider.credential(challengeId, { action: "topUp", channelId }) } });
+  assert.equal(topUp.status, 400);
+  const res = await fetch(base + `/api/v1/mpp/sessions/${id}/tools/oman_supplier_check`, { method: "POST", headers: { Authorization: provider.credential(challengeId, { action: "close", channelId, cumulative: 500_000 }) } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get("payment-receipt") ?? "", /^receipt-close/);
+  const body = await res.json();
+  assert.equal(body.data.status, "closed");
+  assert.equal(body.data.calls, 1); // the tool did not run again
+  assert.equal(body.data.settlement.status, "settled");
+  assert.equal(provider.channels.get(channelId)!.finalized, true);
+  // Same close credential via the create route (looked up by channel) is an idempotent no-op.
+  const again = await fetch(base + "/api/v1/mpp/sessions", { method: "POST", headers: { Authorization: provider.credential(challengeId, { action: "close", channelId, cumulative: 500_000 }) } });
+  assert.equal(again.status, 200);
+  assert.equal(provider.settlements, 1);
+});
+
+test("MPP status: configured / provider reachable / database ready / charge / session / network — probe cached, no payment", async t => {
+  const app = await startSessionApp(t);
+  const s1 = (await (await fetch(app.base + "/api/v1/mpp/status")).json()).data;
+  await fetch(app.base + "/api/v1/mpp/status");
+  assert.equal(s1.configured, true);
+  assert.equal(s1.provider.reachable, true);
+  assert.equal(s1.database.ready, true);
+  assert.equal(s1.charge.enabled, false);
+  assert.equal(s1.session.enabled, true);
+  assert.equal(s1.network.chainId, 42431);
+  assert.equal(s1.network.testnet, true);
+  assert.equal(app.provider.probes, 1); // cached
+  assert.equal(app.provider.settlements, 0);
+  assert.equal(app.provider.challenges.size, 0); // no challenge / payment created
+  assert.ok(!JSON.stringify(s1).includes(mppEnv.MPP_SECRET_KEY));
+  const off = createApp(loadConfig(baseEnv), { logger: () => {} });
+  const offBase = await listen(t, off);
+  const d = (await (await fetch(offBase + "/api/v1/mpp/status")).json()).data;
+  assert.equal(d.configured, false);
+});
+
+test("MPP charge: an unknown settlement outcome keeps the credential claimed, withholds the result and is never reported as success", async () => {
+  const config = loadConfig({ ...mppEnv, MPP_MODES: "charge" });
+  const redemptions = new MemoryMppChargeRedemptionStore();
+  let settles = 0, executions = 0;
+  const provider = new FakeChannelProvider() as unknown as MppProvider;
+  Object.assign(provider, {
+    createCharge: async () => ({ headers: [], challenges: [{ id: "c1" }], problem: {}, wire: [] }),
+    verifyCharge: async () => ({ challengeId: "chal-1", method: "tempo", intent: "charge", payer: null }),
+    settleCharge: async () => { settles++; throw new MppPaymentFailure("unavailable", "rpc-timeout"); }
+  });
+  const audit: Record<string, unknown>[] = [];
+  const service = new MppService({
+    config: config.mpp, provider, sessions: new MemoryMppSessionRepository(), redemptions,
+    getTool: () => ({ name: "analyze_property", input: z.object({}).passthrough(), execute: async () => { executions++; return { payload: "TOOL-OUTPUT-XYZ" }; } }),
+    priceUsd: () => 0.01, audit: e => audit.push(e), recordSettlement: () => assert.fail("must not record revenue")
+  });
+  const r = await service.charge({ tool: "analyze_property", body: {}, authorization: "Payment abc", url: "https://x", requestId: "r" });
+  assert.equal(r.status, 502);
+  assert.equal((r.body.error as { code: string }).code, "MPP_SETTLEMENT_UNCONFIRMED");
+  assert.ok(!JSON.stringify(r.body).includes("TOOL-OUTPUT-XYZ"));
+  assert.equal(redemptions.claimed.get("chal-1"), "settlement_unknown");
+  const replay = await service.charge({ tool: "analyze_property", body: {}, authorization: "Payment abc", url: "https://x", requestId: "r2" });
+  assert.equal(replay.status, 402);
+  assert.equal((replay.body.error as { code: string }).code, "MPP_PAYMENT_REPLAYED");
+  assert.equal(executions, 1);
+  assert.equal(settles, 1);
+  assert.ok(audit.some(e => e.event === "mpp.charge.replay_rejected"));
+});
+
+test("MPP Postgres: DB-level constraints reject every invariant violation, even from a buggy writer", { skip: !pgUrl && "set MPP_TEST_DATABASE_URL to run" }, async t => {
+  const pool = new Pool({ connectionString: pgUrl, max: 25 });
+  t.after(() => pool.end());
+  const repo = new PostgresMppSessionRepository(pool);
+  const mk = (budget = 1_000_000, expiresInMs = 60_000, clientKey: string | null = null) => repo.createPending({ requestedBudgetMicros: budget, maxBudgetMicros: budget, allowedTools: ["analyze_property"], paymentProvider: "test", paymentMethod: "tempo/session", termsDigest: "d", expiresAt: new Date(Date.now() + expiresInMs).toISOString(), metadata: {}, clientKey });
+  const s = await mk();
+  const channel = "0x" + randomBytes(32).toString("hex");
+  await repo.activate(s.id, { externalSessionId: channel, maxBudgetMicros: 1_000_000, authorizationReference: null, expiresAt: new Date(Date.now() + 60_000).toISOString() }, new Date());
+  const violates = async (sql: string, params: unknown[], constraint: RegExp) => {
+    await assert.rejects(pool.query(sql, params), (e: { message: string; constraint?: string }) => constraint.test(e.constraint ?? e.message));
+  };
+  await violates("UPDATE mpp_sessions SET spent_micros = max_budget_micros + 1 WHERE id = $1", [s.id], /budget|spent_within/);
+  await violates("UPDATE mpp_sessions SET reserved_micros = max_budget_micros + 1 WHERE id = $1", [s.id], /remaining|budget_invariant/);
+  await violates("UPDATE mpp_sessions SET spent_micros = -1 WHERE id = $1", [s.id], /spent_micros|check/);
+  await violates("UPDATE mpp_sessions SET max_budget_micros = requested_budget_micros + 1 WHERE id = $1", [s.id], /budget_within_request/);
+  await violates("UPDATE mpp_sessions SET calls = -1 WHERE id = $1", [s.id], /counters_nonnegative/);
+  await violates("UPDATE mpp_sessions SET settlement_status = 'magic' WHERE id = $1", [s.id], /settlement_status/);
+  await violates("UPDATE mpp_sessions SET external_session_id = NULL WHERE id = $1", [s.id], /channel_required/);
+  // One channel can never back two sessions.
+  const s2 = await mk();
+  await violates("UPDATE mpp_sessions SET external_session_id = $2, status = 'active' WHERE id = $1", [s2.id, channel], /external_session_id/);
+  // One usage event per (session, Idempotency-Key).
+  const r1 = await repo.reserve({ sessionId: s.id, toolName: "analyze_property", amountMicros: 10_000, idempotencyKey: "idem", requestHash: "h", now: new Date() });
+  assert.ok(r1.ok);
+  await violates("INSERT INTO mpp_usage_events (id, session_id, tool_name, request_id, request_hash, amount_micros, status) VALUES ($1, $2, 'analyze_property', 'idem', 'h', 1, 'reserved')", [randomUUID(), s.id], /idempotency/);
+  // Charge credentials: 20 concurrent claims of one challenge → exactly one wins; a redeemed or
+  // settlement_unknown credential is never claimable again; unknown statuses are rejected.
+  const { PostgresMppChargeRedemptionStore } = await import("../src/billing/mpp/sessions.js");
+  const store = new PostgresMppChargeRedemptionStore(pool);
+  const chal = "chal-" + randomUUID();
+  const claims = await Promise.all(Array.from({ length: 20 }, () => store.claim(chal, "analyze_property")));
+  assert.equal(claims.filter(Boolean).length, 1);
+  await store.markRedeemed(chal, "0xref");
+  assert.equal(await store.claim(chal, "analyze_property"), false);
+  const unk = "chal-" + randomUUID();
+  assert.equal(await store.claim(unk, "analyze_property"), true);
+  await store.markSettlementUnknown(unk, "rpc-timeout");
+  await store.release(unk); // release never frees an unknown-outcome claim
+  assert.equal(await store.claim(unk, "analyze_property"), false);
+  await violates("UPDATE mpp_charge_redemptions SET status = 'free' WHERE challenge_id = $1", [chal], /status_valid/);
+});
+
+test("MPP Postgres: pending expiry, settlement claims and purge are multi-instance safe", { skip: !pgUrl && "set MPP_TEST_DATABASE_URL to run" }, async t => {
+  const pool = new Pool({ connectionString: pgUrl, max: 25 });
+  t.after(() => pool.end());
+  const repos = [new PostgresMppSessionRepository(pool), new PostgresMppSessionRepository(pool), new PostgresMppSessionRepository(pool)];
+  const repo = repos[0]!;
+  const client = "client-" + randomUUID();
+  const mk = (expiresInMs: number) => repo.createPending({ requestedBudgetMicros: 1_000_000, maxBudgetMicros: 1_000_000, allowedTools: ["analyze_property"], paymentProvider: "test", paymentMethod: "tempo/session", termsDigest: "d", expiresAt: new Date(Date.now() + expiresInMs).toISOString(), metadata: {}, clientKey: client });
+  const overdue = await Promise.all(Array.from({ length: 12 }, () => mk(-1000)));
+  const fresh = await mk(60_000);
+  assert.equal(await repo.countPendingForClient(client, new Date()), 1);
+  // Three "instances" expire concurrently: every overdue row is expired exactly once.
+  const runs = await Promise.all(repos.map(r => r.expirePending(new Date(), 1000)));
+  const mine = runs.flat().filter(id => overdue.some(o => o.id === id));
+  assert.equal(mine.length, 12);
+  assert.equal(new Set(mine).size, 12);
+  assert.equal((await repo.get(fresh.id))!.status, "pending");
+  assert.equal(await repo.activate(overdue[0]!.id, { externalSessionId: "0x" + randomBytes(32).toString("hex"), maxBudgetMicros: 1, authorizationReference: null, expiresAt: new Date(Date.now() + 60_000).toISOString() }, new Date()), null);
+  // Settlement claims: 10 concurrent claimers → one lease.
+  const s = await mk(60_000);
+  const channel = "0x" + randomBytes(32).toString("hex");
+  await repo.activate(s.id, { externalSessionId: channel, maxBudgetMicros: 1_000_000, authorizationReference: null, expiresAt: new Date(Date.now() + 60_000).toISOString() }, new Date());
+  await repo.close(s.id, new Date());
+  const claims = await Promise.all(Array.from({ length: 10 }, (_, i) => repos[i % 3]!.claimSettlement(s.id, new Date(), 120)));
+  assert.equal(claims.filter(Boolean).length, 1);
+  await repo.finishSettlement(s.id, { settlementStatus: "settled", settlementReference: "0xabc", settledMicros: 0 });
+  assert.equal(await repo.claimSettlement(s.id, new Date(), 120), null); // settled: never re-claimed
+  assert.ok(await repo.claimSettlement(s.id, new Date(), 120, { allowSettled: true })); // payer close only
+  // Purge: only expired, never-opened rows older than the cutoff.
+  const purged = await repo.purgeExpiredPending(new Date(Date.now() + 1000), 1000);
+  assert.ok(purged >= 12);
+  assert.equal(await repo.get(overdue[0]!.id), null);
+  assert.ok(await repo.get(s.id));
+  assert.ok(await repo.get(fresh.id));
 });
