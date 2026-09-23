@@ -215,6 +215,7 @@ REST base: `http://localhost:8787`.
 | POST | /api/v1/oman/property/analyze | X-API-Key |
 | POST | /api/v1/risk/company-reputation-check | X-API-Key (x402: /api/v1/x402/risk/company-reputation-check; L402: /api/v1/l402/risk/company-reputation-check) |
 | POST | /api/v1/risk/business-risk-score | X-API-Key (x402: /api/v1/x402/risk/business-risk-score; L402: /api/v1/l402/risk/business-risk-score; MPP: /api/v1/mpp/charge/business_risk_score) |
+| POST | /api/v1/documents/facts-extract | X-API-Key (x402: /api/v1/x402/documents/facts-extract; L402: /api/v1/l402/documents/facts-extract; MPP: /api/v1/mpp/charge/document_facts_extract) — 1 MB JSON body limit |
 | POST | /api/v1/intelligence/research-company | X-API-Key |
 | POST | /api/v1/intelligence/find-companies | X-API-Key |
 | POST | /api/v1/intelligence/analyze-company-risk | X-API-Key |
@@ -529,6 +530,38 @@ Any provider or role can be switched off with `BUSINESS_RISK_DISABLED_PROVIDERS`
 **Unit economics:** worst case uncached 4 web searches ≈ $0.032; everything else free. Estimated gross margin at $0.50 ≈ $0.47/call before hosting and facilitator fees (internal `GET /api/v1/internal/revenue/unit-economics`).
 
 **x402 challenge size:** the x402 Bazaar discovery declaration is embedded in the `PAYMENT-REQUIRED` header; declarations are now size-bounded (`MAX_DISCOVERY_DECLARATION_CHARS`, dropping the output example and then the output schema when needed) so every 402 stays readable by Node-based x402 clients (16 KB header limit). Full schemas/examples remain in `/openapi.json`.
+
+### Document intelligence: evidence-backed document facts (`document_facts_extract`, $0.25/call)
+
+```text
+document_facts_extract
+$0.25 / call
+Structured, verifiable facts from business documents (any country)
+```
+
+`POST /api/v1/documents/facts-extract` (API key) · `POST /api/v1/x402/documents/facts-extract` (x402, $0.25 = 250000 USDC atomic units) · `POST /api/v1/l402/documents/facts-extract` (L402, when enabled) · `POST /api/v1/mpp/charge/document_facts_extract` and MPP session calls (when enabled) · MCP tool `document_facts_extract`. Category `document_intelligence`, idempotent. Converts contracts, invoices, purchase orders, quotations, tenders/RFPs, leases, policies, financial reports, legal documents, CVs and company profiles into facts another agent can act on — **not a summary**: every fact carries a 0–1 extraction confidence and source evidence.
+
+**Input** (strict; exactly one of `documentUrl` / `text`): `documentUrl` (public https; PDF with a text layer, DOCX, HTML, text, Markdown, CSV) or `text` (≤ 200,000 characters; separate pages with `\f` for page-level evidence), optional `documentType` (`auto` default, or `contract | invoice | purchase_order | quotation | tender | policy | financial_report | legal_document | lease | resume | company_profile | other`), `requestedFacts` (≤ 20 plain-language questions), `mode` (`auto` | `requested_only`), `language` (ISO 639), `includeSourceEvidence` (default true). Limit: **25 pages** — larger documents are rejected (`DOCUMENT_TOO_LARGE`), never truncated.
+
+```bash
+curl -X POST http://localhost:8787/api/v1/documents/facts-extract \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"documentUrl":"https://example.com/supplier-contract.pdf","requestedFacts":["contract expiry date","payment terms","termination notice period"]}'
+```
+
+**Output:** `documentType` / `documentSubtype` / `documentTypeConfidence`, `language`, `title`, `facts[]` (`key`, `label`, `value`, `normalizedValue`, `confidence`, `method` = labeled_field | definition | pattern | clause | table | llm_verified, `sourceEvidence`), `requestedFacts[]` (one per request, `found` / `not_found` — absence is reported, never filled from model knowledge), `entities[]`, `dates[]`, `amounts[]`, `percentages[]`, `obligations[]` (party, obligation, `must`/`must_not`, deadline, condition), `requirements[]` (category, mandatory), `deadlines[]`, `riskFlags[]`, `metadata` (pageCount, characterCount, format, source, pageProvenance, extraction mode/method, LLM-assist status), `warnings[]`, `overallConfidence`, `limitations[]`. `sourceEvidence` = `{ page?, section?, text, startOffset, endOffset }` — a short verbatim excerpt plus offsets into the extracted text; `page` appears **only** when the source has real pages (PDF pages, `\f`-separated text, DOCX rendered page breaks).
+
+**Normalization** (only when unambiguous; the original is always returned): dates → ISO 8601 (textual months in English/French/Spanish/German/Portuguese/Italian/Arabic; numeric `dd/mm` vs `mm/dd` only when the document itself proves the order); amounts → `{amount, currency, frequency}` (ISO codes, unambiguous symbols, currency words incl. Arabic; `$`, `¥`, bare "dollars" leave `currency` unset with `currencySymbol`; 3-decimal currencies like OMR/KWD/BHD handled); percentages → ratio; durations → `{value, unit, iso8601}`. Nothing is computed, converted or annualized.
+
+**Document-type-aware facts:** contract (parties, effective/expiry dates, term, value, payment terms, renewal, termination, notice period, penalties, SLA, governing law, liability, warranties) · invoice (supplier, customer, number, dates, subtotal, tax, total, currency, payment details, line items verified by qty × unit price) · purchase order · quotation · tender (issuer, number, submission deadline, eligibility/technical/financial requirements, bid/performance bonds, mandatory documents, evaluation criteria) · lease (landlord, tenant, property, unit, dates, rent + frequency, deposit, renewal, notice) · policy · financial report · legal document · CV · company profile · generic.
+
+**Risk flags** are observable conditions with a rule-defined severity (`src/document-facts/extract/risk.ts`), never legal conclusions — e.g. `automatic_renewal`, `short_termination_notice`, `missing_expiry_date`, `missing_currency`, `contradictory_amounts`, `totals_do_not_reconcile`, `penalty_clause_detected`, `unlimited_liability_language`, `missing_signature`, `ambiguous_payment_terms`, `embedded_instructions_detected`, `macros_present`, `hidden_html_content_removed`.
+
+**Security — the document is untrusted data:** SSRF-safe single download (https only, private/loopback/link-local/metadata targets and redirects into them refused — the shared `safeFeedFetch`), size/time bounded; no link inside the document is ever fetched; PDF parsed text-only with pdf.js eval disabled; DOCX macros detected and never executed; HTML scripts and human-hidden elements removed; zero-width/bidi-override characters stripped. Passages addressed to AI systems ("ignore previous instructions…") are detected, flagged (`embedded_instructions_detected`) and excluded from facts, obligations and requirements. The optional LLM assist (`DOCUMENT_FACTS_LLM=auto` + the intelligence synthesizer) is used only for requested/priority facts the deterministic extractor could not establish; it gets a system prompt declaring the document data-only, never sees detected injection passages, has no tools, and every answer must quote the document verbatim — the quote is located by our code (which also derives the page), and answers whose quote is missing, lies in an injection passage, does not support the value, or contains a secret environment value are discarded.
+
+**Structured errors (no charge on x402/L402/MPP):** `MISSING_DOCUMENT` / `CONFLICTING_DOCUMENT_SOURCES` / `EMPTY_DOCUMENT` / `INVALID_URL` 400, `DOCUMENT_TOO_LARGE` 413, `UNSUPPORTED_FORMAT` 415, `UNREADABLE_DOCUMENT` 422 (corrupt, password-protected, scanned without a text layer), `DOCUMENT_FETCH_FAILED` 502, `DOCUMENT_TIMEOUT` 504, `EXTRACTION_FAILED` 500, plus the shared `INVALID_INPUT` / `INVALID_JSON`.
+
+**Example output** in OpenAPI / `/api/v1/capabilities` is the real pipeline over a synthetic agreement — regenerate with `node --import tsx scripts/generateDocumentFactsExample.ts` (a test fails if it drifts). **Unit economics:** deterministic extraction has no per-call provider cost; LLM assist (when enabled and needed) ≈ ≤ $0.02.
 
 ### Production Oman market data (database mode, import, caching)
 

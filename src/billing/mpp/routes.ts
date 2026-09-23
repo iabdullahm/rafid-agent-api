@@ -110,7 +110,8 @@ export function buildMppStatus(config: MppConfig) {
  * (the gate-first-then-mark discipline x402 and L402 already follow), so an unpaid 402 challenge
  * is never recorded as a failed tool invocation.
  */
-export function createMppRoutes(deps: { service: MppService; limiter: RequestHandler; sessionCreateLimiter?: RequestHandler }): Router {
+export function createMppRoutes(deps: { service: MppService; limiter: RequestHandler; sessionCreateLimiter?: RequestHandler; bodyLimitFor?: (tool: string) => string | undefined }): Router {
+  const toolBody = mppJsonBody({ limitFor: req => deps.bodyLimitFor?.(String(req.params.tool)) });
   const router = Router();
   const { service } = deps;
 
@@ -143,7 +144,7 @@ export function createMppRoutes(deps: { service: MppService; limiter: RequestHan
   // top of the route-family limiter) plus the per-client pending cap enforced in the service.
   const createLimiter = deps.sessionCreateLimiter ?? createMppSessionCreateLimiter(service.config);
 
-  router.post(mppRoutes.charge, deps.limiter, mppJsonBody(), handle((req, res) => service.charge({
+  router.post(mppRoutes.charge, deps.limiter, toolBody, handle((req, res) => service.charge({
     tool: String(req.params.tool), body: req.body, authorization: paymentAuthorization(req), url: requestUrl(req), requestId: requestIdOf(res)
   })));
   router.post(mppRoutes.sessions, deps.limiter, management(false), createLimiter, mppJsonBody(), handle((req, res) => service.createSession({
@@ -151,7 +152,7 @@ export function createMppRoutes(deps: { service: MppService; limiter: RequestHan
     clientKey: mppClientKey(service.config.secretKey, req)
   })));
   router.get(mppRoutes.session, deps.limiter, handle((req, res) => service.getSession({ sessionId: String(req.params.sessionId), requestId: requestIdOf(res) })));
-  router.post(mppRoutes.sessionTool, deps.limiter, management(true), mppJsonBody(), handle((req, res) => service.callTool({
+  router.post(mppRoutes.sessionTool, deps.limiter, management(true), toolBody, handle((req, res) => service.callTool({
     sessionId: String(req.params.sessionId), tool: String(req.params.tool), body: req.body,
     authorization: paymentAuthorization(req), idempotencyKey: req.header("idempotency-key"), url: requestUrl(req), requestId: requestIdOf(res)
   })));

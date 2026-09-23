@@ -53,6 +53,14 @@ import { buildL402SettlementRecord } from "../billing/l402/settlement.js";
 import { recordL402Event } from "../analytics/recorder.js";
 import { createMppMcpHandler, mppMcpPath } from "../billing/mpp/mcp.js";
 import { buildMppService, buildMppInfo, buildMppStatus, createMppDisabledRoutes, createMppRoutes, createMppSessionCreateLimiter, mppBasePath, type MppAuditSink, type MppProvider, type MppSessionRepository, type MppChargeRedemptionStore, type MppKv, type MppService } from "../billing/mpp/index.js";
+/** The largest per-capability JSON body limit (bytes → body-parser string), for shared endpoints. */
+function maxCapabilityBodyLimit(): string {
+  const toBytes = (l: string) => { const m = /^(\d+(?:\.\d+)?)\s*(kb|mb)$/i.exec(l.trim()); return m ? Number(m[1]) * (m[2]!.toLowerCase() === "mb" ? 1024 * 1024 : 1024) : 32 * 1024; };
+  const max = Math.max(32 * 1024, ...capabilities.map(c => (c.requestBodyLimit ? toBytes(c.requestBodyLimit) : 0)));
+  return `${Math.round(max / 1024)}kb`;
+}
+function formatBytes(n: number): string { return n >= 1024 * 1024 ? `${Math.round(n / 1024 / 1024 * 10) / 10}mb` : `${Math.round(n / 1024)}kb`; }
+
 export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number; mppProvider?: MppProvider; mppSessions?: MppSessionRepository; mppRedemptions?: MppChargeRedemptionStore; mppKv?: MppKv; mppAudit?: MppAuditSink; mppNow?: () => Date } = {}) {
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
   const store = config.authMode === "postgres" ? options.store : undefined;
@@ -247,6 +255,15 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     }
   };
   const parseJson = express.json({ limit: "32kb" });
+  // Per-capability JSON body limits (AgentCapability.requestBodyLimit; default 32kb) — e.g.
+  // document_facts_extract accepts a whole document's text. One parser per distinct limit.
+  const jsonParsers = new Map<string, RequestHandler>();
+  const parseJsonFor = (c: { requestBodyLimit?: string }): RequestHandler => {
+    const limit = c.requestBodyLimit ?? "32kb";
+    if (limit === "32kb") return parseJson;
+    if (!jsonParsers.has(limit)) jsonParsers.set(limit, express.json({ limit }));
+    return jsonParsers.get(limit)!;
+  };
   const markTool = (toolName: CapabilityName): RequestHandler => (_req, res, next) => { res.locals.toolName = toolName; next(); };
   for (const c of capabilities) for (const prefix of ["/api/v1", "/v1"]) {
     app.post(prefix + c.path, markTool(c.name), authenticate, async (_req,res,next) => {
@@ -258,7 +275,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       } catch (error) { next(error instanceof ApiError ? error : new ApiError(503,"SERVICE_UNAVAILABLE","Usage storage unavailable")); }
     }, options.rateLimiter ?? ((_req, _res, next) => next()),
       (req, _res, next) => req.is("application/json") ? next() : next(new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Use application/json")),
-      parseJson, async (req, res) => {
+      parseJsonFor(c), async (req, res) => {
         const input = c.input.parse(req.body);
         await billing.authorize({ capability: c.name, requestId: res.locals.requestId, customerId: res.locals.customerId });
         const data = await c.execute(input);
@@ -331,7 +348,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       app.post(x402BasePath + c.path,
         (_req, res, next) => { res.locals.toolName = c.name; res.locals.channel = "x402"; next(); },
         (req, _res, next) => req.is("application/json") ? next() : next(new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Use application/json")),
-        parseJsonX402, async (req, res) => {
+        c.requestBodyLimit ? parseJsonFor(c) : parseJsonX402, async (req, res) => {
           const input = c.input.parse(req.body);
           const data = await c.execute(input);
           res.locals.dataSource = classifyDataSource(c.name, data);
@@ -380,7 +397,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         l402Gate(c.name),
         (_req, res, next) => { res.locals.toolName = c.name; res.locals.channel = "l402"; next(); },
         (req, _res, next) => req.is("application/json") ? next() : next(new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Use application/json")),
-        parseJsonL402, async (req, res) => {
+        c.requestBodyLimit ? parseJsonFor(c) : parseJsonL402, async (req, res) => {
           const input = c.input.parse(req.body);
           const data = await c.execute(input);
           res.locals.dataSource = classifyDataSource(c.name, data);
@@ -404,12 +421,15 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       provider: options.mppProvider, sessions: options.mppSessions, redemptions: options.mppRedemptions, kv: options.mppKv, now: options.mppNow
     });
     mppServiceRef = mppService;
-    app.use(createMppRoutes({ service: mppService, limiter: mppLimiter, sessionCreateLimiter: config.rateLimitEnabled ? createMppSessionCreateLimiter(config.mpp) : disabledRateLimiter }));
+    app.use(createMppRoutes({
+      service: mppService, limiter: mppLimiter, sessionCreateLimiter: config.rateLimitEnabled ? createMppSessionCreateLimiter(config.mpp) : disabledRateLimiter,
+      bodyLimitFor: tool => capabilities.find(c => c.name === tool)?.requestBodyLimit
+    }));
     // Optional MPP-over-MCP payment layer (MPP_MCP_ENABLED=true): the MPP MCP transport binding
     // on its own path, delegating everything but tools/call to the standard MCP handler, so the
     // free /mcp endpoint is untouched. See billing/mpp/mcp.ts.
     if (config.mpp.mcpEnabled && config.mcpRemoteEnabled) {
-      app.post(mppMcpPath, mcpLimiter, express.json({ limit: "32kb" }),
+      app.post(mppMcpPath, mcpLimiter, express.json({ limit: maxCapabilityBodyLimit() }),
         createMppMcpHandler({ service: mppService, delegate: createRemoteMcpHandler(billingService, logger, analyticsRepository) }));
     }
   } else {
@@ -427,7 +447,8 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     // analytics (initialize/tools_list — see mcp/remote.ts's doc comment). A GET/DELETE request
     // (session open/close under the Streamable HTTP transport) has no JSON body and passes
     // through untouched.
-    app.use(mcpRemotePath, express.json({ limit: "32kb" }));
+    // The MCP endpoint carries every tool's arguments, so it accepts the largest per-tool body limit.
+    app.use(mcpRemotePath, express.json({ limit: maxCapabilityBodyLimit() }));
     app.all(mcpRemotePath, createRemoteMcpHandler(billingService, logger, analyticsRepository));
   }
   // Partner Data Feed layer (Section 3/4/9/11) — deliberately outside the `capabilities` registry
@@ -492,7 +513,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   const errors: ErrorRequestHandler = async (error, _req, res, _next) => {
     const type = (error as { type?: string })?.type;
     const normalized = type === "entity.parse.failed" ? new ApiError(400, "INVALID_JSON", "Malformed JSON body")
-      : type === "entity.too.large" ? new ApiError(413, "PAYLOAD_TOO_LARGE", "Request body exceeds 32kb")
+      : type === "entity.too.large" ? new ApiError(413, "PAYLOAD_TOO_LARGE", `Request body exceeds ${formatBytes((error as { limit?: number }).limit ?? 32 * 1024)}`)
       : type === "charset.unsupported" || type === "encoding.unsupported" ? new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Unsupported body encoding")
       : error;
     let result = publicError(normalized);

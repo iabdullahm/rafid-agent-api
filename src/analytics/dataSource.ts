@@ -110,6 +110,10 @@ export function classifyDataSource(toolName: string, data: unknown): DataSource 
     return providers.some(p => p && typeof p === "object" && ["ok", "stale_cache"].includes(String((p as Record<string, unknown>).status))) ? "live_provider" : "not_configured";
   }
 
+  // document_facts_extract: the data is the caller's own document, so "data source" does not apply
+  // (like the pure calculators) — explicitly null rather than "unknown".
+  if (toolName === "document_facts_extract") return null;
+
   return null;
 }
 

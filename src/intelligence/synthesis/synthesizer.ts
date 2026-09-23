@@ -30,6 +30,12 @@ export interface SynthesisRequest {
   /** For cost-attribution/logging only. */
   capability: string;
   requestId: string | null;
+  /** Optional (additive): a system prompt, sent in the provider's dedicated system channel —
+   *  used to state that the evidence is untrusted DATA, never instructions (document_facts_extract). */
+  system?: string;
+  /** Optional (additive): output-token cap (default 2000) and request timeout (default 20 s). */
+  maxOutputTokens?: number;
+  timeoutMs?: number;
 }
 
 export interface IntelligenceSynthesizer {
@@ -90,7 +96,7 @@ export class AnthropicSynthesizer implements IntelligenceSynthesizer {
     ].join("\n");
 
     for (let attempt = 0; attempt < 2; attempt++) {
-      const raw = await this.callModel(prompt, attempt > 0);
+      const raw = await this.callModel(prompt, attempt > 0, request);
       if (raw === null) return null;
       const parsed = tryParseJson(raw);
       if (parsed === undefined) continue;
@@ -105,9 +111,9 @@ export class AnthropicSynthesizer implements IntelligenceSynthesizer {
     return null;
   }
 
-  private async callModel(prompt: string, isRetry: boolean): Promise<string | null> {
+  private async callModel(prompt: string, isRetry: boolean, request?: Pick<SynthesisRequest, "system" | "maxOutputTokens" | "timeoutMs">): Promise<string | null> {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 20_000);
+    const timer = setTimeout(() => controller.abort(), request?.timeoutMs ?? 20_000);
     try {
       const response = await this.fetchImpl("https://api.anthropic.com/v1/messages", {
         method: "POST",
@@ -115,7 +121,8 @@ export class AnthropicSynthesizer implements IntelligenceSynthesizer {
         signal: controller.signal,
         body: JSON.stringify({
           model: this.model,
-          max_tokens: 2000,
+          max_tokens: request?.maxOutputTokens ?? 2000,
+          ...(request?.system ? { system: request.system } : {}),
           messages: [{ role: "user", content: isRetry ? `${prompt}\n\nYour previous response was not valid JSON matching the required shape. Try again, JSON only.` : prompt }]
         })
       });

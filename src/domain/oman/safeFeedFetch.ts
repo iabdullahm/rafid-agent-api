@@ -24,6 +24,9 @@ export interface SafeFeedFetchResult {
   finalUrl: string;
   /** Only ever true when the caller opted into truncateAtLimit. */
   truncated?: boolean;
+  /** The raw response bytes — only present when the caller opted into returnBytes (binary
+   *  documents such as PDF/DOCX, where `body`'s UTF-8 decoding would be lossy). */
+  bytes?: Buffer;
 }
 
 export interface SafeFeedFetchOptions extends FeedUrlValidationOptions {
@@ -37,6 +40,9 @@ export interface SafeFeedFetchOptions extends FeedUrlValidationOptions {
    *  existing caller keeps the strict behavior. Used by page inspection (company websites),
    *  where the first N bytes of a large homepage are still valid evidence. */
   truncateAtLimit?: boolean;
+  /** When true, the result also carries the undecoded response bytes (`bytes`). Default false —
+   *  every existing caller is unchanged. Used by document_facts_extract for binary documents. */
+  returnBytes?: boolean;
 }
 
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
@@ -84,14 +90,15 @@ export async function safeFeedFetch(url: string, options: SafeFeedFetchOptions):
       const { body, truncated } = await readBodyTruncating(response, options.maxResponseBytes);
       return { status: response.status, contentType, body, finalUrl: currentUrl.toString(), truncated };
     }
-    const body = await readBodyWithLimit(response, options.maxResponseBytes);
-    return { status: response.status, contentType, body, finalUrl: currentUrl.toString() };
+    const raw = await readBodyWithLimit(response, options.maxResponseBytes);
+    const body = raw.toString("utf8");
+    return { status: response.status, contentType, body, finalUrl: currentUrl.toString(), ...(options.returnBytes ? { bytes: raw } : {}) };
   }
 }
 
-async function readBodyWithLimit(response: Response, maxBytes: number): Promise<string> {
+async function readBodyWithLimit(response: Response, maxBytes: number): Promise<Buffer> {
   const reader = response.body?.getReader();
-  if (!reader) return "";
+  if (!reader) return Buffer.alloc(0);
   const chunks: Uint8Array[] = [];
   let received = 0;
   try {
@@ -108,7 +115,7 @@ async function readBodyWithLimit(response: Response, maxBytes: number): Promise<
   } finally {
     reader.releaseLock?.();
   }
-  return Buffer.concat(chunks.map(c => Buffer.from(c))).toString("utf8");
+  return Buffer.concat(chunks.map(c => Buffer.from(c)));
 }
 
 async function readBodyTruncating(response: Response, maxBytes: number): Promise<{ body: string; truncated: boolean }> {
