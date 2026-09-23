@@ -1,12 +1,19 @@
 import type { RevenueSettlement } from "./types.js";
 import type { AnalyticsEvent } from "../analytics/types.js";
 
-/** A successful PAID tool execution — over either payment rail (x402 or L402). Every settled
- *  ledger row, from either rail, corresponds to exactly one of these, so reconciliation compares
- *  the two rails' combined executions against the combined ledger. */
+/** A successful PAID tool execution over a per-call rail (x402, L402, or an MPP charge). Every
+ *  settled per-call ledger row corresponds to exactly one of these, so reconciliation compares
+ *  the rails' combined executions against the combined ledger. MPP *session* calls
+ *  ("mpp-session") are deliberately excluded: they are settled per channel, not per call. */
 export function isPaidToolExecution(event: Pick<AnalyticsEvent, "category" | "channel" | "success" | "toolName">): boolean {
-  return event.category === "tool" && (event.channel === "x402" || event.channel === "l402") && event.success === true && Boolean(event.toolName);
+  return event.category === "tool" && (event.channel === "x402" || event.channel === "l402" || event.channel === "mpp") && event.success === true && Boolean(event.toolName);
 }
+
+/** Ledger pseudo-tool for MPP session settlements (billing/mpp/settlement.ts's
+ *  MPP_SESSION_LEDGER_TOOL, duplicated as a literal to keep this module dependency-free). One
+ *  session settlement pays for many metered calls across tools, so it has no per-tool execution
+ *  counterpart and is excluded from the per-tool comparison and the catalog-price check. */
+const MPP_SESSION_LEDGER_TOOL = "mpp_session";
 
 /**
  * Pure aggregation over an already-fetched, already-window-filtered settlement array — the same
@@ -193,7 +200,10 @@ export function buildReconciliation(args: {
 
   // A vs B: successful x402 executions vs settled rows, per tool.
   const settledCountByTool: Record<string, number> = {};
-  for (const row of settled) settledCountByTool[row.toolName] = (settledCountByTool[row.toolName] ?? 0) + 1;
+  for (const row of settled) {
+    if (row.toolName === MPP_SESSION_LEDGER_TOOL) continue;
+    settledCountByTool[row.toolName] = (settledCountByTool[row.toolName] ?? 0) + 1;
+  }
   const allToolNames = new Set([...Object.keys(x402ToolExecutionCounts), ...Object.keys(settledCountByTool)]);
   for (const toolName of allToolNames) {
     const executed = x402ToolExecutionCounts[toolName] ?? 0;
@@ -218,6 +228,7 @@ export function buildReconciliation(args: {
   // error).
   const EPSILON = 0.000001;
   for (const row of settled) {
+    if (row.toolName === MPP_SESSION_LEDGER_TOOL) continue;
     const expected = catalogPriceByTool[row.toolName];
     if (expected === undefined || row.amountDecimal === null) continue;
     // L402 rows are denominated in BTC (sats converted at the challenge-time rate), so they can't

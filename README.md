@@ -637,6 +637,166 @@ Flow, for every capability (`POST /api/v1/l402/property/analyze`, `/api/v1/l402/
 - **Accounting:** each redeemed token writes one `settlement_succeeded` row to the same revenue ledger as x402. It has `network: "lightning:<L402_NETWORK>"`, `currency`/`asset: "BTC"`, sats in `amountAtomic`, BTC in `amountDecimal`, the payment hash as `transactionHash` (never the preimage) and `facilitator: "lnd"`. It is deduplicated on the payment hash. Revenue totals keep BTC and USDC separate, and the internal dashboard shows BTC to 8 decimals. Reconciliation counts paid executions across both rails (analytics channel `l402`) and skips the USD price check for BTC rows. The `amount_decimal` column is widened automatically to `numeric(24,10)` on startup, which is lossless for existing rows.
 - **Production requirements:** either the LND settings (`LND_REST_URL` (https), `LND_INVOICE_MACAROON` (hex)) or the four `VOLTAGE_*` settings with `L402_BACKEND=voltage`, plus `L402_ROOT_KEY` (`openssl rand -hex 32`), and `DATABASE_URL` or `L402_DATABASE_URL` for cross-instance single-use enforcement. `loadConfig()` refuses to start if any of these is missing. See `.env.example`.
 
+### MPP: Machine Payments Protocol (charge + metered sessions, no API key)
+
+MPP is a third payment rail. It runs alongside x402 and L402 and replaces neither. [MPP](https://mpp.dev) is the Machine Payments Protocol co-authored by Tempo and Stripe. On the wire it uses the IETF "Payment" HTTP authentication scheme (`WWW-Authenticate: Payment …` / `Authorization: Payment …` / `Payment-Receipt`). Rafid implements it with the official TypeScript SDK, [`mppx`](https://github.com/wevm/mppx) (`^0.11.0`), and does not reimplement any of the protocol.
+
+MPP is off unless `MPP_ENABLED=true`. When it is off, every `/api/v1/mpp/*` payment route returns `404 MPP_DISABLED` and is left out of OpenAPI and discovery. Two routes are always available: `GET /api/v1/mpp` (terms and per-tool prices) and `GET /api/v1/mpp/status` (secret-free runtime status).
+
+| Rail | What it is | Unit of payment |
+|---|---|---|
+| **x402** | Pay-per-request, USDC on Base | one on-chain payment per call |
+| **L402** | Lightning pay-per-request | one BOLT11 invoice per call |
+| **MPP charge** | One-time machine payment (`tempo/charge` on Tempo, optional `evm/charge` = Base USDC through the existing CDP facilitator) | one MPP credential per call |
+| **MPP session** | Reusable authorization + metered machine usage (`tempo/session`: a TIP-1034 payment channel) | one deposit per session, one signed voucher per call, settled once |
+
+```text
+Agent
+  |
+  +-- x402 ------------ POST /api/v1/x402/<path>
+  |
+  +-- L402 ------------ POST /api/v1/l402/<path>
+  |
+  +-- MPP Charge ------ POST /api/v1/mpp/charge/{tool}
+  |
+  +-- MPP Session ----- POST /api/v1/mpp/sessions            (authorize: open channel, deposit = budget)
+        |
+        +-- Tool Call - POST /api/v1/mpp/sessions/{id}/tools/{tool}   (voucher → run → meter)
+        +-- Tool Call
+        +-- Tool Call
+        |
+        +-- Meter ----- GET  /api/v1/mpp/sessions/{id}            (spent / remaining / per-tool usage)
+        |
+        +-- Settlement  POST /api/v1/mpp/sessions/{id}/close      (settle exactly the metered spend)
+```
+
+**Architecture.** The code lives in `src/billing/mpp/` and is kept apart from the domain services. The capabilities stay protocol-agnostic: MPP runs the same `capability.execute()` as REST, x402, L402 and MCP.
+
+| File | Role |
+|---|---|
+| `config.ts` | `MPP_*` parsing; fails closed at startup |
+| `provider.ts` | the `MppProvider` interface (`createCharge`, `verifyCharge`, `settleCharge`, `createSession`, `verifySession`, `sessionCallChallenge`, `verifySessionCall`, `recordUsage`, `settleSession`, `closeSession`) |
+| `mppx.ts` | the only file that talks to the SDK |
+| `service.ts` | orchestration |
+| `sessions.ts` | persistence |
+| `store.ts` | the SDK's AtomicStore on Postgres |
+| `metering.ts` | metering |
+| `settlement.ts` | revenue-ledger rows |
+| `routes.ts`, `middleware.ts` | HTTP |
+| `mcp.ts` | optional MCP binding |
+| `audit.ts` | audit log |
+| `openapi.ts` | OpenAPI paths |
+
+To add another MPP method later (Stripe SPT, Solana, another EVM chain), write a new provider adapter. The API does not change.
+
+**Pricing.** Prices always come from the capability registry (`BillingService.getToolPrice()`), so x402, L402 and `/api/v1/pricing` see the same numbers. Internally every amount is integer micro-USD. That equals one raw unit of the 6-decimal USD stablecoins MPP settles in. The server is authoritative: the SDK derives each route's payment request itself and rejects any credential whose amount, recipient, currency, realm, scope (`rafid:charge:<tool>`) or expiry differs. A client-supplied price, `spent` or `remaining` is never read.
+
+**Charge flow** (`POST /api/v1/mpp/charge/{tool}`):
+
+1. The tool's JSON input is validated first. Invalid input returns `400` with no challenge and no payment.
+2. If there is no credential, the response is `402` with one `WWW-Authenticate: Payment` challenge per configured method. The body contains `{ protocol: "mpp", mode: "charge", tool, amount, currency: "USD", paymentRequired: true, challenges, problem }`.
+3. If a credential is present:
+   - It is verified without consuming it (`validateCredential`).
+   - It is claimed as single-use (`mpp_charge_redemptions`).
+   - The tool runs.
+   - Only after the tool succeeds is the payment settled (`broadcastCredential`). The response carries the normal tool output, a `payment` block and a `Payment-Receipt` header.
+4. If the tool fails, the payment is not settled and the claim is released.
+5. If settlement fails, the result is withheld (`402 MPP_SETTLEMENT_FAILED`). This is the same rule x402 follows.
+6. A replayed credential gets `402 MPP_PAYMENT_REPLAYED`.
+
+**Session flow.** In the real protocol, a session is a Tempo payment channel.
+
+1. **Open.** `POST /api/v1/mpp/sessions` with `{ "maxBudget": 20, "currency": "USD", "allowedTools": [...] }`:
+   - Without a credential it creates a `pending` session (`mpp_<32 hex>`) and returns a `402` asking the payer to open a channel. The suggested deposit is the budget.
+   - The budget and tools are bound into the challenge's HMAC'd `meta`. If they are changed, the request gets `409 MPP_TERMS_MISMATCH`.
+   - Retrying the same body with the open credential opens the channel on-chain. The response is `201`, and the session is `active` with `maxBudget = min(requested, deposit)`.
+   - An open credential can only ever bind one session.
+2. **Call.** `POST /api/v1/mpp/sessions/{id}/tools/{tool}` with an `Idempotency-Key` header runs these steps in order:
+   1. The session exists and is active.
+   2. The tool is allowed.
+   3. The price is read from the registry.
+   4. The input is validated.
+   5. The budget is reserved atomically. `SELECT … FOR UPDATE` plus a DB `CHECK (spent + reserved <= max_budget)` means concurrent calls can never overspend. An unaffordable call returns `402 MPP_SESSION_BUDGET_EXCEEDED { required, remaining }` before it executes.
+   6. The payer's voucher is verified without consuming it. Without a voucher, the response is `402` with a voucher challenge for this channel.
+   7. The tool executes.
+   8. Only on success, the voucher is accepted and the price is metered against the channel (`tempo.session.charge()`).
+   9. `spent`, `remaining`, `calls` and per-tool usage are updated.
+
+   The response is the normal tool output plus `usage: { sessionId, tool, charge, spent, remaining, calls, status }` (kept outside `data`). A failed tool call is never charged. Retrying the same `Idempotency-Key` returns the stored result and charges nothing. The same key with a different tool or input returns `422 MPP_IDEMPOTENCY_CONFLICT`.
+3. **Meter.** `GET /api/v1/mpp/sessions/{id}` returns status, `spent`, `remaining`, `calls`, `usageByTool`, and the channel view (deposit, accepted voucher, metered, settled on-chain).
+4. **Close.** `POST /api/v1/mpp/sessions/{id}/close` is idempotent. It stops calls, finalizes metering and settles:
+   - With the payer's channel `close` credential, the channel closes on-chain capturing **exactly the metered spend**, and the rest of the deposit is refunded.
+   - Without it, the server calls `tempo.session.settle()`, but only when the signed voucher equals the metered spend. That function captures the signed voucher, so it is never used when that would over-capture. Otherwise `settlement.status` is `pending_payer_close`.
+   - Settled amounts are written to the revenue ledger once, as `toolName: "mpp_session"`. The per-tool reconciliation leaves these rows out because they are not per-call settlements.
+5. **States.** A session is one of `pending`, `active`, `exhausted`, `closed`, `expired` (`MPP_SESSION_TTL_SECONDS`) or `failed`. Calls are rejected unless the session is `active`: `exhausted` → `402`, `closed` → `409`, `expired` → `410`.
+
+**Persistence.** Tables are created automatically, like every other store in this repository, in one DDL transaction under an advisory lock:
+
+| Table | Holds | Keys and constraints |
+|---|---|---|
+| `mpp_sessions` | sessions | unique `external_session_id` (the channel id); a budget-invariant `CHECK` |
+| `mpp_usage_events` | usage events | unique `(session_id, request_id)` = idempotency |
+| `mpp_charge_redemptions` | single-use charge credentials | — |
+| `mpp_kv` | the SDK's own channel state and replay markers | a linearizable read-modify-write under a per-key advisory lock |
+
+MPP uses `MPP_DATABASE_URL` if set and falls back to `DATABASE_URL`. Production refuses to start MPP without a database.
+
+**Security.**
+
+- Credentials are HMAC-bound, route-scoped and expiring. The SDK validates the challenge, signature, amount, recipient and scope.
+- Charge credentials are single-use.
+- A session's open credential cannot be replayed into a second session, and its terms cannot be tampered with.
+- Vouchers must come from the session's own channel.
+- Budget enforcement is atomic.
+- Settlement never captures unmetered authorization.
+- Structured audit events are emitted: `mpp.charge.created|verified|settled`, `mpp.session.created|opened|call|usage_recorded|exhausted|closed|expired|settled` and `mpp.payment.failed`. They never contain credentials, signatures, receipts or keys, and anything that looks like one is dropped.
+
+**MCP.** Normal MCP stays at `/mcp`, free and unchanged: MCP handles tool discovery and invocation, and MPP handles payment. With `MPP_MCP_ENABLED=true`, `/mcp/mpp` serves the MPP MCP transport binding:
+
+- A paid `tools/call` without payment fails with JSON-RPC `-32042` and `data.challenges`.
+- The client retries with `params._meta["org.paymentauth/credential"]`.
+- Results carry `_meta["org.paymentauth/receipt"]`.
+
+The official `mppx/mcp/client` `McpClient.wrap()` handles this automatically, and `tests/mpp.test.ts` exercises it end to end. For session mode over MCP, open the session over HTTP and pass `_meta["com.rafidsystem/mpp-session"] = { sessionId, idempotencyKey }` along with the voucher credential. `initialize` and `tools/list` are passed straight through to the standard MCP server. More detail is in `docs/mpp.md`.
+
+**Configuration** (see `.env.example`):
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `MPP_ENABLED` | `false` | master switch |
+| `MPP_PROVIDER` | `mppx` | provider adapter |
+| `MPP_NETWORK` | `tempo` | `tempo` (chain 4217, USDC) or `tempo-testnet` (Moderato 42431, pathUSD) |
+| `MPP_MODES` | `charge,session` | enabled intents |
+| `MPP_CHARGE_METHODS` | `tempo` | `tempo` and/or `evm` |
+| `MPP_CURRENCY` | `USD` | pricing currency (USD only) |
+| `MPP_SECRET_KEY` | — | ≥32 random bytes, HMAC for challenges (`openssl rand -base64 32`) |
+| `MPP_REALM` | `api.rafidsystem.com` | stable realm bound into challenges |
+| `MPP_TEMPO_PRIVATE_KEY` | — | payee key; required for session mode (server-submitted close/settle) |
+| `MPP_TEMPO_RECIPIENT` | derived from the key | Tempo payee address |
+| `MPP_TEMPO_CURRENCY`, `MPP_TEMPO_RPC_URL` | chain defaults | overrides |
+| `MPP_EVM_NETWORK` | `eip155:8453` | evm/charge network; mainnet needs `CDP_API_KEY_*`, like x402 |
+| `MPP_EVM_RECIPIENT` | `X402_WALLET_ADDRESS` | evm/charge payee |
+| `MPP_SESSION_TTL_SECONDS` | `3600` | session lifetime |
+| `MPP_MAX_SESSION_BUDGET_USD` / `MPP_MIN_SESSION_BUDGET_USD` | `1000` / `0.01` | budget bounds |
+| `MPP_REQUIRE_IDEMPOTENCY` | `true` | require `Idempotency-Key` on session calls |
+| `MPP_CHALLENGE_TTL_SECONDS` | `300` | challenge lifetime |
+| `MPP_MCP_ENABLED` | `false` | `/mcp/mpp` binding |
+| `MPP_DATABASE_URL` | `DATABASE_URL` | persistence |
+
+**Examples.** `examples/mpp-client/` contains `charge.ts`, `session.ts` (a $10 session, two tools, read the remaining budget, close) and `bulk-supplier-check.ts` (screen suppliers until the budget runs out, then close and settle).
+
+```bash
+# Unpaid quote (no wallet needed):
+curl -si -X POST https://api.rafidsystem.com/api/v1/mpp/charge/analyze_oman_property \
+  -H 'Content-Type: application/json' \
+  -d '{"governorate":"Muscat","area":"Al Mouj","propertyType":"villa","bedrooms":4,"sizeSqm":420,"askingPriceOMR":450000}'
+# → HTTP/1.1 402 … WWW-Authenticate: Payment id="…", method="tempo", intent="charge", request="…"
+
+# Start a session (402 → pay the open challenge with an MPP client → 201):
+curl -si -X POST https://api.rafidsystem.com/api/v1/mpp/sessions -H 'Content-Type: application/json' \
+  -d '{"maxBudget":20,"currency":"USD","allowedTools":["oman_supplier_check","analyze_oman_property"]}'
+```
+
 ## MCP usage
 
 MCP is one of Rafid's two primary agent interfaces (alongside x402), not an afterthought bolted onto the REST API. The installed MCP SDK v2 is retained; see the [official SDK documentation](https://ts.sdk.modelcontextprotocol.io/v2/). Two transports are available, and both are built by the exact same `createMcpServer()` factory (`src/mcp/server.ts`) reading the exact same `capabilities` registry — there is no second tool registry, schema set, description set, or `execute()` path to keep in sync by hand:

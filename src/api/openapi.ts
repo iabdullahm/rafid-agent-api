@@ -8,6 +8,8 @@ import { buildLlmsTxt } from "./llms-txt.js";
 import { buildX402Status } from "../billing/x402.js";
 import { l402BasePath } from "../billing/l402/gate.js";
 import { buildMcpStatus, mcpStatusBasePath } from "../mcp/remote.js";
+import { buildMppOpenapiPaths } from "../billing/mpp/openapi.js";
+import type { MppConfig } from "../billing/mpp/config.js";
 const json = (schema: unknown, example?: unknown, summary = "Example") => ({ "application/json": {
   schema, ...(example === undefined ? {} : { examples: { default: { summary, value: example } } })
 } });
@@ -31,7 +33,7 @@ const x402Errors = Object.fromEntries(Object.entries(errors).filter(([status]) =
 const toolMeta = { type: "object", required: ["requestId", "tool", "price", "currency"], properties: { requestId: { type: "string" }, tool: { type: "string" }, price: { type: "number" }, currency: { type: "string" } } };
 const toolSuccess = (data: unknown) => ({ type: "object", required: ["success", "data", "meta"], properties: { success: { const: true }, data, meta: toolMeta } });
 
-export function buildOpenapi(config: { x402Enabled: boolean; x402Network: string; x402WalletAddress: string; cdpConfigured: boolean; mcpRemoteEnabled: boolean; logoUrl: string; contactEmail: string; legalInfoUrl: string; l402Enabled?: boolean; l402Network?: "mainnet" | "testnet" | "signet" | "regtest" } = { x402Enabled: false, x402Network: "", x402WalletAddress: "", cdpConfigured: false, mcpRemoteEnabled: false, logoUrl: "", contactEmail: "", legalInfoUrl: "" }) {
+export function buildOpenapi(config: { x402Enabled: boolean; x402Network: string; x402WalletAddress: string; cdpConfigured: boolean; mcpRemoteEnabled: boolean; logoUrl: string; contactEmail: string; legalInfoUrl: string; l402Enabled?: boolean; l402Network?: "mainnet" | "testnet" | "signet" | "regtest"; mpp?: MppConfig } = { x402Enabled: false, x402Network: "", x402WalletAddress: "", cdpConfigured: false, mcpRemoteEnabled: false, logoUrl: "", contactEmail: "", legalInfoUrl: "" }) {
 const paths: Record<string, unknown> = {};
 for (const c of capabilities) {
   const operation = {
@@ -209,6 +211,8 @@ paths[mcpStatusBasePath] = { get: { operationId: "mcp_status", tags: ["Agent"], 
 paths["/llms.txt"] = { get: { operationId: "llms_txt", tags: ["Agent"], summary: "Plain-text briefing for LLM-based agents", description: "What Rafid does, every tool and how to call it, pricing, the x402 payment model and known limitations, in plain text for an agent that hasn't called a JSON endpoint yet.", security: [],
   responses: { "200": { description: "llms.txt", content: { "text/plain": { schema: { type: "string" }, example: buildLlmsTxt(config) } } } }
 } };
+// MPP (Machine Payments Protocol): info/status always, payment routes only when MPP_ENABLED=true.
+Object.assign(paths, buildMppOpenapiPaths(config.mpp));
 return {
   openapi: "3.1.0", info: { title: "Rafid Agent API", version: "0.1.0", description: "Property intelligence calculations in OMR for agents and applications. Use Authorize to set X-API-Key. Maintenance is an uncalibrated heuristic. Monetary outputs are rounded to two decimals. Aliases maintenance and maintenanceCost are mutually exclusive; comparison names must be unique." },
   tags: [
@@ -220,7 +224,8 @@ return {
     { name: "Agent", description: "Public discovery, pricing and tool-catalog endpoints for AI agents and agent marketplaces." },
     { name: "System", description: "Public discovery, health and documentation endpoints." },
     { name: "x402", description: "Pay-per-call protocol information, always available; payment-gated endpoints are settled on-chain via the x402 protocol and require no account or API key." },
-    { name: "L402", description: "Pay-per-call over the Bitcoin Lightning Network via the L402 protocol (macaroon + BOLT11 invoice); no account or API key. Payment-gated endpoints exist only when L402_ENABLED=true." }
+    { name: "L402", description: "Pay-per-call over the Bitcoin Lightning Network via the L402 protocol (macaroon + BOLT11 invoice); no account or API key. Payment-gated endpoints exist only when L402_ENABLED=true." },
+    { name: "MPP", description: "Machine Payments Protocol (HTTP 'Payment' auth scheme, https://mpp.dev): one-time charges per call and budgeted, metered sessions over Tempo payment channels; no account or API key. Payment-gated endpoints exist only when MPP_ENABLED=true." }
   ],
   servers: [{ url: "/" }], paths,
   components: { securitySchemes: { ApiKeyAuth: { type: "apiKey", in: "header", name: "X-API-Key", description: "Enter an active Rafid API key. Swagger UI sends it in the X-API-Key request header." } } }

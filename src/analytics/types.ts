@@ -69,8 +69,11 @@ export type DataSource = "partner_feed" | "demo_manual" | "mixed" | "unknown" | 
  *  see that function's doc comment. Null for discovery/mcp/x402-category rows, where "channel"
  *  isn't a meaningful concept (a discovery hit and an x402 funnel event aren't tool invocations at
  *  all). This is purely additive to an already-shipped table — PostgresAnalyticsRepository adds it
- *  via ALTER TABLE ... ADD COLUMN IF NOT EXISTS, so existing rows simply read back as null. */
-export type AnalyticsChannel = "rest" | "x402" | "l402" | "mcp-remote";
+ *  via ALTER TABLE ... ADD COLUMN IF NOT EXISTS, so existing rows simply read back as null.
+ *  "mpp" = an MPP charge call (one settled payment per call, like x402/L402); "mpp-session" = a
+ *  metered call inside an MPP session (paid by the session's eventual channel settlement, so it
+ *  is NOT one-settlement-per-call — see revenue/aggregate.ts's isPaidToolExecution()). */
+export type AnalyticsChannel = "rest" | "x402" | "l402" | "mpp" | "mpp-session" | "mcp-remote";
 
 export interface AnalyticsEvent {
   category: AnalyticsCategory;

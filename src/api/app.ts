@@ -51,7 +51,9 @@ import { PublicBtcUsdRateProvider, type BtcUsdRateProvider } from "../billing/l4
 import { MemoryL402RedemptionStore, PostgresL402RedemptionStore, type L402RedemptionStore } from "../billing/l402/redemptions.js";
 import { buildL402SettlementRecord } from "../billing/l402/settlement.js";
 import { recordL402Event } from "../analytics/recorder.js";
-export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number } = {}) {
+import { createMppMcpHandler, mppMcpPath } from "../billing/mpp/mcp.js";
+import { buildMppService, buildMppInfo, buildMppStatus, createMppDisabledRoutes, createMppRoutes, mppBasePath, type MppAuditSink, type MppProvider, type MppSessionRepository, type MppChargeRedemptionStore, type MppKv } from "../billing/mpp/index.js";
+export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number; mppProvider?: MppProvider; mppSessions?: MppSessionRepository; mppRedemptions?: MppChargeRedemptionStore; mppKv?: MppKv; mppAudit?: MppAuditSink; mppNow?: () => Date } = {}) {
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
   const store = config.authMode === "postgres" ? options.store : undefined;
   const app = express();
@@ -101,10 +103,12 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     // is normally absent, but a client should not have to special-case that).
     // Authorization carries an L402 token (macaroon:preimage) — like X-PAYMENT, a per-request
     // credential, never an ambient cookie, so the permissive origin above stays safe.
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-PAYMENT, Authorization, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID");
+    // Payment-Authorization / Idempotency-Key: MPP credentials (alternative header) and session
+    // call idempotency keys — per-request values, never ambient browser state.
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-PAYMENT, Authorization, Payment-Authorization, Idempotency-Key, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID");
     // WWW-Authenticate carries the L402 challenge (macaroon + invoice); a browser client must be
     // able to read it back.
-    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate, X-L402-Error, PAYMENT-REQUIRED, X-PAYMENT-RESPONSE");
+    res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, WWW-Authenticate, X-L402-Error, PAYMENT-REQUIRED, X-PAYMENT-RESPONSE, Payment-Receipt, Idempotent-Replay");
     res.setHeader("Access-Control-Max-Age", "600");
     res.on("finish", () => {
       const durationMs = Math.round((performance.now() - start) * 100) / 100;
@@ -118,9 +122,11 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       // secret: it is either the existing redacted customerId, or an x402 channel/network tag.
       const toolName = res.locals.toolName as CapabilityName | undefined;
       if (toolName) {
-        const accessMode = res.locals.channel === "x402" ? "x402" : res.locals.channel === "l402" ? "l402" : "api-key";
+        const channel = res.locals.channel as string | undefined;
+        const accessMode = channel === "x402" || channel === "l402" || channel === "mpp" || channel === "mpp-session" ? channel : "api-key";
         const keyIdentifier = accessMode === "x402" ? `x402:${config.x402Network}`
           : accessMode === "l402" ? `l402:lightning:${config.l402Network}`
+          : accessMode === "mpp" || accessMode === "mpp-session" ? `${accessMode}:${config.mpp.tempo.network}`
           : (res.locals.customerId as string | undefined) ?? "anonymous";
         void billingService.recordUsage({
           requestId: res.locals.requestId, keyIdentifier, toolName, accessMode, status: res.statusCode, durationMs,
@@ -151,6 +157,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   const x402Limiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   const mcpLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   const l402Limiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
+  const mppLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   const ingestionLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   // Vercel's Node runtime does not set Express's "trust proxy", so req.protocol stays "http"
   // behind TLS termination; read X-Forwarded-Proto directly instead so /agent.json and the
@@ -164,6 +171,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     agent: agentBasePath, pricing: pricingBasePath, tools: toolsBasePath,
     ...(config.x402Enabled ? { x402: x402BasePath } : {}),
     ...(config.l402Enabled ? { l402: l402BasePath } : {}),
+    ...(config.mpp.enabled ? { mpp: mppBasePath } : {}),
     endpoints: capabilities.map(c => "/api/v1" + c.path)
   };
   // Section I: browsers get a landing page; machine/agent clients that ask for JSON (the
@@ -216,6 +224,9 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   app.use(l402BasePath, l402Limiter);
   app.get(l402BasePath, (_req, res) => send(res, buildL402Info(config, t => billingService.getToolPrice(t))));
   app.get(l402BasePath + "/status", (_req, res) => send(res, buildL402Status(config)));
+  // MPP info + status: always mounted, independent of MPP_ENABLED, exactly like x402/L402 above.
+  app.get(mppBasePath, mppLimiter, (_req, res) => send(res, buildMppInfo(config.mpp, t => billingService.getToolPrice(t))));
+  app.get(mppBasePath + "/status", mppLimiter, (_req, res) => send(res, buildMppStatus(config.mpp)));
   const authenticate: RequestHandler = store ? async (req, res, next) => {
     try {
       const principal = await store.authenticate(req.header("x-api-key") ?? "");
@@ -371,6 +382,32 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
           sendToolResult(res, data, c.name);
         });
     }
+  }
+  // Pay-per-call and metered sessions via MPP (Machine Payments Protocol): a fourth route family
+  // (after REST, x402 and L402), equally unauthenticated — an MPP credential (Authorization:
+  // Payment …) is the sole authorization. Mounted only when MPP_ENABLED=true; otherwise every
+  // /api/v1/mpp/* path (except info/status above) answers a clear 404 MPP_DISABLED. Tool
+  // execution is the unchanged capability registry; see billing/mpp/ for the full design.
+  if (config.mpp.enabled) {
+    const mppService = buildMppService({
+      config: config.mpp,
+      databaseUrl: process.env.MPP_DATABASE_URL || config.databaseUrl,
+      priceUsd: tool => billingService.getToolPrice(tool as CapabilityName),
+      recordSettlement: input => recordSettlement(revenueLedger, input),
+      audit: options.mppAudit ?? (entry => { if (config.logLevel !== "silent") process.stderr.write(`${JSON.stringify(entry)}\n`); }),
+      x402: { facilitatorUrl: config.x402FacilitatorUrl, cdpConfigured: config.cdpConfigured, cdpApiKeyId: config.cdpApiKeyId, cdpApiKeySecret: config.cdpApiKeySecret },
+      provider: options.mppProvider, sessions: options.mppSessions, redemptions: options.mppRedemptions, kv: options.mppKv, now: options.mppNow
+    });
+    app.use(createMppRoutes({ service: mppService, limiter: mppLimiter }));
+    // Optional MPP-over-MCP payment layer (MPP_MCP_ENABLED=true): the MPP MCP transport binding
+    // on its own path, delegating everything but tools/call to the standard MCP handler, so the
+    // free /mcp endpoint is untouched. See billing/mpp/mcp.ts.
+    if (config.mpp.mcpEnabled && config.mcpRemoteEnabled) {
+      app.post(mppMcpPath, mcpLimiter, express.json({ limit: "32kb" }),
+        createMppMcpHandler({ service: mppService, delegate: createRemoteMcpHandler(billingService, logger, analyticsRepository) }));
+    }
+  } else {
+    app.use(createMppDisabledRoutes());
   }
   // Remote MCP (Section 1): a Streamable HTTP transport at /mcp, mounted only when
   // MCP_REMOTE_ENABLED=true; otherwise this path simply 404s via the catch-all below, exactly

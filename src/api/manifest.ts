@@ -1,12 +1,13 @@
 import { capabilities, CURRENCY } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
-import { buildCapabilitiesRegistry } from "./agent.js";
+import { buildCapabilitiesRegistry, buildPaymentsSummary } from "./agent.js";
+import { mppBasePath } from "../billing/mpp/routes.js";
 import { x402BasePath } from "../billing/x402.js";
 import { l402BasePath } from "../billing/l402/gate.js";
 import { mcpRemotePath } from "../mcp/remote.js";
 import type { Config } from "../config/env.js";
 
-type ManifestConfig = Pick<Config, "x402Enabled" | "x402Network" | "x402WalletAddress" | "cdpConfigured" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network">>;
+type ManifestConfig = Pick<Config, "x402Enabled" | "x402Network" | "x402WalletAddress" | "cdpConfigured" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp">>;
 type PluginManifestConfig = Pick<Config, "logoUrl" | "contactEmail" | "legalInfoUrl">;
 
 const PRODUCT_NAME = "Rafid Property Intelligence";
@@ -20,7 +21,7 @@ const PRODUCT_DESCRIPTION =
  *  mentioned when MCP_REMOTE_ENABLED=true (config.mcpRemoteEnabled) — otherwise every manifest
  *  and llms.txt describe stdio only, so a manifest can never advertise an endpoint app.ts
  *  didn't actually mount (see api/app.ts). */
-function protocolList(config: Pick<Config, "x402Enabled" | "x402Network" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network">>) {
+function protocolList(config: Pick<Config, "x402Enabled" | "x402Network" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp">>) {
   return [
     {
       protocol: "mcp", role: "primary" as const,
@@ -33,6 +34,7 @@ function protocolList(config: Pick<Config, "x402Enabled" | "x402Network" | "mcpR
     },
     { protocol: "x402", role: "primary" as const, enabled: config.x402Enabled, network: config.x402Enabled ? config.x402Network : null, description: "Pay-per-call, no account or API key required." },
     ...(config.l402Enabled ? [{ protocol: "l402", role: "primary" as const, enabled: true, network: `lightning:${config.l402Network}`, endpoint: l402BasePath, description: "Pay-per-call over Lightning (L402: macaroon + BOLT11 invoice), no account or API key required." }] : []),
+    ...(config.mpp?.enabled ? [{ protocol: "mpp", role: "primary" as const, enabled: true, modes: [...config.mpp.modes], network: config.mpp.tempo.network, endpoint: mppBasePath, description: "Machine Payments Protocol (HTTP 'Payment' auth scheme): one-time charges per call, or budgeted metered sessions (TIP-1034 payment channels) for high-frequency agents. No account or API key required." }] : []),
     { protocol: "rest", role: "compatibility" as const, description: "X-API-Key authenticated HTTP routes; the underlying transport MCP and the informational endpoints share, and a fallback for callers that can't do x402 yet." }
   ];
 }
@@ -67,6 +69,8 @@ export function buildAgentManifest(config: ManifestConfig) {
       info: x402BasePath,
       status: x402BasePath + "/status"
     },
+    // Additive (MPP rollout): which payment rails are live, in one place.
+    payments: buildPaymentsSummary(config),
     currency: CURRENCY,
     tools: buildCapabilitiesRegistry(config),
     roadmap: plannedCapabilities,
@@ -122,7 +126,7 @@ export function buildAiPluginManifest(config: PluginManifestConfig, origin: stri
  * self-describing agent/service discovery document at this URL. `origin` is the request's own
  * scheme+host, same reasoning as buildAiPluginManifest above.
  */
-export function buildAgentCard(config: Pick<Config, "x402Enabled">, origin: string) {
+export function buildAgentCard(config: Pick<Config, "x402Enabled"> & Partial<Pick<Config, "x402Network" | "l402Enabled" | "l402Network" | "mpp">>, origin: string) {
   return {
     name: PRODUCT_NAME,
     description: PRODUCT_DESCRIPTION,
@@ -130,7 +134,9 @@ export function buildAgentCard(config: Pick<Config, "x402Enabled">, origin: stri
     provider: { organization: "Rafid" },
     version: "0.1.0",
     capabilities: { streaming: false, pushNotifications: false },
-    authentication: { schemes: config.x402Enabled ? ["x402", "apiKey"] : ["apiKey"] },
+    authentication: { schemes: [...(config.x402Enabled ? ["x402"] : []), ...(config.l402Enabled ? ["l402"] : []), ...(config.mpp?.enabled ? ["mpp"] : []), "apiKey"] },
+    // Additive (MPP rollout): same payments summary as /agent.json.
+    payments: buildPaymentsSummary({ x402Enabled: config.x402Enabled, x402Network: config.x402Network ?? "", l402Enabled: config.l402Enabled, l402Network: config.l402Network, mpp: config.mpp }),
     defaultInputModes: ["application/json"],
     defaultOutputModes: ["application/json"],
     skills: capabilities.map(c => ({

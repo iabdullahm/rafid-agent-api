@@ -3,6 +3,7 @@ import { plannedCapabilities } from "../domain/roadmap.js";
 import { prices } from "../billing/catalog.js";
 import { x402BasePath } from "../billing/x402.js";
 import { l402BasePath } from "../billing/l402/gate.js";
+import { mppBasePath } from "../billing/mpp/routes.js";
 import { MUSCAT_GOVERNORATE, SUPPORTED_MUSCAT_AREAS } from "../domain/oman/locations.js";
 import type { Config } from "../config/env.js";
 
@@ -14,7 +15,9 @@ import type { Config } from "../config/env.js";
  * registry every other endpoint uses — this file adds no tool metadata of its own, only prose
  * around it.
  */
-export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network"> & Partial<Pick<Config, "l402Enabled" | "l402Network">>): string {
+export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp">>): string {
+  const mppCharge = Boolean(config.mpp?.enabled && config.mpp.modes.includes("charge"));
+  const mppSession = Boolean(config.mpp?.enabled && config.mpp.modes.includes("session"));
   const toolLines = capabilities.map(c => {
     const price = prices[c.name].toFixed(2);
     const lines = [
@@ -25,6 +28,8 @@ export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network">
       `API key route: POST /api/v1${c.path}  (header: X-API-Key)`,
       `x402 route:    POST ${x402BasePath}${c.path}  (no account — pay per call on-chain)`,
       ...(config.l402Enabled ? [`L402 route:    POST ${l402BasePath}${c.path}  (no account — pay per call over Lightning)`] : []),
+      ...(mppCharge ? [`MPP charge:    POST ${mppBasePath}/charge/${c.name}  (no account — one-time Machine Payments Protocol payment)`] : []),
+      ...(mppSession ? [`MPP session:   POST ${mppBasePath}/sessions/{sessionId}/tools/${c.name}  (metered against an open MPP session budget)`] : []),
       `MCP tool name: ${c.name}`,
       `Example request: ${JSON.stringify(c.example)}`
     ];
@@ -78,6 +83,12 @@ ${config.x402Enabled
 ${config.l402Enabled
   ? `L402 pay-per-call is enabled on this deployment (network: lightning:${config.l402Network}). Call any ${l402BasePath}/... route without an Authorization header to receive an HTTP 402 with a WWW-Authenticate: L402 macaroon="...", invoice="..." challenge. Pay the BOLT11 invoice (priced at the tool's USD price converted to sats at the live BTC/USD rate), then retry with Authorization: L402 <macaroon>:<preimage-hex>. One token buys one successful call; a failed call does not consume it. See GET ${l402BasePath} for terms and GET ${l402BasePath}/status for live status.`
   : `L402 (Lightning) pay-per-call is not enabled on this deployment. See GET ${l402BasePath}/status for current status.`}
+
+## Payment (MPP / Machine Payments Protocol)
+
+${config.mpp?.enabled
+  ? `MPP is enabled on this deployment (modes: ${config.mpp.modes.join(", ")}; Tempo network: ${config.mpp.tempo.network}). It uses the HTTP "Payment" authentication scheme: an unpaid request returns HTTP 402 with WWW-Authenticate: Payment challenges; pay one with an MPP client (e.g. the mppx SDK) and retry with Authorization: Payment <credential>. Successful responses carry a Payment-Receipt header.${mppCharge ? ` Charge mode — POST ${mppBasePath}/charge/{tool}: one payment buys one successful call (methods: ${config.mpp.chargeMethods.map(m => m + "/charge").join(", ")}); invalid input is rejected before any payment, and a payment is only settled after the call succeeds.` : ""}${mppSession ? ` Session mode — POST ${mppBasePath}/sessions with {"maxBudget": <USD>, "currency": "USD", "allowedTools": [...]} returns a 402 to open a Tempo payment channel whose deposit is the budget; then POST ${mppBasePath}/sessions/{sessionId}/tools/{tool} with an Idempotency-Key header and a voucher credential per call. Each successful call is metered at the tool's catalog price; the server refuses (before executing) any call that would exceed the remaining budget; GET ${mppBasePath}/sessions/{sessionId} returns spend and per-tool usage; POST ${mppBasePath}/sessions/{sessionId}/close stops the session and settles exactly the metered spend on-chain (the rest of the deposit returns to the payer).` : ""} See GET ${mppBasePath} for terms and GET ${mppBasePath}/status for live status.`
+  : `MPP (Machine Payments Protocol) is not enabled on this deployment. See GET ${mppBasePath}/status for current status.`}
 
 No account, signup or dashboard is required for any access model.
 

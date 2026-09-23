@@ -1,0 +1,20 @@
+{
+  "name": "rafid-mpp-client-example",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone example agents for Rafid Agent API's MPP (Machine Payments Protocol) rail: one-time charges and budgeted, metered sessions, using the official mppx SDK. Not part of the Rafid Agent API server itself.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "charge": "tsx src/charge.ts",
+    "session": "tsx src/session.ts",
+    "bulk-supplier-check": "tsx src/bulk-supplier-check.ts"
+  },
+  "dependencies": {
+    "mppx": "^0.11.0",
+    "viem": "^2.56.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0"
+  }
+}
