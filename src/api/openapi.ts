@@ -35,7 +35,12 @@ const paths: Record<string, unknown> = {};
 for (const c of capabilities) {
   const operation = {
     operationId: c.name,
-    tags: [c.name === "estimate_maintenance" ? "Maintenance" : c.name === "analyze_oman_property" ? "Oman" : "Property"],
+    tags: [
+      c.name === "estimate_maintenance" ? "Maintenance" :
+      c.name === "analyze_oman_property" ? "Oman" :
+      c.name === "research_company" || c.name === "find_companies" || c.name === "analyze_company_risk" ? "Intelligence" :
+      "Property"
+    ],
     summary: c.description,
     description: `${c.description} Click Authorize and enter an active Rafid API key before using Try it out.`,
     security: [{ ApiKeyAuth: [] }],
@@ -175,6 +180,7 @@ return {
     { name: "Property", description: "Property analysis and comparison calculations." },
     { name: "Maintenance", description: "Annual maintenance reserve estimation." },
     { name: "Oman", description: "Oman/Muscat-specific property analysis using local rental/sale comparables, normalization, confidence scoring and provenance. Muscat governorate only; see GET /llms.txt for supported areas and data limitations." },
+    { name: "Intelligence", description: "Rafid Agent Intelligence: company research, discovery and evidence-tiered risk signals from public web sources. Inert (no external calls) until an operator configures the relevant provider — see GET /llms.txt." },
     { name: "Agent", description: "Public discovery, pricing and tool-catalog endpoints for AI agents and agent marketplaces." },
     { name: "System", description: "Public discovery, health and documentation endpoints." },
     { name: "x402", description: "Pay-per-call protocol information, always available; payment-gated endpoints are settled on-chain via the x402 protocol and require no account or API key." }

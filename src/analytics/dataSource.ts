@@ -23,6 +23,16 @@ import type { DataSource } from "./types.js";
  *   database-backed) company gets a generated UUID. This is a best-effort heuristic, not a
  *   published contract — if DemoCompanyProvider's id scheme ever changes, this must change with
  *   it (flagged in the doc comment rather than silently going stale).
+ * - research_company / find_companies / analyze_company_risk (src/schemas/intelligenceOutputs.ts):
+ *   each publishes its own `dataMode: "live" | "not_configured"` field for exactly this purpose
+ *   (src/intelligence/types.ts) — "live" means at least one real external provider (web search,
+ *   LLM synthesis, or — for analyze_company_risk — the always-on Oman registry cross-check/gated
+ *   live checks) actually ran; "not_configured" means the honest empty/default result. Never
+ *   "partner_feed"/"demo_manual"/"mixed" (those are Oman-business-specific vocabulary) — mapped to
+ *   this function's own DataSource union as "live_provider" / "not_configured" respectively so
+ *   callers get one consistent signal without inventing a claim these capabilities' own field
+ *   doesn't make, and without conflating it with the Oman-specific "partner_feed"/"demo_manual"
+ *   vocabulary (see analytics/types.ts's doc comment on DataSource).
  * - Every other capability (analyze_property, compare_properties, estimate_maintenance): returns
  *   null — these compute purely from caller-supplied numbers, so "data source" isn't a concept
  *   that applies to them.
@@ -63,6 +73,13 @@ export function classifyDataSource(toolName: string, data: unknown): DataSource 
       else hasReal = true;
     }
     return combine(hasReal, hasDemo);
+  }
+
+  if (toolName === "research_company" || toolName === "find_companies" || toolName === "analyze_company_risk") {
+    const dataMode = record.dataMode;
+    if (dataMode === "live") return "live_provider";
+    if (dataMode === "not_configured") return "not_configured";
+    return "unknown";
   }
 
   return null;

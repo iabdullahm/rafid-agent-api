@@ -7,6 +7,9 @@ import { analyzeOmanProperty } from "../services/omanProperty.js";
 import { searchOmanCompanyInput, getOmanCompanyProfileInput, analyzeOmanCompanyInput, dueDiligenceOmanCompanyInput } from "../schemas/businessInputs.js";
 import { searchOmanCompanyOutput, getOmanCompanyProfileOutput, analyzeOmanCompanyOutput, dueDiligenceOmanCompanyOutput } from "../schemas/businessOutputs.js";
 import { searchOmanCompany, getOmanCompanyProfile, analyzeOmanCompany, dueDiligenceOmanCompany } from "../services/omanBusiness.js";
+import { researchCompanyInput, findCompaniesInput, analyzeCompanyRiskInput } from "../schemas/intelligenceInputs.js";
+import { researchCompanyOutput, findCompaniesOutput, analyzeCompanyRiskOutput } from "../schemas/intelligenceOutputs.js";
+import { researchCompany, findCompanies, analyzeCompanyRisk } from "../services/companyIntelligence.js";
 import type { z } from "zod";
 
 /** The one currency every capability is priced in today. A single constant, not a literal
@@ -513,6 +516,91 @@ const DUE_DILIGENCE_EXAMPLE_OUTPUT = {
   ]
 } as unknown;
 
+// Section: "Rafid Agent Intelligence" expansion, Phase 1. Every one of these three examples is
+// evaluated with NO web-search or LLM provider configured (WEB_SEARCH_PROVIDER/
+// INTELLIGENCE_LLM_PROVIDER unset — the default for a fresh deployment and for `npm test`'s
+// generic per-capability loops) so the exampleOutput below is the honest, deterministic
+// "not_configured" shape — never a fabricated live-looking result. Regenerate by calling
+// researchCompany/findCompanies/analyzeCompanyRisk with the exact example inputs below, with no
+// intelligence env vars set, whenever intelligence/companyResearch/provider.ts,
+// intelligence/companyDiscovery/provider.ts or intelligence/risk/provider.ts change.
+const RESEARCH_COMPANY_EXAMPLE_OUTPUT = {
+  company: { name: "Acme Corporation", website: "https://acme.example.com", industry: null, headquarters: null, founded: null },
+  overview: null,
+  productsAndServices: [],
+  leadership: [],
+  funding: { summary: null, knownRounds: [] },
+  competitors: [],
+  technologySignals: [],
+  recentDevelopments: [],
+  riskFlags: [],
+  sources: [],
+  confidence: 0,
+  dataFreshness: { latestSourceDate: null, freshnessDays: null },
+  cached: false,
+  dataMode: "not_configured",
+  limitations: [
+    "No web search provider is configured for this deployment (WEB_SEARCH_PROVIDER is not set) — no external research was performed.",
+    "This result is derived from public web search results, not verified company records or a direct company disclosure.",
+    "Coverage depends on what is publicly indexed and searchable — a real, established company with limited public web presence will correctly return sparse results, not a false negative about its existence."
+  ]
+} as unknown;
+
+const FIND_COMPANIES_EXAMPLE_OUTPUT = {
+  companies: [],
+  resultCount: 0,
+  sources: [],
+  confidence: 0,
+  cached: false,
+  dataMode: "not_configured",
+  requestedLimit: 10,
+  appliedLimit: 0,
+  limitations: [
+    "No web search provider is configured for this deployment (WEB_SEARCH_PROVIDER is not set) — no discovery search was performed.",
+    "Company discovery is based on public web search coverage — it cannot guarantee completeness, especially for small, private, or newly founded companies with limited public presence.",
+    "A company not appearing in these results is not evidence that it doesn't exist or doesn't match the criteria — only that it wasn't found by this search."
+  ]
+} as unknown;
+
+const ANALYZE_COMPANY_RISK_EXAMPLE_OUTPUT = {
+  company: { name: "Acme Corporation", website: "https://acme.example.com", country: null },
+  riskSignals: [
+    {
+      type: "corporate_identity", severity: "low",
+      summary: "No confident match was found in Rafid's Oman company registry data.",
+      evidence: [{ description: "No Oman registry match above the confidence threshold.", source: null, tier: "missing_information" }],
+      source: null
+    }
+  ],
+  checks: {
+    corporateIdentity: { status: "performed", summary: "No confident match was found in Rafid's Oman company registry data.", findings: ["This check only covers Oman-registered companies known to Rafid; a company outside Oman, or one not yet covered, will correctly show no match here."], evidence: [{ description: "No Oman registry match above the confidence threshold.", source: null, tier: "missing_information" }] },
+    domain: { status: "not_configured", summary: "Live checks are not enabled for this deployment (RISK_LIVE_CHECKS_ENABLED is not true).", findings: [], evidence: [] },
+    website: { status: "not_configured", summary: "Live checks are not enabled for this deployment (RISK_LIVE_CHECKS_ENABLED is not true).", findings: [], evidence: [] },
+    sanctions: { status: "not_configured", summary: "Live checks are not enabled for this deployment (RISK_LIVE_CHECKS_ENABLED is not true).", findings: [], evidence: [] },
+    adverseNews: { status: "not_configured", summary: "No web search provider is configured for this deployment.", findings: [], evidence: [] },
+    securitySignals: { status: "not_configured", summary: "Live checks are not enabled for this deployment (RISK_LIVE_CHECKS_ENABLED is not true).", findings: [], evidence: [] },
+    reputation: { status: "not_configured", summary: "No web search provider is configured for this deployment.", findings: [], evidence: [] },
+    legalSignals: { status: "not_configured", summary: "No web search provider is configured for this deployment.", findings: [], evidence: [] }
+  },
+  sources: [],
+  confidence: 0.13,
+  limitations: [
+    "Sanctions screening (when enabled) is an automated name-matching indicator only and does not constitute a legal sanctions determination — verify directly against the source list before acting.",
+    "Adverse news, reputation and legal-signal findings are search results, not confirmed facts — each must be reviewed at its source.",
+    "This tool never returns a safe/unsafe verdict; it returns evidence for the calling agent or a human to weigh.",
+    "Corporate identity verification only covers Oman-registered companies known to Rafid; a company elsewhere, or not yet covered, correctly shows no match rather than a false negative.",
+    "domain: Live checks are not enabled for this deployment (RISK_LIVE_CHECKS_ENABLED is not true).",
+    "website: Live checks are not enabled for this deployment (RISK_LIVE_CHECKS_ENABLED is not true).",
+    "sanctions: Live checks are not enabled for this deployment (RISK_LIVE_CHECKS_ENABLED is not true).",
+    "adverse_news: No web search provider is configured for this deployment.",
+    "reputation: No web search provider is configured for this deployment.",
+    "legal_signals: No web search provider is configured for this deployment.",
+    "security_signals: Live checks are not enabled for this deployment (RISK_LIVE_CHECKS_ENABLED is not true)."
+  ],
+  cached: false,
+  dataMode: "live"
+} as unknown;
+
 export const capabilities = [
   {
     name: "analyze_property" as const, path: "/property/analyze",
@@ -666,6 +754,85 @@ export const capabilities = [
       "riskScore/riskLevel and confidence are both fully deterministic (documented weight tables), never an LLM judgment.",
       "Never asserts fraud, criminal activity, insolvency or sanctions status.",
       "Without a production data source configured, only the curated demo dataset is available and must not be treated as real due-diligence evidence."
+    ]
+  } satisfies AgentCapability,
+  // ---------------------------------------------------------------------------------------------
+  // "Rafid Agent Intelligence" expansion, Phase 1 (research_company, find_companies,
+  // analyze_company_risk). Section "Prioritize shipping research_company, find_companies and
+  // analyze_company_risk first so they can start generating real x402 usage as soon as possible."
+  // Every one of these is entirely inert (no external network call, no cost) until an operator
+  // sets WEB_SEARCH_PROVIDER/TAVILY_API_KEY, INTELLIGENCE_LLM_PROVIDER/ANTHROPIC_API_KEY/
+  // INTELLIGENCE_LLM_MODEL and/or RISK_LIVE_CHECKS_ENABLED (see intelligence/config.ts) — the
+  // existing Oman property/business capabilities above are completely unchanged by this addition.
+  // ---------------------------------------------------------------------------------------------
+  {
+    name: "research_company" as const, path: "/intelligence/research-company",
+    description: "Research a company from public web sources: overview, products, leadership, funding, competitors, technology signals, recent developments and risk flags, with cited sources and a confidence score.",
+    whenToUse: "Use when an agent needs a structured research brief on a named company — for sales/investment/partnership research, competitive analysis, or general company background — beyond what a structured company registry alone provides.",
+    useCases: ["company background research", "sales prospect research", "investment/competitor research", "build a company profile from public web sources"],
+    input: researchCompanyInput, output: researchCompanyOutput,
+    example: { company: "Acme Corporation", website: "https://acme.example.com", country: "United States", depth: "standard" },
+    exampleOutput: RESEARCH_COMPANY_EXAMPLE_OUTPUT,
+    execute: (input: unknown) => researchCompany(input),
+    price: 0.15, currency: CURRENCY, paymentProtocol: "x402",
+    idempotent: true, sideEffects: false,
+    limitations: [
+      "Every fact is drawn from public web search results, never invented or filled in from the model's own general knowledge — a field is null/empty when the evidence does not state it.",
+      "Structured extraction (industry, leadership, funding, competitors, technology signals, recent developments) requires an LLM synthesis provider; without one configured, only raw cited sources are returned.",
+      "Coverage depends on what is publicly indexed and searchable — sparse results for a real company reflect limited public web presence, not evidence the company doesn't exist.",
+      "Not a substitute for a structured company registry (see search_oman_company/get_oman_company_profile for Oman-specific registry data) or for direct company disclosure/verification."
+    ],
+    agentGuidance: {
+      priorityContexts: ["sales or investment research on a named company", "competitive/market research", "building context on a company before a partnership or transaction decision"],
+      evidenceTypes: [
+        { type: "web_search", description: "Snippets and metadata from public web search results — never a confirmed company disclosure or filing." },
+        { type: "llm_synthesis", description: "Structured fields (leadership, funding, competitors, etc.) synthesized from the web-search evidence by an LLM when one is configured for this deployment; schema-validated before being returned, and null/empty wherever the evidence doesn't support a fact." }
+      ],
+      limitations: [
+        "This is public-web research, not verified company records — always report confidence and dataFreshness alongside any fact drawn from this tool.",
+        "riskFlags here are surface-level signals from public sources, not a risk assessment — use analyze_company_risk for evidence-tiered risk signals."
+      ],
+      sampleQueries: [
+        { query: "Give me a quick overview of Acme Corporation before my call with them", guidance: "Call research_company with depth: \"quick\" and report the overview, productsAndServices and recentDevelopments fields, citing sources and noting the confidence score and dataFreshness." },
+        { query: "Who are Acme Corporation's main competitors and how are they funded?", guidance: "Call research_company with focusAreas: [\"competitors\",\"funding\"], and report the competitors and funding fields with their sources — never fill in a competitor or funding round the evidence didn't state." }
+      ]
+    }
+  } satisfies AgentCapability,
+  {
+    name: "find_companies" as const, path: "/intelligence/find-companies",
+    description: "Discover companies from public web sources matching an industry, location, size and/or keyword criteria, returning cited candidate companies (never fabricated) with a stated confidence score.",
+    whenToUse: "Use when an agent needs to discover a list of candidate companies matching criteria (industry, location, size, keywords) rather than analyze one already-known company.",
+    useCases: ["find companies in an industry or location", "build a prospect/lead list", "market landscape scan", "shortlist potential partners or suppliers by criteria"],
+    input: findCompaniesInput, output: findCompaniesOutput,
+    example: { industry: "renewable energy", country: "Germany", limit: 10 },
+    exampleOutput: FIND_COMPANIES_EXAMPLE_OUTPUT,
+    execute: (input: unknown) => findCompanies(input),
+    price: 0.05, currency: CURRENCY, paymentProtocol: "x402",
+    idempotent: true, sideEffects: false,
+    limitations: [
+      "Every returned company is one actually named in the underlying web search evidence — this tool never invents a company to fill out a requested limit.",
+      "Without an LLM synthesis provider configured, no structured company records can safely be extracted from raw search results; only cited raw sources are returned.",
+      "Results are capped internally at 20 per request regardless of the requested limit (see requestedLimit vs appliedLimit in the output), to control upstream cost.",
+      "Absence from these results is not evidence a matching company doesn't exist — only that this search didn't surface it."
+    ]
+  } satisfies AgentCapability,
+  {
+    name: "analyze_company_risk" as const, path: "/intelligence/analyze-company-risk",
+    description: "Gather evidence-tiered risk signals for a company across corporate identity, domain, website, sanctions-list name-matching, adverse news, reputation and legal/regulatory signals — never a safe/unsafe verdict.",
+    whenToUse: "Use when an agent needs risk evidence to weigh before a transaction, partnership, or onboarding decision — not a substitute for compliance/legal sign-off.",
+    useCases: ["pre-transaction risk screening", "vendor/partner risk check", "sanctions name-matching indicator", "adverse media / reputation check"],
+    input: analyzeCompanyRiskInput, output: analyzeCompanyRiskOutput,
+    example: { company: "Acme Corporation", website: "https://acme.example.com" },
+    exampleOutput: ANALYZE_COMPANY_RISK_EXAMPLE_OUTPUT,
+    execute: (input: unknown) => analyzeCompanyRisk(input),
+    price: 0.35, currency: CURRENCY, paymentProtocol: "x402",
+    idempotent: true, sideEffects: false,
+    limitations: [
+      "This tool never returns a safe/unsafe verdict — it returns evidence, each explicitly tiered (confirmed_evidence / public_allegation / automated_indicator / missing_information), for the calling agent or a human to weigh.",
+      "Sanctions screening is an automated name-matching indicator only, never a legal sanctions determination — verify directly against the source list before acting.",
+      "Adverse news, reputation and legal-signal findings are search results, not confirmed facts.",
+      "Domain/website/sanctions live checks are disabled by default (RISK_LIVE_CHECKS_ENABLED) and adverse-news/reputation/legal-signal checks require a web search provider; corporate_identity (Oman registry cross-check) is the only check performed by default.",
+      "corporate_identity only covers Oman-registered companies known to Rafid; a company elsewhere, or not yet covered, correctly shows no match rather than a false negative."
     ]
   } satisfies AgentCapability
 ];

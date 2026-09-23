@@ -49,8 +49,15 @@ export type AnalyticsEventType = DiscoveryEventType | McpEventType | X402EventTy
  *  which reads this straight off each capability's own already-published provenance fields
  *  (analyze_oman_property's `provenance`, the three business capabilities' `dataCoverage`) —
  *  never inferred or guessed. `null` for a tool with no such field (the three plain calculators,
- *  and search_oman_company where the company registry itself carries no coverage breakdown). */
-export type DataSource = "partner_feed" | "demo_manual" | "mixed" | "unknown";
+ *  and search_oman_company where the company registry itself carries no coverage breakdown).
+ *
+ *  "live_provider" / "not_configured" are the Rafid Agent Intelligence capabilities' own
+ *  vocabulary (research_company/find_companies/analyze_company_risk's `dataMode` field — see
+ *  src/intelligence/types.ts) — deliberately distinct from "partner_feed"/"demo_manual" rather
+ *  than reused, because a live web-search/LLM-backed result is not the same evidentiary class as
+ *  Rafid's own licensed/imported Oman business data, and conflating the two would overstate what
+ *  either honestly means. */
+export type DataSource = "partner_feed" | "demo_manual" | "mixed" | "unknown" | "live_provider" | "not_configured";
 
 /** How a "tool" category invocation reached this codebase — REST X-API-Key, x402 pay-per-call,
  *  or remote MCP. Added for the revenue ledger's reconciliation endpoint (src/revenue/aggregate.ts's

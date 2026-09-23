@@ -7,6 +7,7 @@ import { DEFAULT_TRANSACTIONS_PAGE_SIZE, MAX_TRANSACTIONS_PAGE_SIZE } from "../r
 import type { AnalyticsRepository } from "../analytics/types.js";
 import type { BillingService } from "../billing/service.js";
 import { prices, type CapabilityName } from "../billing/catalog.js";
+import { computeAllUnitEconomics } from "../intelligence/costEstimator.js";
 
 /**
  * Internal revenue/settlement-ledger API — GET-only, internal-key-protected, never registered in
@@ -109,6 +110,21 @@ export function createRevenueRoutes(options: RevenueRoutesOptions): Router {
       for (const name of Object.keys(prices)) catalogPriceByTool[name] = billingService.getToolPrice(name as CapabilityName);
       const anomalies = buildReconciliation({ settlements, x402ToolExecutionCounts, catalogPriceByTool });
       send(res, { period, anomalyCount: anomalies.length, anomalies });
+    } catch (error) { next(error); }
+  });
+
+  // Section "Unit Economics": internal-only, reuses this same REVENUE_INTERNAL_API_KEY-gated
+  // router rather than a new secret or a new dashboard. Revenue-per-call figures come from the
+  // same `prices` catalog every other route here reads; estimated upstream costs are Rafid's own
+  // documented assumptions (see intelligence/costEstimator.ts's doc comment) — never a provider's
+  // actual confidential pricing, and `recordedActualCostUSDThisProcess` resets on every restart
+  // (an in-process counter, not a persisted ledger). Never exposed publicly — this route sits
+  // behind internalAuth exactly like every other route in this file, and calling this "net
+  // profit" anywhere would be wrong: estimatedGrossMarginPerCallUSD excludes hosting, database and
+  // facilitator/network fees.
+  router.get("/api/v1/internal/revenue/unit-economics", internalAuth, async (_req, res, next) => {
+    try {
+      send(res, { capabilities: computeAllUnitEconomics(prices) });
     } catch (error) { next(error); }
   });
 
