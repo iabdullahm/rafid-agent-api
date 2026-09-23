@@ -204,15 +204,17 @@ export function buildL402Info(config: Pick<Config, "l402Enabled" | "l402Network"
   };
 }
 
-export function buildL402Status(config: Pick<Config, "l402Enabled" | "l402Network" | "lndRestUrl" | "lndInvoiceMacaroon" | "l402RootKey">) {
+export function buildL402Status(config: Pick<Config, "l402Enabled" | "l402Network" | "l402Backend" | "lndRestUrl" | "lndInvoiceMacaroon" | "l402RootKey" | "voltageApiKey" | "voltageOrganizationId" | "voltageEnvironmentId" | "voltageWalletId">) {
   const enabled = config.l402Enabled;
   return {
     enabled,
     mode: !enabled ? "disabled" : config.l402Network === "mainnet" ? "production" : "testnet",
     network: enabled ? `lightning:${config.l402Network}` : null,
     asset: enabled ? "BTC" : null,
-    backend: enabled ? "lnd" : null,
-    lightningBackendConfigured: Boolean(config.lndRestUrl && config.lndInvoiceMacaroon),
+    backend: enabled ? config.l402Backend : null,
+    lightningBackendConfigured: config.l402Backend === "voltage"
+      ? Boolean(config.voltageApiKey && config.voltageOrganizationId && config.voltageEnvironmentId && config.voltageWalletId)
+      : Boolean(config.lndRestUrl && config.lndInvoiceMacaroon),
     rootKeyConfigured: /^[0-9a-fA-F]{64,}$/.test(config.l402RootKey),
     paymentEnforcement: enabled
   };

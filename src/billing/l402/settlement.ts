@@ -12,9 +12,10 @@ import type { L402PaidContext } from "./gate.js";
  *  - amountSource "verified_requirement": the sats amount is the one signed into the macaroon at
  *    challenge time, and the preimage proves the invoice for exactly that amount was paid
  *  - transactionHash: the Lightning payment hash (public, unique per invoice) — never the preimage
+ *  - facilitator: the Lightning backend that issued the invoice ("lnd" or "voltage")
  *  - dedupe key: tx:<network>:<payment hash>, so one token can never be counted twice
  */
-export function buildL402SettlementRecord(args: { ctx: L402PaidContext; requestId: string; network: string; payTo: string }): RevenueSettlementInput {
+export function buildL402SettlementRecord(args: { ctx: L402PaidContext; requestId: string; network: string; payTo: string; facilitator?: string }): RevenueSettlementInput {
   const now = new Date().toISOString();
   const network = `lightning:${args.network}`;
   return {
@@ -27,7 +28,7 @@ export function buildL402SettlementRecord(args: { ctx: L402PaidContext; requestI
     payToAddress: args.payTo,
     transactionHash: args.ctx.paymentHashHex,
     status: "settlement_succeeded",
-    facilitator: "lnd",
+    facilitator: args.facilitator ?? "lnd",
     errorReason: null,
     paymentVerifiedAt: now,
     settledAt: now,

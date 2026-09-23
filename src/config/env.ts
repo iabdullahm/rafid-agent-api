@@ -18,6 +18,14 @@ const envSchema = z.object({
   // See src/billing/l402/ for the full design.
   L402_ENABLED: z.enum(["true", "false"]).default("false"),
   L402_NETWORK: z.enum(["mainnet", "testnet", "signet", "regtest"]).default("mainnet"),
+  // Which Lightning backend creates invoices: a self-run/hosted LND node, or a Voltage Payments
+  // wallet (hosted, API-key based — see src/billing/l402/voltage.ts).
+  L402_BACKEND: z.enum(["lnd", "voltage"]).default("lnd"),
+  VOLTAGE_API_URL: z.string().default("https://voltageapi.com/v1"),
+  VOLTAGE_API_KEY: z.string().default(""),
+  VOLTAGE_ORGANIZATION_ID: z.string().default(""),
+  VOLTAGE_ENVIRONMENT_ID: z.string().default(""),
+  VOLTAGE_WALLET_ID: z.string().default(""),
   LND_REST_URL: z.string().default(""),
   LND_INVOICE_MACAROON: z.string().default(""),
   LND_TLS_CERT: z.string().default(""),
@@ -99,11 +107,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options = { req
     if (!Number.isFinite(n) || n <= 0) throw new Error("L402_BTC_USD_FALLBACK must be a positive number (USD per 1 BTC) when set");
     l402BtcUsdFallback = n;
   }
-  if (l402Enabled) {
+  if (l402Enabled && e.L402_BACKEND === "lnd") {
     let lndUrl: URL;
-    try { lndUrl = new URL(e.LND_REST_URL); } catch { throw new Error("LND_REST_URL must be a valid URL (e.g. https://your-node.m.voltageapp.io:8080) when L402_ENABLED=true"); }
+    try { lndUrl = new URL(e.LND_REST_URL); } catch { throw new Error("LND_REST_URL must be a valid URL (e.g. https://your-node.m.voltageapp.io:8080) when L402_ENABLED=true and L402_BACKEND=lnd"); }
     if (lndUrl.protocol !== "https:") throw new Error("LND_REST_URL must use https");
-    if (!/^[0-9a-fA-F]{20,}$/.test(e.LND_INVOICE_MACAROON)) throw new Error("LND_INVOICE_MACAROON must be the hex-encoded invoice macaroon (invoice.macaroon) when L402_ENABLED=true");
+    if (!/^[0-9a-fA-F]{20,}$/.test(e.LND_INVOICE_MACAROON)) throw new Error("LND_INVOICE_MACAROON must be the hex-encoded invoice macaroon (invoice.macaroon) when L402_ENABLED=true and L402_BACKEND=lnd");
+  }
+  if (l402Enabled && e.L402_BACKEND === "voltage") {
+    let voltageUrl: URL;
+    try { voltageUrl = new URL(e.VOLTAGE_API_URL); } catch { throw new Error("VOLTAGE_API_URL must be a valid URL"); }
+    if (voltageUrl.protocol !== "https:") throw new Error("VOLTAGE_API_URL must use https");
+    const missing = (["VOLTAGE_API_KEY", "VOLTAGE_ORGANIZATION_ID", "VOLTAGE_ENVIRONMENT_ID", "VOLTAGE_WALLET_ID"] as const).filter(k => !e[k].trim());
+    if (missing.length) throw new Error(`Set ${missing.join(", ")} when L402_ENABLED=true and L402_BACKEND=voltage`);
+  }
+  if (l402Enabled) {
     if (!/^[0-9a-fA-F]{64,}$/.test(e.L402_ROOT_KEY)) throw new Error("L402_ROOT_KEY must be at least 32 random bytes, hex-encoded (openssl rand -hex 32), when L402_ENABLED=true");
     // Single-use token enforcement must be shared across serverless instances in production — an
     // in-process redemption set would let the same paid token be replayed on another instance.
@@ -131,7 +148,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options = { req
   return { port: e.PORT, nodeEnv: e.NODE_ENV, apiKeys, authMode: e.AUTH_MODE, databaseUrl: e.DATABASE_URL, logLevel: e.LOG_LEVEL,
     x402Enabled, x402Network: e.X402_NETWORK, x402WalletAddress: e.X402_WALLET_ADDRESS, x402FacilitatorUrl: e.X402_FACILITATOR_URL,
     cdpApiKeyId: e.CDP_API_KEY_ID, cdpApiKeySecret: e.CDP_API_KEY_SECRET, cdpConfigured,
-    l402Enabled, l402Network: e.L402_NETWORK, lndRestUrl: e.LND_REST_URL, lndInvoiceMacaroon: e.LND_INVOICE_MACAROON,
+    l402Enabled, l402Network: e.L402_NETWORK, l402Backend: e.L402_BACKEND,
+    voltageApiUrl: e.VOLTAGE_API_URL, voltageApiKey: e.VOLTAGE_API_KEY.trim(), voltageOrganizationId: e.VOLTAGE_ORGANIZATION_ID.trim(),
+    voltageEnvironmentId: e.VOLTAGE_ENVIRONMENT_ID.trim(), voltageWalletId: e.VOLTAGE_WALLET_ID.trim(), lndRestUrl: e.LND_REST_URL, lndInvoiceMacaroon: e.LND_INVOICE_MACAROON,
     lndTlsCert: e.LND_TLS_CERT, l402RootKey: e.L402_ROOT_KEY, l402InvoiceExpirySeconds: e.L402_INVOICE_EXPIRY_SECONDS,
     l402RateCacheMs: e.L402_RATE_CACHE_MS, l402BtcUsdFallback,
     mcpRemoteEnabled: e.MCP_REMOTE_ENABLED === "true",

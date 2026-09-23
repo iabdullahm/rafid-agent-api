@@ -370,3 +370,90 @@ test("usdToSats always rounds up and never returns less than 1 sat", () => {
   assert.equal(usdToSats(0.05, 97_123.45), Math.ceil((0.05 / 97_123.45) * 1e8));
   assert.equal(usdToSats(0.0000001, 100_000), 1);
 });
+
+// -------------------------------------------------------------------------------------------
+// BOLT11 reader + Voltage Payments backend (L402_BACKEND=voltage)
+// -------------------------------------------------------------------------------------------
+
+import { decodeBolt11 } from "../src/billing/l402/bolt11.js";
+import { VoltagePaymentsBackend } from "../src/billing/l402/voltage.js";
+
+// Encoded and signed with the `bolt11` npm package (payment hash 0001…0102), cross-checked here.
+const INVOICE_150_SATS_MAINNET = "lnbc1500n1pj48ugqpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygsdqs2fskv6tyyp6x2um59qypqsqxqrrsscqpfndvdxlx6w4ywd3p9ve360cqs297s2syug99rcarqez8sqjmawkundx4xt06dvayq2lpmnxjtut00fkxsxcxwk7qmyux9w3lklp280uspquu97a";
+const INVOICE_263_SATS_SIGNET = "lntbs2630n1pj48ugqpp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygsdqs2fskv6tyyp6x2um59qypqsqxqrrsscqpfmlkg6mx2lmc22y6muhhs8fnwxcj39cjcknegykcfdfajfpuepaty3rnev2jd4ctpqsnlmxpwpk6lc9qh3f9ghgm9g4nc7pfenf0fhhcqj677w2";
+const VECTOR_HASH = "0001020304050607080900010203040506070809000102030405060708090102";
+
+test("BOLT11: decodes payment hash, amount and network from real invoices; rejects a bad checksum", () => {
+  const a = decodeBolt11(INVOICE_150_SATS_MAINNET)!;
+  assert.equal(a.network, "bc");
+  assert.equal(a.amountMsat, 150_000n);
+  assert.equal(a.paymentHash.toString("hex"), VECTOR_HASH);
+  const b = decodeBolt11(INVOICE_263_SATS_SIGNET)!;
+  assert.equal(b.network, "tbs");
+  assert.equal(b.amountMsat, 263_000n);
+  const flipped = INVOICE_150_SATS_MAINNET.slice(0, -1) + (INVOICE_150_SATS_MAINNET.endsWith("q") ? "p" : "q");
+  assert.equal(decodeBolt11(flipped), null);
+  assert.equal(decodeBolt11("not an invoice"), null);
+});
+
+function voltageFake(script: Array<{ status: number; body?: unknown }>) {
+  const calls: { url: string; method: string; headers: Record<string, string>; body?: string }[] = [];
+  let i = 0;
+  const fetchImpl = async (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => {
+    calls.push({ url, ...init });
+    const step = script[Math.min(i++, script.length - 1)]!;
+    return { status: step.status, ok: step.status < 300, text: async () => step.body === undefined ? "" : JSON.stringify(step.body) };
+  };
+  const backend = new VoltagePaymentsBackend({
+    apiUrl: "https://voltageapi.com/v1", apiKey: "vk_test", organizationId: "org-1", environmentId: "env-1", walletId: "wal-1",
+    fetchImpl, sleep: async () => {}, maxWaitMs: 200, pollIntervalMs: 1
+  });
+  return { backend, calls };
+}
+
+test("Voltage backend: POST receive payment (msats), poll until the BOLT11 appears, hash read from the invoice", async () => {
+  const { backend, calls } = voltageFake([
+    { status: 202 },
+    { status: 404 },
+    { status: 200, body: { status: "generating", data: {} } },
+    { status: 200, body: { status: "receiving", data: { payment_request: INVOICE_150_SATS_MAINNET } } }
+  ]);
+  const invoice = await backend.createInvoice({ amountSats: 150, memo: "Rafid analyze_property (1 call)", expirySeconds: 600 });
+  assert.equal(invoice.paymentRequest, INVOICE_150_SATS_MAINNET);
+  assert.equal(invoice.paymentHash.toString("hex"), VECTOR_HASH);
+  const post = calls[0]!;
+  assert.equal(post.method, "POST");
+  assert.equal(post.url, "https://voltageapi.com/v1/organizations/org-1/environments/env-1/payments");
+  assert.equal(post.headers["x-api-key"], "vk_test");
+  const body = JSON.parse(post.body!);
+  assert.equal(body.wallet_id, "wal-1");
+  assert.equal(body.payment_kind, "bolt11");
+  assert.deepEqual(body.amount, { currency: "btc", amount: 150_000, unit: "msats" });
+  assert.equal(body.expiration, 600);
+  assert.equal(calls[1]!.url, `${post.url}/${body.id}`);
+});
+
+test("Voltage backend: refuses a wrong-amount invoice, failed/expired status, HTTP errors and timeouts", async () => {
+  const wrongAmount = voltageFake([{ status: 202 }, { status: 200, body: { status: "receiving", data: { payment_request: INVOICE_263_SATS_SIGNET } } }]);
+  await assert.rejects(wrongAmount.backend.createInvoice({ amountSats: 150, memo: "", expirySeconds: 600 }), /wrong amount/);
+  const failed = voltageFake([{ status: 202 }, { status: 200, body: { status: "failed", data: {} } }]);
+  await assert.rejects(failed.backend.createInvoice({ amountSats: 150, memo: "", expirySeconds: 600 }), /could not generate/);
+  const rejected = voltageFake([{ status: 401, body: { error: "bad key" } }]);
+  await assert.rejects(rejected.backend.createInvoice({ amountSats: 150, memo: "", expirySeconds: 600 }), /HTTP 401/);
+  const slow = voltageFake([{ status: 202 }, { status: 200, body: { status: "generating", data: {} } }]);
+  await assert.rejects(slow.backend.createInvoice({ amountSats: 150, memo: "", expirySeconds: 600 }), /in time/);
+});
+
+test("L402_BACKEND=voltage config: requires API key + org/env/wallet ids, no LND settings needed; status reports the backend", () => {
+  const base = { RAFID_API_KEYS: key, L402_ENABLED: "true", L402_BACKEND: "voltage", L402_ROOT_KEY: "5c".repeat(32), L402_NETWORK: "signet" };
+  assert.throws(() => loadConfig(base), /VOLTAGE_API_KEY/);
+  assert.throws(() => loadConfig({ ...base, VOLTAGE_API_KEY: "k", VOLTAGE_ORGANIZATION_ID: "o", VOLTAGE_ENVIRONMENT_ID: "e", VOLTAGE_WALLET_ID: "w", VOLTAGE_API_URL: "http://insecure" }), /https/);
+  const config = loadConfig({ ...base, VOLTAGE_API_KEY: "k", VOLTAGE_ORGANIZATION_ID: "o", VOLTAGE_ENVIRONMENT_ID: "e", VOLTAGE_WALLET_ID: "w" });
+  assert.equal(config.l402Backend, "voltage");
+  const status = buildL402Status(config);
+  assert.equal(status.backend, "voltage");
+  assert.equal(status.mode, "testnet");
+  assert.equal(status.lightningBackendConfigured, true);
+  assert.equal(JSON.stringify(status).includes("\"k\""), false);
+  assert.doesNotThrow(() => createApp(config, { logger: () => {}, l402Redemptions: new MemoryL402RedemptionStore() }));
+});

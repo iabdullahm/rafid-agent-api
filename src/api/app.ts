@@ -46,6 +46,7 @@ import { decodeX402SettlementMetadata, buildSettlementRecord, recordSettlement }
 import { createDashboardRoutes } from "./dashboardRoutes.js";
 import { buildL402Info, buildL402Status, createL402Gate, l402BasePath } from "../billing/l402/gate.js";
 import { LndRestBackend, type LightningBackend } from "../billing/l402/lightning.js";
+import { VoltagePaymentsBackend } from "../billing/l402/voltage.js";
 import { PublicBtcUsdRateProvider, type BtcUsdRateProvider } from "../billing/l402/rates.js";
 import { MemoryL402RedemptionStore, PostgresL402RedemptionStore, type L402RedemptionStore } from "../billing/l402/redemptions.js";
 import { buildL402SettlementRecord } from "../billing/l402/settlement.js";
@@ -330,11 +331,18 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     const l402Redemptions = options.l402Redemptions
       ?? (l402DatabaseUrl ? new PostgresL402RedemptionStore(l402DatabaseUrl) : new MemoryL402RedemptionStore());
     const l402Backend = options.l402Backend
-      ?? new LndRestBackend({ restUrl: config.lndRestUrl, invoiceMacaroonHex: config.lndInvoiceMacaroon, tlsCert: config.lndTlsCert });
+      ?? (config.l402Backend === "voltage"
+        ? new VoltagePaymentsBackend({
+            apiUrl: config.voltageApiUrl, apiKey: config.voltageApiKey, organizationId: config.voltageOrganizationId,
+            environmentId: config.voltageEnvironmentId, walletId: config.voltageWalletId
+          })
+        : new LndRestBackend({ restUrl: config.lndRestUrl, invoiceMacaroonHex: config.lndInvoiceMacaroon, tlsCert: config.lndTlsCert }));
     const l402Rates = options.l402Rates
       ?? new PublicBtcUsdRateProvider({ cacheMs: config.l402RateCacheMs, fallbackBtcUsd: config.l402BtcUsdFallback });
     // The receiving side, for the ledger's pay_to column: the node's host (public), never a credential.
-    const l402PayTo = `lnd:${(() => { try { return new URL(config.lndRestUrl).hostname; } catch { return "unknown"; } })()}`;
+    const l402PayTo = config.l402Backend === "voltage"
+      ? `voltage:wallet:${config.voltageWalletId}`
+      : `lnd:${(() => { try { return new URL(config.lndRestUrl).hostname; } catch { return "unknown"; } })()}`;
     const l402Gate = createL402Gate({
       config, backend: l402Backend, rates: l402Rates, redemptions: l402Redemptions, now: options.l402Now,
       priceUsd: t => billingService.getToolPrice(t),
@@ -343,7 +351,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       onRedeemed: (req, res, ctx) => {
         recordL402Event(analyticsRepository, req, { eventType: "settlement_success", toolName: ctx.toolName, amount: ctx.priceUsd, txHash: ctx.paymentHashHex });
         recordSettlement(revenueLedger, buildL402SettlementRecord({
-          ctx, network: config.l402Network, payTo: l402PayTo,
+          ctx, network: config.l402Network, payTo: l402PayTo, facilitator: config.l402Backend,
           requestId: typeof res.locals.requestId === "string" ? res.locals.requestId : randomUUID()
         }));
       }
