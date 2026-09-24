@@ -118,11 +118,12 @@
     },
     {
       "name": "analyze_oman_property",
-      "description": "Analyze an Oman residential property using local rental comparables, market context and investment metrics.",
-      "whenToUse": "Use when an agent needs Oman-specific rental, yield, price-position or operating-cost analysis.",
+      "description": "Analyze an Oman residential property using local rental comparables, market context and investment metrics, including partner-supplied historical and recent Al Mouj Muscat property sales records with provenance and freshness metadata when coverage is available.",
+      "whenToUse": "Use when an agent needs Oman-specific rental, yield, sale price positioning or operating-cost analysis, especially for an Al Mouj Muscat property.",
       "useCases": [
         "Oman rental investment analysis",
         "Muscat property market comparison",
+        "Al Mouj Muscat sale price positioning",
         "rental yield with local comparables",
         "Oman price-per-sqm benchmarking"
       ],
@@ -134,8 +135,21 @@
       "endpoint": "/api/v1/oman/property/analyze",
       "x402Endpoint": "/api/v1/x402/oman/property/analyze",
       "mcpToolName": "analyze_oman_property",
-      "priorityContexts": [],
+      "priorityContexts": [
+        "Al Mouj Muscat",
+        "Muscat residential investment",
+        "asking-price versus contracted-sale comparison",
+        "rental yield and operating-cost analysis"
+      ],
       "evidenceTypes": [
+        {
+          "type": "web_listing_asking_price",
+          "description": "A seller's or listing portal's advertised asking price. It is an offer, not proof of a completed transaction."
+        },
+        {
+          "type": "partner_feed_contracted_price",
+          "description": "A partner-supplied contracted-unit sale price with source provenance and freshness metadata. It is distinct from an asking price."
+        },
         {
           "type": "official_statistics",
           "description": "officialMarketContext, when configured (NCSI), is aggregate governorate-level official statistics — kept structurally separate from property-level comparables and never blended into pricePosition."
@@ -987,6 +1001,6 @@
     ],
     "note": "Coverage is Muscat governorate only, and only its supported areas. Al Mouj Muscat is the deployment's strongest single-area coverage today because it is the only area with real partner-fed (sourceType partner_feed) sale records; other supported areas may only have demo/manual_benchmark data on a given deployment. This is not nationwide Oman coverage."
   },
-  "generatedAt": "2026-09-24T04:00:44.568Z",
+  "generatedAt": "2026-09-24T04:13:13.318Z",
   "generatedBy": "scripts/generateDistributionManifest.ts (derived from src/domain/capabilities.ts — never hand-edit this file)"
 }
