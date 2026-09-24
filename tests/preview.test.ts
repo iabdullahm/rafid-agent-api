@@ -25,7 +25,7 @@ const l402Env = {
  *  (not derived) so a future capability that ADDS a preview without corresponding security-test
  *  coverage below fails loudly, rather than the new capability silently getting only generic
  *  coverage from the loops further down. */
-const PREVIEWABLE = ["analyze_oman_property", "oman_supplier_check", "company_reputation_check", "business_risk_score", "research_company", "document_facts_extract", "invoice_anomaly_check"] as const;
+const PREVIEWABLE = ["analyze_oman_property", "oman_supplier_check", "company_reputation_check", "business_risk_score", "research_company", "document_facts_extract", "invoice_anomaly_check", "vehicle_value_estimate"] as const;
 
 test("every previewable capability actually named in this test file exists and defines a preview; nothing extra silently gained one", () => {
   const actual = capabilities.filter(c => c.preview).map(c => c.name).sort();
@@ -181,7 +181,8 @@ const FORBIDDEN_FIELDS: Record<(typeof PREVIEWABLE)[number], string[]> = {
   business_risk_score: ["riskScore", "riskLevel", "confidence", "recommendation", "riskFlags", "positiveSignals", "sanctionsScreening", "reasonCodes"],
   research_company: ["overview", "productsAndServices", "leadership", "funding", "competitors", "technologySignals", "recentDevelopments", "riskFlags", "sources"],
   document_facts_extract: ["facts", "entities", "requestedFacts", "riskFlags", "limitations"],
-  invoice_anomaly_check: ["riskScore", "riskLevel", "decision", "anomalies", "anomalyCount", "financialChecks", "recommendedAction", "summary", "scoring"]
+  invoice_anomaly_check: ["riskScore", "riskLevel", "decision", "anomalies", "anomalyCount", "financialChecks", "recommendedAction", "summary", "scoring"],
+  vehicle_value_estimate: ["estimatedValue", "estimatedPrivateSalePrice", "estimatedDealerBuyPrice", "estimatedDealerRetailPrice", "askingPriceAnalysis", "depreciation", "adjustments", "marketComparables", "marketStats", "confidence", "riskFlags"]
 };
 
 test("security: no preview response exposes the paid analytical findings it's a preview of", async () => {

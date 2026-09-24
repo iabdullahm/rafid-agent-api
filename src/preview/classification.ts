@@ -12,7 +12,9 @@
  * "medium": the preview still does real work per call — resolving an entity identity and/or a
  * provider/comparable lookup (analyze_oman_property, oman_supplier_check,
  * company_reputation_check, business_risk_score, research_company) — but the work is bounded by a
- * small, structured input (a company name, a location).
+ * small, structured input (a company name, a location). vehicle_value_estimate's preview never
+ * queries a provider (it only normalizes the vehicle and checks provider coverage), but it shares
+ * this tier so vehicle identities cannot be enumerated for free faster than company identities.
  *
  * "expensive": the preview's cost scales with caller-supplied CONTENT, not just identity —
  * document_facts_extract and invoice_anomaly_check accept a document/invoice payload (up to the
@@ -28,6 +30,7 @@ export const PREVIEW_COST_TIER: Readonly<Record<string, PreviewCostTier>> = Obje
   oman_supplier_check: "medium",
   company_reputation_check: "medium",
   business_risk_score: "medium",
+  vehicle_value_estimate: "medium",
   document_facts_extract: "expensive",
   invoice_anomaly_check: "expensive"
 });
