@@ -32,6 +32,10 @@ import { invoiceAnomalyCheckOutput } from "../schemas/invoiceAnomalyOutputs.js";
 import { invoiceAnomalyCheck, previewInvoiceAnomalyCheckCapability } from "../services/invoiceAnomalyCheck.js";
 import { INVOICE_ANOMALY_EXAMPLE_INPUT, INVOICE_ANOMALY_EXAMPLE_OUTPUT } from "./examples/invoiceAnomalyCheckExample.js";
 import { INVOICE_ANOMALY_LIMITS } from "../invoice-anomaly/config.js";
+import { vehicleValueEstimateInput } from "../schemas/vehicleValueInputs.js";
+import { vehicleValueEstimateOutput } from "../schemas/vehicleValueOutputs.js";
+import { previewVehicleValueEstimateCapability, vehicleValueEstimate } from "../services/vehicleValueEstimate.js";
+import { VEHICLE_EXAMPLE_INPUT, VEHICLE_VALUE_EXAMPLE_OUTPUT } from "./examples/vehicleValueEstimateExample.js";
 import type { CapabilityPreviewBody } from "../preview/types.js";
 import type { z } from "zod";
 
@@ -1166,6 +1170,61 @@ export const capabilities = [
         { query: "The supplier sent new bank details — is that a problem?", guidance: "Call invoice_anomaly_check with supplierProfile.bankAccounts and history; BANK_ACCOUNT_CHANGED means verify with the supplier via a known contact before paying." },
         { query: "Does this invoice fit the purchase order?", guidance: "Call invoice_anomaly_check with purchaseOrder (totalAmount, invoicedToDate, lineItems); report PO_MISMATCH / PO_AMOUNT_EXCEEDED." },
         { query: "Are these invoices being split to avoid approval?", guidance: "Call invoice_anomaly_check with approvalContext.approvalThreshold and the supplier's recent historicalInvoices; SPLIT_INVOICE_PATTERN is a risk indicator, not an accusation." }
+      ]
+    }
+  } satisfies AgentCapability,
+  // Automotive: vehicle_value_estimate — GLOBAL, deterministic used-vehicle valuation from comparable
+  // market evidence (src/vehicle-value/). Provider-independent: market-data providers plug in behind
+  // VehicleMarketProvider; with none configured for a market the call returns an honest
+  // insufficient_market_data result (never a fabricated estimate). No LLM in the valuation maths.
+  {
+    name: "vehicle_value_estimate" as const, path: "/automotive/vehicle-value-estimate",
+    description: "Estimate the fair market value of a vehicle using make, model, year, trim, mileage, condition, ownership history, location and available market comparables. Returns a valuation range, private-sale estimate, dealer buy/retail estimates, depreciation, transparent valuation adjustments, confidence and risk flags.",
+    whenToUse: "Use this capability when an AI agent needs to estimate the current market value of a passenger vehicle, determine whether an asking price is reasonable, estimate private-sale or dealer values, assess depreciation, or evaluate a vehicle using local or regional market comparables.",
+    useCases: [
+      "Estimate the current market value of a used vehicle", "Is this asking price above, below or near market?", "Estimate private-sale value",
+      "Estimate dealer acquisition / trade-in value", "Estimate dealer retail value", "Assess depreciation", "Compare a vehicle with similar market listings",
+      "Vehicle purchase decision support", "Auto-finance and loan-to-value checks", "Insurance valuation workflows", "Fleet and leasing residual checks",
+      "Dealership software", "Vehicle marketplaces and auction platforms", "automotive"
+    ],
+    category: "automotive",
+    input: vehicleValueEstimateInput, output: vehicleValueEstimateOutput,
+    example: VEHICLE_EXAMPLE_INPUT,
+    exampleOutput: VEHICLE_VALUE_EXAMPLE_OUTPUT,
+    execute: (input: unknown) => vehicleValueEstimate(input),
+    preview: (input: unknown) => previewVehicleValueEstimateCapability(input),
+    price: 0.25, currency: CURRENCY, paymentProtocol: "x402",
+    // Deterministic for the same normalized input and the same market evidence; provider search
+    // results are cached (never the valuation itself); nothing about the request is stored.
+    idempotent: true, sideEffects: false,
+    limitations: [
+      "Valuation is anchored on comparable-market evidence from the providers configured on this deployment; market support (valuation parameters) and live data coverage are reported separately in marketCoverage. With no usable evidence the result is status insufficient_market_data with null prices — never a fabricated estimate.",
+      "Comparables are mostly listing asking prices; a documented, market-specific negotiation margin converts them to fair value. It is not a physical inspection, vehicle-history check or formal appraisal.",
+      "Condition, accident, service-history, owner-count and option adjustments are conservative, capped market defaults (basis: heuristic) and never dominate the market evidence; model-year, mileage, trim and local-market effects are derived from the comparables when the evidence supports it.",
+      "Evidence in another currency is used only when a reliable exchange-rate source is configured; otherwise it is excluded (CURRENCY_CONVERSION_UNAVAILABLE), never converted with a guessed rate.",
+      "Original (new) price and total depreciation are reported only when a provider supplies a verified reference; otherwise null.",
+      "Schema-invalid requests (unrealistic year, mileage, owners or price; unknown enum values; unknown fields) return 400 INVALID_INPUT and are not charged. VINs are not accepted or stored."
+    ],
+    agentGuidance: {
+      priorityContexts: ["used-vehicle purchase decision", "asking-price check", "trade-in / dealer acquisition", "auto-finance loan-to-value", "insurance valuation", "fleet and leasing residual value", "dealership software", "vehicle marketplace and auction pricing"],
+      evidenceTypes: [
+        { type: "market_listing", description: "A comparable listing's asking price from a configured market-data provider (priceType listing)." },
+        { type: "market_sale", description: "A recorded sale / auction result from a configured provider (priceType sale) — no negotiation margin applied." },
+        { type: "market_derived_adjustment", description: "An effect measured from the comparables themselves (model year, mileage, trim, local market, transmission/drivetrain/fuel)." },
+        { type: "heuristic_adjustment", description: "A capped, conservative market default (condition, accident, service history, owners, options, listing negotiation)." },
+        { type: "new_price_reference", description: "A verified original/new price from a provider, used only for depreciation." }
+      ],
+      limitations: [
+        "Relay estimatedValue (low/mid/high) together with confidence.level and the top riskFlags; for asking-price questions quote askingPriceAnalysis.differenceFromMid, differencePercent and marketPosition.",
+        "If status is insufficient_market_data, say that no defensible valuation was possible and why (riskFlags, assumptions) — do not substitute a number from general knowledge.",
+        "Supply mileageKm, trim, city and condition whenever known — each missing field lowers confidence; call the free preview first to check market-data coverage for the country."
+      ],
+      sampleQueries: [
+        { query: "Estimate the current market value of this 2022 Toyota Land Cruiser GXR with 68,000 km in Muscat and tell me whether OMR 22,500 is a reasonable asking price.", guidance: "Call vehicle_value_estimate with make, model, year, trim, mileageKm, country, city, condition and askingPrice 22500 (currency OMR); answer from estimatedValue and askingPriceAnalysis.marketPosition." },
+        { query: "What would a dealer offer me as a trade-in?", guidance: "Call vehicle_value_estimate and report estimatedDealerBuyPrice alongside estimatedPrivateSalePrice, with confidence." },
+        { query: "What loan-to-value does this car support?", guidance: "Call vehicle_value_estimate; use estimatedValue.low (conservative) as the collateral value and state confidence.level and riskFlags." },
+        { query: "How much has this car depreciated?", guidance: "Call vehicle_value_estimate; report depreciation.* — if estimatedOriginalPrice is null, report only marketImpliedAnnualDepreciationPercent when present." },
+        { query: "Is this listing a good deal compared with similar cars?", guidance: "Call vehicle_value_estimate with askingPrice; cite marketComparables and marketStats.comparableCount." }
       ]
     }
   } satisfies AgentCapability

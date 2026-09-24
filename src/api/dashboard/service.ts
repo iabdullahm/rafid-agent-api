@@ -454,15 +454,15 @@ export interface UsageReport {
 
 export type AgentStatusLevel = "active" | "processing" | "waiting" | "error";
 
-/** One of the operational groupings the dashboard's "Active Agents" panel shows. Five ("research",
- *  "property", "supplier", "risk", "document") are a fixed, non-overlapping partition of every
+/** One of the operational groupings the dashboard's "Active Agents" panel shows. Six ("research",
+ *  "property", "supplier", "risk", "document", "valuation") are a fixed, non-overlapping partition of every
  *  tool-executing capability in the registry (domain/capabilities.ts) — chosen so every capability
  *  belongs to exactly one group and no group is empty in a mature deployment; the remaining two
  *  ("payment", "reconciliation") are cross-cutting and have no tools of their own. When a new
  *  capability is added to the registry, add its name to the best-fit group's toolNames below (or a
  *  new group, if none fits) — buildAgentStatuses() falls through to the generic tool-group branch
  *  for any id other than "payment"/"reconciliation", so no other code change is required. */
-export type AgentGroupId = "research" | "property" | "supplier" | "risk" | "document" | "payment" | "reconciliation";
+export type AgentGroupId = "research" | "property" | "supplier" | "risk" | "document" | "valuation" | "payment" | "reconciliation";
 
 export interface AgentGroupDef {
   id: AgentGroupId;
@@ -479,6 +479,7 @@ export const AGENT_GROUPS: readonly AgentGroupDef[] = [
   { id: "supplier", name: "Supplier Intelligence Agent", toolNames: ["search_oman_company", "get_oman_company_profile", "analyze_oman_company", "due_diligence_oman_company", "oman_supplier_check"] },
   { id: "risk", name: "Risk Agent", toolNames: ["analyze_company_risk", "company_reputation_check", "business_risk_score", "invoice_anomaly_check"] },
   { id: "document", name: "Document Intelligence Agent", toolNames: ["document_facts_extract"] },
+  { id: "valuation", name: "Vehicle Valuation Agent", toolNames: ["vehicle_value_estimate"] },
   { id: "payment", name: "Payment / Settlement Agent", toolNames: [] },
   { id: "reconciliation", name: "Reconciliation Agent", toolNames: [] }
 ];

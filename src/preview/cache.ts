@@ -86,6 +86,7 @@ const TTL_SECONDS_BY_CAPABILITY: Readonly<Record<string, number>> = Object.freez
   research_company: 1200,
   company_reputation_check: 1200,
   business_risk_score: 1200,
+  vehicle_value_estimate: 1200,
   analyze_oman_property: 1200,
   oman_supplier_check: 1200,
   document_facts_extract: 600,

@@ -63,6 +63,10 @@ export const ESTIMATED_UPSTREAM_COST_USD: Partial<Record<CapabilityKey, { provid
     providerCostUSD: 0, llmCostUSD: 0,
     assumptions: "Fully deterministic, in-process analysis of caller-supplied invoice and context data: no web search, no registry or bank lookup, no LLM. Compute is milliseconds for typical requests (one invoice, hundreds of historical invoices), so the upstream cost per call is effectively zero."
   },
+  vehicle_value_estimate: {
+    providerCostUSD: 0, llmCostUSD: 0,
+    assumptions: "The shipped provider reads Rafid's own vehicle_market_records table (imported, licensed/partner evidence): no per-call provider fee and no LLM. A future paid market-data API would add its per-search fee here; provider search results are cached (6h default) per market + make/model + model-year window, so repeat valuations of similar vehicles reuse one search."
+  },
   business_risk_score: {
     providerCostUSD: 0.032, llmCostUSD: 0,
     assumptions: "Uncached worst case: 4 web searches (2 news/adverse-media + 1 review-platform + 1 regulator/enforcement) at an estimated $0.008/search (Tavily pay-as-you-go class pricing, rounded up). GLEIF, RDAP, the company website, the UN list and the US CSL are free public sources; UK Companies House and Google Safe Browsing are free with a key. Evidence is shared with company_reputation_check through the same evidence cache (news 1d, reviews 3d, registry/domain 7d, sanctions 12h), so repeat or cross-capability checks cost less. Ambiguous/not-found entities stop before any paid search. OpenSanctions (optional, paid licence) is excluded. No LLM synthesis."

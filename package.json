@@ -19,6 +19,7 @@
     "admin": "node --env-file-if-exists=.env --import tsx src/admin.ts",
     "billing": "node --env-file-if-exists=.env --import tsx src/billingCli.ts",
     "market:import": "node --env-file-if-exists=.env --import tsx src/marketImportCli.ts",
+    "vehicle:import": "node --env-file-if-exists=.env --import tsx src/vehicleImportCli.ts",
     "ncsi:discover": "node --env-file-if-exists=.env --import tsx src/ncsiDiscoverCli.ts",
     "partner:feeds": "node --env-file-if-exists=.env --import tsx src/partnerFeedsCli.ts",
     "analytics:summary": "node --env-file-if-exists=.env --import tsx src/analyticsSummaryCli.ts",

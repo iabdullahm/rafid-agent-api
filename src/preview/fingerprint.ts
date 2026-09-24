@@ -91,6 +91,12 @@ const NORMALIZERS: Readonly<Record<string, Normalizer>> = Object.freeze({
     companyName: str(input.companyName), country: str(input.country), website: str(input.website),
     domain: str(input.domain), registrationNumber: str(input.registrationNumber), lei: str(input.lei)
   }),
+  // Vehicle identity + market + a coarse 10,000 km mileage band. No asking price, no colour/options,
+  // and never a VIN (the schema does not accept one).
+  vehicle_value_estimate: input => compact({
+    make: str(input.make), model: str(input.model), year: num(input.year), trim: str(input.trim), country: str(input.country),
+    city: str(input.city), currency: str(input.currency), mileageBand: typeof input.mileageKm === "number" ? Math.floor(input.mileageKm / 10_000) : undefined
+  }),
   business_risk_score: input => compact({
     companyName: str(input.companyName), country: str(input.country), registrationNumber: str(input.registrationNumber),
     lei: str(input.lei), website: str(input.website)
