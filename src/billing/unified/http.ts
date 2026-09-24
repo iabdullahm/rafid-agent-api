@@ -175,8 +175,13 @@ function requireBillingKey(engine: BillingEngine): RequestHandler {
   return async (req, res, next) => {
     try {
       const alt = req.header("x-rafid-api-key");
-      const key = bearerBillingKey(req.header("authorization")) ?? (alt && looksLikeBillingKey(alt) ? alt : undefined);
-      if (!key) return fail(res, 401, "api_key_required", "Send Authorization: Bearer raf_live_…", {}, { "WWW-Authenticate": `Bearer realm="rafid"` });
+      const xApiKey = req.header("x-api-key");
+      const key = bearerBillingKey(req.header("authorization"))
+        ?? (alt && looksLikeBillingKey(alt) ? alt : undefined)
+        // X-API-Key is also the legacy customer-auth header. Accept it for prepaid
+        // keys only when its value has the billing-key shape, leaving legacy keys untouched.
+        ?? (xApiKey && looksLikeBillingKey(xApiKey) ? xApiKey : undefined);
+      if (!key) return fail(res, 401, "api_key_required", "Send Authorization: Bearer raf_live_… or X-API-Key: rafid_live_…", {}, { "WWW-Authenticate": `Bearer realm="rafid"` });
       const auth = await engine.authenticate(key);
       if (!auth.ok) return authFailure(res, auth);
       res.locals.billingAccount = auth.account satisfies BillingAccount;

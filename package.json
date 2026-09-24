@@ -30,7 +30,7 @@
     "predistribution:check": "npm run distribution:manifest",
     "distribution:check": "node --import tsx scripts/distributionCheck.ts",
     "pretest": "npm run build",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "node scripts/runTests.mjs"
   },
   "dependencies": {
     "@coinbase/x402": "^2.1.0",

@@ -2,7 +2,8 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { ApiKeyEnvironment } from "./types.js";
 
 /**
- * Billing API keys: `raf_live_<secret>` / `raf_test_<secret>`, where <secret> is 32 bytes from
+ * Billing API keys: `raf_live_<secret>` / `raf_test_<secret>` (and the compatible public
+ * `rafid_live_<secret>` / `rafid_test_<secret>` spelling), where <secret> is 32 bytes from
  * the OS CSPRNG, base64url-encoded (43 chars, 256 bits). Deliberately a different prefix from the
  * legacy customer keys (`rafid_<hex>`, X-API-Key header, src/db/store.ts), so the two systems can
  * never be confused.
@@ -12,7 +13,7 @@ import type { ApiKeyEnvironment } from "./types.js";
  * brute-forced or looked up in a dictionary, and a fast deterministic hash is what allows an
  * indexed O(1) lookup on every request. The raw key is returned exactly once, at creation.
  */
-const KEY_PATTERN = /^raf_(live|test)_([A-Za-z0-9_-]{43})$/;
+const KEY_PATTERN = /^(raf|rafid)_(live|test)_([A-Za-z0-9_-]{43})$/;
 
 export function generateApiKey(environment: ApiKeyEnvironment) {
   const key = `raf_${environment}_${randomBytes(32).toString("base64url")}`;
@@ -25,13 +26,13 @@ export function hashApiKey(key: string): string {
 
 export function parseApiKey(key: string): { environment: ApiKeyEnvironment } | null {
   const m = KEY_PATTERN.exec(key);
-  return m ? { environment: m[1] as ApiKeyEnvironment } : null;
+  return m ? { environment: m[2] as ApiKeyEnvironment } : null;
 }
 
 /** True for anything shaped like a billing key's prefix — used to decide that the caller
  *  *meant* to present one (and should get a 401 if it's wrong) rather than no key at all. */
 export function looksLikeBillingKey(value: string): boolean {
-  return /^raf_(live|test)_/.test(value);
+  return /^(?:raf|rafid)_(live|test)_/.test(value);
 }
 
 /** Extracts `Authorization: Bearer raf_…`. Returns undefined for any other scheme (L402,

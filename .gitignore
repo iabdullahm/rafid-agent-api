@@ -6,6 +6,8 @@ dist/
 !.env.example
 coverage/
 *.log
+mcp-publisher.exe
+*.tar.gz
 .postgres-test/
 .vercel/
 

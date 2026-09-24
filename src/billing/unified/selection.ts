@@ -47,7 +47,13 @@ export type PaymentDecision =
 
 export function detectCredentials(header: (name: string) => string | undefined): PresentedCredentials {
   const authorization = header("authorization");
-  const billingKey = bearerBillingKey(authorization) ?? (looksLikeBillingKey(header("x-rafid-api-key") ?? "") ? header("x-rafid-api-key") : undefined);
+  const explicitBillingHeader = header("x-rafid-api-key");
+  const xApiKey = header("x-api-key");
+  const billingKey = bearerBillingKey(authorization)
+    ?? (looksLikeBillingKey(explicitBillingHeader ?? "") ? explicitBillingHeader : undefined)
+    // Preserve the legacy X-API-Key route: only the dedicated billing-key shape is
+    // diverted here; every existing customer key continues through the legacy path.
+    ?? (looksLikeBillingKey(xApiKey ?? "") ? xApiKey : undefined);
   return {
     billingKey,
     legacyApiKey: Boolean(header("x-api-key")),

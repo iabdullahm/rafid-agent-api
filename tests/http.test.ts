@@ -26,7 +26,17 @@ test("REST: auth, all services, discovery, errors, and log redaction", async t =
     method: "POST", headers: { "X-API-Key": apiKey, "Content-Type": contentType },
     body: typeof body === "string" ? body : JSON.stringify(body)
   });
-  for (const path of ["/", "/health", "/api/v1/health", "/openapi.json"]) assert.equal((await fetch(base + path)).status, 200);
+  for (const path of ["/", "/health", "/api/v1/health", "/openapi.json", "/docs"]) assert.equal((await fetch(base + path)).status, 200);
+  const discovery = await (await fetch(base + "/", { headers: { Accept: "application/json" } })).json();
+  assert.deepEqual({ docs: discovery.data.docs, openapi: discovery.data.openapi, health: discovery.data.health }, {
+    docs: "/docs", openapi: "/openapi.json", health: "/api/v1/health"
+  });
+  const docs = await fetch(base + "/docs");
+  assert.match(docs.headers.get("content-type") ?? "", /text\/html/);
+  assert.match(docs.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
+  const docsHtml = await docs.text();
+  assert.match(docsHtml, /SwaggerUIBundle/);
+  assert.match(docsHtml, /url: "\/openapi\.json"/);
   for (const c of capabilities) {
     for (const prefix of ["/api/v1", "/v1"]) {
       const response = await post(prefix + c.path, c.example);
@@ -84,5 +94,14 @@ test("OpenAPI covers aliases, strict inputs, output schemas, auth and errors", (
     assert.deepEqual(op.security, [{ ApiKeyAuth: [] }]);
     for (const code of ["200", "400", "401", "413", "415", "429", "500"]) assert.ok(op.responses[code].content["application/json"].schema);
     assert.ok(paths["/v1" + c.path].post.deprecated);
+  }
+  assert.equal(paths["/api/v1/health"].get.security.length, 0);
+  assert.ok(paths["/docs"].get.responses["200"].content["text/html"]);
+  const openapi = buildOpenapi() as any;
+  assert.equal(openapi.components.securitySchemes.ApiKeyAuth.name, "X-API-Key");
+  for (const path of ["/property/analyze", "/property/compare", "/maintenance/estimate"]) {
+    const operation = paths["/api/v1" + path].post;
+    assert.ok(operation.requestBody.content["application/json"].examples.default.value);
+    assert.ok(operation.responses["200"].content["application/json"].examples.default.value);
   }
 });

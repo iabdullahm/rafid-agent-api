@@ -50,8 +50,8 @@ export function buildPaymentMethods(config: RailDiscoveryConfig) {
   const b = billingOf(config);
   const methods: Record<string, unknown>[] = [];
   if (a.x402) methods.push({ id: "x402", enabled: true, type: "pay_per_call", currency: "USDC", asset: "USDC", network: config.x402Network, authentication: "none", credential: "X-PAYMENT (x402 v1) or PAYMENT-SIGNATURE (x402 v2) header", endpoints: { canonical: "POST /api/v1/<tool-path> with X-Rafid-Payment-Method: x402", dedicated: "POST /api/v1/x402/<tool-path>" }, info: "/api/v1/x402" });
-  if (a.apiCredits) methods.push({ id: "api_credits", enabled: true, type: "prepaid", currency: "USD", authentication: "api_key", credential: "Authorization: Bearer raf_live_…", balance: "/api/v1/account/balance" });
-  if (a.subscription) methods.push({ id: "subscription", enabled: true, type: "subscription", currency: "USD", authentication: "api_key", credential: "Authorization: Bearer raf_live_…", plans: Object.values(b.plans).map(p => ({ id: p.id, name: p.name, allowance: { type: p.allowance.type, monthlyIncluded: (p.allowance.monthlyIncludedMicros / 1_000_000).toFixed(2), currency: "USD" } })), creditFallback: b.subscriptionCreditFallback && a.apiCredits });
+  if (a.apiCredits) methods.push({ id: "api_credits", enabled: true, type: "prepaid", currency: "USD", authentication: "api_key", credential: "Authorization: Bearer raf_live_… or X-API-Key: rafid_live_…", balance: "/api/v1/account/balance" });
+  if (a.subscription) methods.push({ id: "subscription", enabled: true, type: "subscription", currency: "USD", authentication: "api_key", credential: "Authorization: Bearer raf_live_… or X-API-Key: rafid_live_…", plans: Object.values(b.plans).map(p => ({ id: p.id, name: p.name, allowance: { type: p.allowance.type, monthlyIncluded: (p.allowance.monthlyIncludedMicros / 1_000_000).toFixed(2), currency: "USD" } })), creditFallback: b.subscriptionCreditFallback && a.apiCredits });
   if (a.l402) methods.push({ id: "l402", enabled: true, type: "pay_per_call", currency: "BTC", network: `lightning:${config.l402Network ?? "mainnet"}`, authentication: "none", credential: "Authorization: L402 <macaroon>:<preimage>", endpoints: { canonical: "POST /api/v1/<tool-path> with X-Rafid-Payment-Method: l402", dedicated: "POST /api/v1/l402/<tool-path>" }, info: "/api/v1/l402" });
   if (config.mpp?.enabled) methods.push({ id: "mpp", enabled: true, type: "pay_per_call", modes: [...config.mpp.modes], network: config.mpp.tempo.network, authentication: "none", credential: "Authorization: Payment <credential>", endpoints: { ...(a.mppCharge ? { canonical: "POST /api/v1/<tool-path> with X-Rafid-Payment-Method: mpp", charge: "POST /api/v1/mpp/charge/<tool>" } : {}), ...(config.mpp.modes.includes("session") ? { sessions: "POST /api/v1/mpp/sessions" } : {}) }, info: "/api/v1/mpp" });
   return {
@@ -72,8 +72,8 @@ export function paymentOptionsObject(config: RailDiscoveryConfig) {
   const a = railAvailability(config);
   return {
     x402: a.x402 ? { enabled: true, network: config.x402Network, asset: "USDC", selectWith: "X-Rafid-Payment-Method: x402" } : { enabled: false },
-    apiCredits: a.apiCredits ? { enabled: true, authentication: "api_key", header: "Authorization: Bearer raf_live_…" } : { enabled: false },
-    subscription: a.subscription ? { enabled: true, authentication: "api_key", header: "Authorization: Bearer raf_live_…" } : { enabled: false },
+    apiCredits: a.apiCredits ? { enabled: true, authentication: "api_key", headers: ["Authorization: Bearer raf_live_…", "X-API-Key: rafid_live_…"] } : { enabled: false },
+    subscription: a.subscription ? { enabled: true, authentication: "api_key", headers: ["Authorization: Bearer raf_live_…", "X-API-Key: rafid_live_…"] } : { enabled: false },
     l402: a.l402 ? { enabled: true, network: `lightning:${config.l402Network ?? "mainnet"}`, selectWith: "X-Rafid-Payment-Method: l402" } : { enabled: false },
     mpp: a.mppCharge ? { enabled: true, network: config.mpp!.tempo.network, selectWith: "X-Rafid-Payment-Method: mpp" } : { enabled: false }
   };

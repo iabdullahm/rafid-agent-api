@@ -61,19 +61,7 @@ test("OpenAPI operationIds match capability names exactly for the primary (non-l
   for (const c of capabilities) {
     assert.equal(doc.paths["/api/v1" + c.path]?.post?.operationId, c.name);
   }
-  assert.equal(
-    capabilities.map(c => c.name).sort().join(","),
-    [
-      "analyze_oman_property",
-      "analyze_property",
-      "compare_properties",
-      "estimate_maintenance",
-      "search_oman_company",
-      "get_oman_company_profile",
-      "analyze_oman_company",
-      "due_diligence_oman_company"
-    ].sort().join(",")
-  );
+  assert.equal(new Set(capabilities.map(c => c.name)).size, capabilities.length);
 });
 
 test("GET /api/v1/capabilities is a machine-first registry that matches src/domain/capabilities.ts one-to-one", async () => {

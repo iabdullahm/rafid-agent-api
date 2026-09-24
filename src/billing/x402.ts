@@ -38,7 +38,7 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
     : new HTTPFacilitatorClient({ url: config.x402FacilitatorUrl });
   // registerExtension(bazaarResourceServerExtension) turns on Bazaar discovery-metadata
   // enrichment (e.g. filling in the HTTP `method` field at declaration time) and echoing for
-  // every route below that declares a `bazaar` extension via declareDiscoveryExtension() — see
+  // each eligible route below that declares a `bazaar` extension via declareDiscoveryExtension() — see
   // https://docs.x402.org/extensions/bazaar. This makes each route's request/response shape
   // legible to Bazaar-aware facilitators/clients; it does not itself register Rafid with any
   // catalog. Cataloging only happens once a facilitator processes a real settled payment whose
@@ -55,8 +55,11 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
       // Bazaar discovery declaration: same input/output shape already published via OpenAPI
       // (z.toJSONSchema(c.input)/(c.output), the same conversion src/api/openapi.ts uses) and
       // the same hand-verified example/exampleOutput used everywhere else in this registry —
-      // no second copy of a schema or example is maintained here.
-      extensions: discoveryDeclaration(c)
+      // no second copy of a schema or example is maintained here. The exceptionally large invoice
+      // schema is intentionally excluded below rather than emitting a malformed header.
+      // The invoice schema is too large for a valid Bazaar declaration inside a payment header.
+      // Its complete, tested contract remains available in OpenAPI and the capability registry.
+      ...(c.name === "invoice_anomaly_check" ? {} : { extensions: discoveryDeclaration(c) })
     };
   }
   // syncFacilitatorOnStart (default true): the returned handler awaits the facilitator's
@@ -94,7 +97,13 @@ export function discoveryDeclaration(c: (typeof capabilities)[number]): ReturnTy
     const declaration = declareDiscoveryExtension(candidate);
     if (JSON.stringify(declaration).length <= MAX_DISCOVERY_DECLARATION_CHARS) return declaration;
   }
-  return declareDiscoveryExtension({ bodyType: "json" as const, inputSchema: compactInputSchema });
+  return declareDiscoveryExtension({ bodyType: "json" as const, input: minimumDiscoveryInput(c) });
+}
+
+/** Keeps Bazaar declarations valid when a full JSON Schema cannot fit in a payment header. */
+function minimumDiscoveryInput(c: (typeof capabilities)[number]): Record<string, unknown> {
+  if (c.name === "invoice_anomaly_check") return { invoice: { total: 0 } };
+  return c.example as Record<string, unknown>;
 }
 
 /** A JSON Schema without its `description` annotations (validation keywords unchanged). */

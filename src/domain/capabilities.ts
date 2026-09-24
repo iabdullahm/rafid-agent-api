@@ -683,9 +683,9 @@ export const capabilities = [
   } satisfies AgentCapability,
   {
     name: "analyze_oman_property" as const, path: "/oman/property/analyze",
-    description: "Analyze an Oman residential property using local rental comparables, market context and investment metrics.",
-    whenToUse: "Use when an agent needs Oman-specific rental, yield, price-position or operating-cost analysis.",
-    useCases: ["Oman rental investment analysis", "Muscat property market comparison", "rental yield with local comparables", "Oman price-per-sqm benchmarking"],
+    description: "Analyze an Oman residential property using local rental comparables, market context and investment metrics, including partner-supplied historical and recent Al Mouj Muscat property sales records with provenance and freshness metadata when coverage is available.",
+    whenToUse: "Use when an agent needs Oman-specific rental, yield, sale price positioning or operating-cost analysis, especially for an Al Mouj Muscat property.",
+    useCases: ["Oman rental investment analysis", "Muscat property market comparison", "Al Mouj Muscat sale price positioning", "rental yield with local comparables", "Oman price-per-sqm benchmarking"],
     input: omanPropertyInput, output: omanPropertyOutput,
     example: { governorate: "Muscat", area: "Al Mouj", propertyType: "apartment", bedrooms: 2, sizeSqm: 130, askingPriceOMR: 118000 },
     // Filled in below (see bottom of this file) once analyzeOmanProperty's real output shape is
@@ -695,22 +695,11 @@ export const capabilities = [
     preview: (input: unknown) => previewOmanProperty(input),
     price: 0.25, currency: CURRENCY, paymentProtocol: "x402",
     idempotent: true, sideEffects: false,
-    // RESTORED 2026-09-21 (see the Cardify import investigation report) after an accidental
-    // overwrite of this file during an unrelated fix wiped out today's agent-discovery/
-    // tool-selection pass on this capability. Only `limitations` and `sampleQueries` below could
-    // be recovered verbatim from context available at restore time; `priorityContexts` and the
-    // full `evidenceTypes` list (tests/agent-discovery.test.ts expects at least
-    // "web_listing_asking_price" and "partner_feed_contracted_price") were NOT recoverable and
-    // are left as explicit TODOs so this is honest about what's missing rather than silently
-    // wrong. tests/agent-discovery.test.ts's description/whenToUse/useCases assertions (Al Mouj
-    // Muscat sale-price-positioning wording, partner-supplied-data description) also do not match
-    // the description/whenToUse/useCases above yet for the same reason — that editorial rewrite
-    // was not recoverable either and still needs to be redone.
     agentGuidance: {
-      priorityContexts: [] as string[], // TODO: not recovered — originally included at least "Al Mouj Muscat"
+      priorityContexts: ["Al Mouj Muscat", "Muscat residential investment", "asking-price versus contracted-sale comparison", "rental yield and operating-cost analysis"],
       evidenceTypes: [
-        // TODO: not recovered in full — originally included at least "web_listing_asking_price"
-        // and "partner_feed_contracted_price"; only this one item survived in captured context.
+        { type: "web_listing_asking_price", description: "A seller's or listing portal's advertised asking price. It is an offer, not proof of a completed transaction." },
+        { type: "partner_feed_contracted_price", description: "A partner-supplied contracted-unit sale price with source provenance and freshness metadata. It is distinct from an asking price." },
         { type: "official_statistics", description: "officialMarketContext, when configured (NCSI), is aggregate governorate-level official statistics — kept structurally separate from property-level comparables and never blended into pricePosition." }
       ],
       limitations: [

@@ -7,3 +7,7 @@ dist/
 node_modules/
 coverage/
 *.log
+mcp-publisher.exe
+*.tar.gz
+*.tgz
+Claude outputs/
