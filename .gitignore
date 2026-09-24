@@ -20,5 +20,8 @@ partner-packages/
 # (See distribution/SECURITY.md for what Rafid's discovery/docs surfaces deliberately omit;
 # this covers local files that were never meant to be in version control at all.)
 data/
+# The synthetic import fixture is required by the cross-platform test suite.
+!data/
+!data/example-oman-market-import.csv
 _to_delete/
 Claude outputs/
