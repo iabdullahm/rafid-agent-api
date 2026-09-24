@@ -527,6 +527,25 @@ const CLIENT_SCRIPT = `
   }
 
   // =============================================================================================
+  // Revenue Overview (Collected / Pending-Internal / On-chain Settled / Payout Available)
+  // =============================================================================================
+  function renderRevenueOverview(data) {
+    var el = document.getElementById("kpi-revenue-overview");
+    var ov = data.revenueOverview;
+    var spark = (data.sparklines && data.sparklines.collectedRevenue) || [];
+    var onChainSpark = (data.sparklines && data.sparklines.onChainSettledRevenue) || [];
+    var pendingSpark = (data.sparklines && data.sparklines.unifiedBillingRevenue) || [];
+    var cards = [];
+    cards.push('<div class="kpi glow"><div class="kpi-value">' + (ov.collectedRevenueUsd !== null ? fmtAmount(ov.collectedRevenueUsd) + " USD" : "—") + '</div><div class="kpi-label">Collected Revenue</div><div class="kpi-spark">' + sparklineSvg(spark, "#34e0a1") + "</div></div>");
+    cards.push('<div class="kpi"><div class="kpi-value">' + fmtAmount(ov.pendingInternalBillingRevenueUsd) + ' USD</div><div class="kpi-label">Pending / Internal Billing Revenue</div><div class="kpi-spark">' + sparklineSvg(pendingSpark, "#f5a623") + "</div></div>");
+    cards.push('<div class="kpi"><div class="kpi-value">' + (ov.onChainSettledRevenueUsd !== null ? fmtAmount(ov.onChainSettledRevenueUsd) + " USD" : "—") + '</div><div class="kpi-label">On-chain Settled Revenue</div><div class="kpi-sub">x402 / USDC</div><div class="kpi-spark">' + sparklineSvg(onChainSpark, "#2f6bff") + "</div></div>");
+    cards.push('<div class="kpi"><div class="kpi-value">' + (ov.payoutAvailableUsd !== null ? fmtAmount(ov.payoutAvailableUsd) + " USD" : "—") + '</div><div class="kpi-label">Payout Available</div><div class="kpi-sub">on-chain settled funds only</div></div>');
+    el.innerHTML = cards.join("");
+    var note = document.getElementById("revenue-overview-mixed-note");
+    note.style.display = ov.onChainSettledRevenueUsd === null ? "block" : "none";
+  }
+
+  // =============================================================================================
   // Revenue KPIs (+ sparklines + count-up)
   // =============================================================================================
   function renderRevenueKpis(data) {
@@ -1076,6 +1095,7 @@ const CLIENT_SCRIPT = `
     renderHero(data);
     renderAgents(data);
     renderActivityFeed(data);
+    renderRevenueOverview(data);
     renderRevenueKpis(data);
     renderTrend(data);
     renderRevenueByTool(data);
@@ -1264,6 +1284,13 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
       <div class="panel">
         <h2>Live Agent Activity</h2>
         <div id="activity-feed" class="activity-feed"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Revenue Overview</h2>
+        <p class="panel-desc">Collected Revenue and Payout Available combine both revenue rails this deployment settles &mdash; x402 on-chain (USDC, treated 1:1 with USD) and unified billing (API credits &amp; subscriptions, always USD). Pending / Internal Billing Revenue is labeled "pending" because, unlike an on-chain settlement, it is never independently confirmed outside this application's own ledger. Payout Available reports only the on-chain settled total: there is no payout/withdrawal system in this codebase, so internal billing revenue is not counted as available to pay out.</p>
+        <div id="kpi-revenue-overview" class="kpi-grid"></div>
+        <p id="revenue-overview-mixed-note" class="empty" style="display:none">Settled x402 payments this period span more than one currency (or a non-USDC asset) &mdash; Collected Revenue and Payout Available can't be safely combined into one USD figure; see the Revenue panel's per-currency breakdown below.</p>
       </div>
 
       <div class="panel">

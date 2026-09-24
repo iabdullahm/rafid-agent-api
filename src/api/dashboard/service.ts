@@ -847,6 +847,101 @@ function buildUnifiedBillingRevenueSparkline(entries: readonly LedgerEntry[], pe
   });
 }
 
+// -----------------------------------------------------------------------------------------------
+// Revenue Overview (dashboard section added 2026-09-24) — a top-level "collected vs. available"
+// summary spanning BOTH revenue rails this deployment can settle (x402 on-chain + unified billing
+// API credits/subscriptions): Collected Revenue, Pending / Internal Billing Revenue, On-chain
+// Settled Revenue, and Payout Available. Every figure here is derived purely from `revenue`
+// (RevenueSummary, already computed above from the x402 ledger) and `unifiedBillingRevenue`
+// (already computed above from billing/unified/reporting.ts) — no second accounting pass, no new
+// query, same "reuse the existing aggregate" discipline as every other section in this file.
+//
+// Why "Pending" for unified billing: x402 settlement is independently confirmed by a real
+// blockchain transaction (see revenue/chainVerifier.ts's on-chain receipt check) before this
+// codebase ever counts it as revenue. Unified billing has no equivalent external confirmation —
+// BillingEngine.addCredit()/adjustBalance() are purely internal ledger operations; this codebase
+// has no payment-gateway/webhook integration behind a credit top-up anywhere (grep confirms zero
+// references to any payment processor in src/billing/unified/). So unified billing revenue is
+// real within this application's own books, but it has never been independently verified the way
+// an on-chain settlement has — "pending" reflects that honestly rather than implying it is as
+// final as a blockchain-confirmed payment.
+//
+// Why "Payout Available" == on-chain settled revenue: there is no payout/withdrawal ledger
+// anywhere in this codebase (grep confirms zero references to "payout") — this deployment has
+// never tracked money actually leaving Rafid's wallet or moving to a bank account. Rather than
+// invent a payout system for this reporting task (which would mean fabricating a number with
+// nothing behind it — exactly what this dashboard's own design principles forbid), this field
+// reports the only revenue independently confirmed to already be sitting in a wallet Rafid
+// controls: the on-chain settled total. Internal billing revenue is excluded until a real payout
+// mechanism for it exists to report on.
+// -----------------------------------------------------------------------------------------------
+
+export interface RevenueOverview {
+  /** revenue.revenueByCurrency, restated here so a mixed/non-USDC window is never silently hidden
+   *  behind onChainSettledRevenueUsd's null — read this when that's null. */
+  onChainRevenueByCurrency: Record<string, number>;
+  /** Null exactly when onChainRevenueByCurrency spans more than one currency, or a currency other
+   *  than USDC (this deployment's only supported x402 asset) — same convention as
+   *  RevenueSummary.grossRevenueUSD, but 0 (not null) when there is simply no settled revenue yet
+   *  this period, matching renderRevenueKpis()'s own existing zero-state convention. */
+  onChainSettledRevenueUsd: number | null;
+  /** = unifiedBillingRevenue.totalUsd — see this section's doc comment for why it's labeled
+   *  "pending" rather than "settled". 0 when unified billing is disabled or has no settled
+   *  charges yet (UnifiedBillingRevenueSummary is already zeroed, never fabricated, in that
+   *  case). */
+  pendingInternalBillingRevenueUsd: number;
+  /** onChainSettledRevenueUsd + pendingInternalBillingRevenueUsd — this deployment's only two
+   *  revenue rails, combined because both are USD-denominated in practice (x402 settles USDC,
+   *  treated 1:1 with USD throughout this codebase — see RevenueSummary.grossRevenueUSD's own
+   *  identical convention; unified billing is USD by construction, money.ts). Null exactly when
+   *  onChainSettledRevenueUsd is null (see its own doc comment) — never silently combined with a
+   *  guessed on-chain figure. */
+  collectedRevenueUsd: number | null;
+  /** See this section's doc comment for why this equals onChainSettledRevenueUsd today. */
+  payoutAvailableUsd: number | null;
+}
+
+function buildRevenueOverview(revenue: RevenueSummary, unifiedBillingRevenue: UnifiedBillingRevenueSummary): RevenueOverview {
+  const currencies = Object.keys(revenue.revenueByCurrency);
+  const onChainSettledRevenueUsd: number | null =
+    revenue.settledPayments === 0 || currencies.length === 0 ? 0
+      : currencies.length === 1 && currencies[0] === "USDC" ? revenue.revenueByCurrency["USDC"]!
+        : null;
+  const pendingInternalBillingRevenueUsd = unifiedBillingRevenue.totalUsd;
+  const collectedRevenueUsd = onChainSettledRevenueUsd !== null
+    ? round(onChainSettledRevenueUsd + pendingInternalBillingRevenueUsd, 6) : null;
+  return {
+    onChainRevenueByCurrency: revenue.revenueByCurrency,
+    onChainSettledRevenueUsd,
+    pendingInternalBillingRevenueUsd,
+    collectedRevenueUsd,
+    payoutAvailableUsd: onChainSettledRevenueUsd
+  };
+}
+
+/** On-chain (x402) settled-revenue-in-USD sparkline — reuses the same bucketBoundaries() as every
+ *  other sparkline in this file. Unlike buildSettlementCountSparkline (a row count, safe
+ *  regardless of currency mix), this sums amountDecimal per bucket, so the caller only passes
+ *  `safe: true` when the whole window's settled x402 rows are entirely USDC or there are none —
+ *  the exact same single-currency condition buildRevenueOverview() uses for
+ *  onChainSettledRevenueUsd. Returns an all-zero array of the right length when unsafe (mixed/
+ *  non-USDC currencies), mirroring the KPI's own null (no amount to plot) rather than fabricating
+ *  a blended trend line. */
+function buildOnChainSettledRevenueSparkline(settlements: readonly RevenueSettlement[], period: RevenuePeriod, now: Date, safe: boolean): number[] {
+  const boundaries = bucketBoundaries(period, now);
+  if (!safe) return boundaries.map(() => 0);
+  const succeeded = settlements.filter(r => r.status === "settlement_succeeded" && r.currency === "USDC" && r.amountDecimal !== null);
+  return boundaries.map(([start, end]) => {
+    const startMs = start.getTime(), endMs = end.getTime();
+    let sum = 0;
+    for (const r of succeeded) {
+      const t = Date.parse(r.createdAt);
+      if (t >= startMs && t < endMs) sum += r.amountDecimal!;
+    }
+    return round(sum, 6);
+  });
+}
+
 export interface TransactionRow {
   time: string;
   capability: string;
@@ -903,7 +998,12 @@ export interface DashboardData {
     toolCalls: number[];
     discoveryHits: number[];
     unifiedBillingRevenue: number[];
+    onChainSettledRevenue: number[];
+    collectedRevenue: number[];
   };
+  /** Collected / Pending-Internal / On-chain Settled / Payout Available — see RevenueOverview's
+   *  own doc comment. */
+  revenueOverview: RevenueOverview;
 }
 
 export interface DashboardServiceOptions {
@@ -1085,12 +1185,6 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   });
   const activityFeed = buildActivityFeed(events);
   const systemHealth = buildSystemHealthScore(systemStatus, anomalies.length);
-  const sparklines = {
-    revenue: buildSettlementCountSparkline(settlements, period, now),
-    toolCalls: buildCountSparkline(events, period, now, e => e.category === "tool"),
-    discoveryHits: buildCountSparkline(events, period, now, e => e.category === "discovery"),
-    unifiedBillingRevenue: buildUnifiedBillingRevenueSparkline(unifiedBillingEntries, period, now)
-  };
 
   // ---- Free Preview funnel (spec: preview traffic + preview->paid conversion) ----
   const previewFunnel = buildPreviewFunnel(events);
@@ -1106,9 +1200,27 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
     byTool: summarizeUnifiedBillingRevenueByTool(unifiedBillingEntries)
   };
 
+  // ---- Revenue Overview: Collected / Pending-Internal / On-chain Settled / Payout Available
+  // (see RevenueOverview's doc comment above for the reasoning behind each figure) ----
+  const revenueOverview = buildRevenueOverview(revenue, unifiedBillingRevenue);
+  const pendingRevenueSpark = buildUnifiedBillingRevenueSparkline(unifiedBillingEntries, period, now);
+  const onChainSettledRevenueSpark = buildOnChainSettledRevenueSparkline(
+    settlements, period, now, revenueOverview.onChainSettledRevenueUsd !== null
+  );
+  const sparklines = {
+    revenue: buildSettlementCountSparkline(settlements, period, now),
+    toolCalls: buildCountSparkline(events, period, now, e => e.category === "tool"),
+    discoveryHits: buildCountSparkline(events, period, now, e => e.category === "discovery"),
+    unifiedBillingRevenue: pendingRevenueSpark,
+    onChainSettledRevenue: onChainSettledRevenueSpark,
+    // Same USD-safe combination as revenueOverview.collectedRevenueUsd: onChainSettledRevenueSpark
+    // is already all-zero (never a blended amount) when that combination isn't currency-safe.
+    collectedRevenue: onChainSettledRevenueSpark.map((v, i) => round(v + pendingRevenueSpark[i]!, 6))
+  };
+
   return {
     period, generatedAt: now.toISOString(), revenue, paidCalls, revenueTrend, revenueByTool, toolConversion,
-    capabilityOverview, x402Funnel, previewFunnel, unifiedBillingRevenue, usage,
+    capabilityOverview, x402Funnel, previewFunnel, unifiedBillingRevenue, revenueOverview, usage,
     transactions, reconciliation: { anomalyCount: anomalies.length, anomalies }, systemStatus,
     agents, activityFeed, systemHealth, sparklines
   };

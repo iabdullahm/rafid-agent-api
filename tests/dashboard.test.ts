@@ -1305,6 +1305,95 @@ test("dashboard unified billing revenue: a settled API-credit charge is counted 
 });
 
 // -------------------------------------------------------------------------------------------
+// Revenue Overview — Collected / Pending-Internal / On-chain Settled / Payout Available
+// -------------------------------------------------------------------------------------------
+
+test("dashboard revenue overview: honest zeros when nothing has settled on either rail", async t => {
+  const { server, base } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  assert.deepEqual(data.revenueOverview.onChainRevenueByCurrency, {});
+  assert.equal(data.revenueOverview.onChainSettledRevenueUsd, 0);
+  assert.equal(data.revenueOverview.pendingInternalBillingRevenueUsd, 0);
+  assert.equal(data.revenueOverview.collectedRevenueUsd, 0);
+  assert.equal(data.revenueOverview.payoutAvailableUsd, 0);
+});
+
+test("dashboard revenue overview: combines on-chain x402 settlements with unified billing charges into Collected Revenue, while Payout Available stays on-chain only", async t => {
+  const revenueLedger = new MemoryRevenueLedger();
+  revenueLedger.record(settlementRow({ amountDecimal: 0.25 }));
+  revenueLedger.record(settlementRow({ amountDecimal: 0.25 }));
+
+  const ADMIN_SECRET = "billing-admin-secret-for-overview-tests-0123456789";
+  const { server, base } = await startDashboardApp({
+    revenueLedger, billingEnv: { API_CREDITS_ENABLED: "true", BILLING_ADMIN_SECRET: ADMIN_SECRET }
+  });
+  t.after(() => { server.closeAllConnections(); server.close(); });
+
+  const admin = async (method: string, path: string, body?: unknown) => {
+    const r = await fetch(base + "/api/internal/billing" + path, {
+      method, headers: { "X-Billing-Admin-Key": ADMIN_SECRET, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    return { status: r.status, body: await r.json() as any };
+  };
+  const acct = await admin("POST", "/accounts", { name: "Overview Test Co" });
+  const accountId = acct.body.data.id as string;
+  await admin("POST", `/accounts/${accountId}/credits`, { amount: "5.00", reason: "test" });
+  const keyRes = await admin("POST", `/accounts/${accountId}/api-keys`, { name: "test" });
+  const apiKeyValue = keyRes.body.data.apiKey as string;
+  const tool = capabilities.find(c => c.name === "analyze_property")!; // $0.01, deterministic calculator
+  const call = await fetch(base + "/api/v1" + tool.path, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKeyValue}` }, body: JSON.stringify(tool.example)
+  });
+  assert.equal(call.status, 200);
+
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+
+  assert.equal(data.revenueOverview.onChainSettledRevenueUsd, 0.5);
+  assert.equal(data.revenueOverview.pendingInternalBillingRevenueUsd, tool.price);
+  assert.equal(data.revenueOverview.collectedRevenueUsd, Math.round((0.5 + tool.price) * 1e6) / 1e6);
+  // Payout Available reports on-chain settled funds only — the internal-billing portion of
+  // Collected Revenue is deliberately excluded (see RevenueOverview's doc comment: no payout
+  // ledger exists to confirm it as withdrawable).
+  assert.equal(data.revenueOverview.payoutAvailableUsd, 0.5);
+  assert.notEqual(data.revenueOverview.payoutAvailableUsd, data.revenueOverview.collectedRevenueUsd);
+});
+
+test("dashboard revenue overview: never fabricates a blended USD figure when settled x402 payments span more than one currency", async t => {
+  const revenueLedger = new MemoryRevenueLedger();
+  revenueLedger.record(settlementRow({ currency: "USDC", amountDecimal: 0.25 }));
+  revenueLedger.record(settlementRow({ currency: "EURC", asset: "EURC", amountDecimal: 0.20 }));
+  const { server, base } = await startDashboardApp({ revenueLedger });
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  assert.deepEqual(data.revenueOverview.onChainRevenueByCurrency, { USDC: 0.25, EURC: 0.2 });
+  assert.equal(data.revenueOverview.onChainSettledRevenueUsd, null);
+  assert.equal(data.revenueOverview.collectedRevenueUsd, null);
+  assert.equal(data.revenueOverview.payoutAvailableUsd, null);
+  // Internal billing's own figure is still reported honestly even when the on-chain side is
+  // ambiguous — only the combined/on-chain-derived figures go null.
+  assert.equal(data.revenueOverview.pendingInternalBillingRevenueUsd, 0);
+});
+
+test("dashboard UI: Revenue Overview panel renders Collected Revenue, Pending/Internal Billing Revenue, On-chain Settled Revenue and Payout Available", async t => {
+  const { server, base } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const cookie = await loginAndGetSessionCookie(base);
+  const html = await (await fetch(base + "/internal/dashboard", { headers: { Cookie: cookie } })).text();
+  assert.ok(html.includes("Revenue Overview"));
+  assert.ok(html.includes("id=\"kpi-revenue-overview\""));
+  assert.ok(html.includes("Collected Revenue"));
+  assert.ok(html.includes("Pending / Internal Billing Revenue"));
+  assert.ok(html.includes("On-chain Settled Revenue"));
+  assert.ok(html.includes("Payout Available"));
+  assert.ok(html.includes("renderRevenueOverview"));
+});
+
+// -------------------------------------------------------------------------------------------
 // Free Preview funnel — preview traffic and preview->paid conversion
 // -------------------------------------------------------------------------------------------
 test("dashboard Free Preview funnel: reports honest zeros when no preview traffic occurred", async t => {
