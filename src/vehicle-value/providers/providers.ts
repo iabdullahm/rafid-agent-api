@@ -24,9 +24,16 @@ function covers(coverage: CountryCoverage, market: { country: string; regionalCo
  *  free preview can say whether evidence exists for a market without querying the database. */
 export class DatabaseVehicleMarketProvider implements VehicleMarketProvider {
   readonly id = "vehicle_market_records";
+  /** Operator-imported official price lists outrank dealer-reported MSRPs. */
+  readonly newPriceRank = 10;
   constructor(private readonly repository: VehicleMarketRepository, private readonly coverage: CountryCoverage, private readonly limit = 500) {}
   supports(market: { country: string; regionalCountries: readonly string[] }): boolean { return covers(this.coverage, market); }
   searchComparables(query: VehicleMarketQuery): Promise<VehicleComparable[]> { return this.repository.findComparables(query, this.limit); }
+  async getNewVehiclePrice(query: { makeKey: string; modelKey: string; year: number; trimKey: string | null; country: string }): Promise<NewVehiclePriceReference | null> {
+    if (!covers(this.coverage, { country: query.country, regionalCountries: [] })) return null;
+    const r = await this.repository.findNewPrice(query);
+    return r ? { price: r.price, currency: r.currency, sourceName: `${r.sourceName}${r.effectiveDate ? ` (effective ${r.effectiveDate})` : ""}` } : null;
+  }
 }
 
 /**

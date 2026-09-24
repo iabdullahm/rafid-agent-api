@@ -1198,12 +1198,13 @@ export const capabilities = [
     // results are cached (never the valuation itself); nothing about the request is stored.
     idempotent: true, sideEffects: false,
     limitations: [
-      "Valuation is anchored on comparable-market evidence from the providers configured on this deployment; market support (valuation parameters) and live data coverage are reported separately in marketCoverage. With no usable evidence the result is status insufficient_market_data with null prices — never a fabricated estimate.",
+      "Valuation is anchored on comparable-market evidence from the providers configured on this deployment (Rafid's imported vehicle_market_records, partner HTTPS feeds, and MarketCheck for the US/Canada when licensed); market support (valuation parameters) and live data coverage are reported separately in marketCoverage. With no usable evidence the result is status insufficient_market_data with null prices — never a fabricated estimate.",
       "Comparables are mostly listing asking prices; a documented, market-specific negotiation margin converts them to fair value. It is not a physical inspection, vehicle-history check or formal appraisal.",
       "Condition, accident, service-history, owner-count and option adjustments are conservative, capped market defaults (basis: heuristic) and never dominate the market evidence; model-year, mileage, trim and local-market effects are derived from the comparables when the evidence supports it.",
-      "Evidence in another currency is used only when a reliable exchange-rate source is configured; otherwise it is excluded (CURRENCY_CONVERSION_UNAVAILABLE), never converted with a guessed rate.",
-      "Original (new) price and total depreciation are reported only when a provider supplies a verified reference; otherwise null.",
-      "Schema-invalid requests (unrealistic year, mileage, owners or price; unknown enum values; unknown fields) return 400 INVALID_INPUT and are not charged. VINs are not accepted or stored."
+      "Evidence in another currency is used only through a configured, dated exchange-rate source (ECB reference rates, ExchangeRate-API) and every conversion is reported in currencyConversion; otherwise it is excluded (CURRENCY_CONVERSION_UNAVAILABLE), never converted with a guessed rate.",
+      "Original (new) price and total depreciation are reported only when a verified reference exists (an imported official price list, or ≥ 3 agreeing dealer-reported MSRPs from MarketCheck); otherwise null.",
+      "Schema-invalid requests (unrealistic year, mileage, owners or price; malformed VIN; unknown enum values; unknown fields) return 400 INVALID_INPUT and are not charged.",
+      "An optional VIN is validated (check digit for North American VINs), optionally decoded (NHTSA vPIC) to confirm identity and fill missing trim/body/fuel/drivetrain, and used to exclude the vehicle's own listing; it is never stored or logged and is returned masked. A mismatching VIN is flagged (VIN_MISMATCH), never trusted over the request."
     ],
     agentGuidance: {
       priorityContexts: ["used-vehicle purchase decision", "asking-price check", "trade-in / dealer acquisition", "auto-finance loan-to-value", "insurance valuation", "fleet and leasing residual value", "dealership software", "vehicle marketplace and auction pricing"],

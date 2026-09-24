@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { hashVin, isVinFormatValid, normalizeVin } from "../vin.js";
 import { BODY_TYPES, CONDITIONS, DRIVETRAINS, FUEL_TYPES, TRANSMISSIONS } from "../types.js";
 import {
   BODY_SYNONYMS, CONDITION_SYNONYMS, DRIVETRAIN_SYNONYMS, FUEL_SYNONYMS, TRANSMISSION_SYNONYMS,
@@ -37,6 +38,9 @@ export interface VehicleMarketRecord {
   sourceUrl: string | null;
   observedAt: string;
   metadata: Record<string, string | number | boolean | null>;
+  /** SHA-256 of a VIN column when the source supplied one — never persisted, never the VIN itself;
+   *  used only to exclude the subject vehicle's own listing from its comparables. */
+  vinHash?: string;
 }
 
 const cat = <T extends readonly [string, ...string[]]>(values: T, synonyms: Readonly<Record<string, string>>) =>
@@ -91,7 +95,9 @@ export function validateVehicleMarketRows(rows: readonly Record<string, unknown>
   const ignored = new Set<string>();
   rows.forEach((row, index) => {
     const known: Record<string, unknown> = {};
+    let vinHash: string | undefined;
     for (const [column, value] of Object.entries(row ?? {})) {
+      if (/^vin$/i.test(column) && typeof value === "string" && isVinFormatValid(normalizeVin(value))) vinHash = hashVin(value);
       if (KNOWN_COLUMNS.has(column)) known[column] = value;
       else if (PERSONAL_DATA_COLUMN.test(column)) dropped.add(column);
       else ignored.add(column);
@@ -113,8 +119,68 @@ export function validateVehicleMarketRows(rows: readonly Record<string, unknown>
       price: r.price, currency: normalizeCurrencyCode(r.currency)!, priceType: r.priceType ?? "listing",
       sourceType: r.sourceType ?? defaults.sourceType ?? "manual_import", sourceName: r.sourceName,
       sourceRecordId: r.sourceRecordId ?? null, sourceUrl: r.sourceUrl ?? null, observedAt: new Date(Date.parse(r.observedAt)).toISOString(),
-      metadata: {}
+      metadata: {},
+      ...(vinHash ? { vinHash } : {})
     });
   });
   return { records, errors, droppedPersonalDataColumns: [...dropped].sort(), ignoredColumns: [...ignored].sort() };
+}
+
+// ---- new-vehicle (original) price references ------------------------------------------------------
+
+/**
+ * vehicle_new_prices — verified original / new-vehicle prices (e.g. a distributor's official
+ * price list for a model year, a manufacturer's published MSRP) imported by an operator. Used only
+ * for depreciation; a valuation never assumes an original price that is not on record.
+ */
+export interface VehicleNewPriceRecord {
+  make: string; normalizedMake: string;
+  model: string; normalizedModel: string;
+  year: number;
+  trim: string | null; normalizedTrim: string | null;
+  country: string;
+  price: number;
+  currency: string;
+  sourceName: string;
+  sourceUrl: string | null;
+  effectiveDate: string | null;
+}
+
+export const vehicleNewPriceRow = z.object({
+  make: z.string().trim().min(1).max(60),
+  model: z.string().trim().min(1).max(80),
+  year: z.preprocess(v => (typeof v === "string" ? Number(v) : v), z.number().int().min(1950).max(2100)),
+  trim: str(60),
+  country: z.string().trim().refine(v => normalizeCountry(v) !== null, "unrecognized country"),
+  price: z.preprocess(v => (typeof v === "string" ? Number(v.replace(/[, ]/g, "")) : v), z.number().positive().max(100_000_000)),
+  currency: z.string().trim().refine(v => normalizeCurrencyCode(v) !== null, "currency must be ISO 4217"),
+  sourceName: z.string().trim().min(1).max(160),
+  sourceUrl: str(1000).refine(v => v === undefined || /^https?:\/\//i.test(v), "sourceUrl must be http(s)"),
+  effectiveDate: str(40).refine(v => v === undefined || !Number.isNaN(Date.parse(v)), "effectiveDate must be a date")
+});
+
+export function validateNewPriceRows(rows: readonly Record<string, unknown>[]): { records: VehicleNewPriceRecord[]; errors: { row: number; issues: string[] }[] } {
+  const records: VehicleNewPriceRecord[] = [];
+  const errors: { row: number; issues: string[] }[] = [];
+  rows.forEach((row, index) => {
+    const parsed = vehicleNewPriceRow.safeParse(row);
+    if (!parsed.success) { errors.push({ row: index + 1, issues: parsed.error.issues.map(i => `${i.path.join(".") || "row"}: ${i.message}`) }); return; }
+    const r = parsed.data;
+    const make = normalizeMake(r.make); const model = normalizeModel(r.model); const trim = normalizeTrim(r.trim);
+    records.push({
+      make: make.display, normalizedMake: make.key, model: model.display, normalizedModel: model.key, year: r.year,
+      trim: trim?.display ?? null, normalizedTrim: trim?.key ?? null, country: normalizeCountry(r.country)!.code,
+      price: r.price, currency: normalizeCurrencyCode(r.currency)!, sourceName: r.sourceName, sourceUrl: r.sourceUrl ?? null,
+      effectiveDate: r.effectiveDate ? new Date(Date.parse(r.effectiveDate)).toISOString().slice(0, 10) : null
+    });
+  });
+  return { records, errors };
+}
+
+/** Exact trim match when the subject's trim is known; when it is not, only an unambiguous single
+ *  price for the model year (never an average of different trims). */
+export function pickNewPrice(candidates: readonly VehicleNewPriceRecord[], trimKey: string | null): VehicleNewPriceRecord | null {
+  if (trimKey) return candidates.find(c => c.normalizedTrim === trimKey) ?? null;
+  const distinct = new Set(candidates.map(c => `${c.price}|${c.currency}`));
+  return candidates.length && distinct.size === 1 ? candidates[0]! : null;
 }

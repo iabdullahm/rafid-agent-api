@@ -380,5 +380,11 @@ export const VEHICLE_VALUE_EXAMPLE_OUTPUT = {
       "KW"
     ]
   },
+  "vinCheck": null,
+  "currencyConversion": {
+    "resultCurrency": "OMR",
+    "sourcesConfigured": [],
+    "conversions": []
+  },
   "disclaimer": "Estimate derived from available market evidence using deterministic methods. It is not a physical inspection, a vehicle-history check, a formal appraisal, or a guarantee of sale price, and it is not financial, lending or insurance advice."
 };

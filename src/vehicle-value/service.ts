@@ -6,11 +6,16 @@ import { ApiError } from "../utils/errors.js";
 import { FALLBACK_DESCRIPTIONS, MIN_COMPARABLES, preparePool, selectComparables } from "./comparables.js";
 import { STALE_AFTER_DAYS, computeConfidence, type ConfidenceResult } from "./confidence.js";
 import {
+  getExchangeRateApiKey, getMarketCheckApiKey, getMarketCheckPages, getVehicleFxCacheTtlMs, getVehicleFxSources,
   getVehicleMarketCountries, getVehicleMarketDataMode, getVehicleMarketDatabaseUrl, getVehicleMaxListingAgeDays,
-  getVehicleProviderTimeoutMs, getVehicleSearchCacheTtlMs
+  getVehicleProviderTimeoutMs, getVehicleSearchCacheTtlMs, getVehicleVinDecoder, getVehicleVinDecoderTimeoutMs
 } from "./config.js";
-import { SameCurrencyOnly } from "./currency.js";
+import { EcbRateSource, ExchangeRateApiSource, ExchangeRateService, SameCurrencyOnly } from "./currency.js";
+import { HttpFeedVehicleProvider, parseFeedConfigs } from "./providers/httpFeed.js";
+import { MarketCheckVehicleProvider } from "./providers/marketcheck.js";
 import { DatabaseVehicleMarketProvider } from "./providers/providers.js";
+import { NhtsaVinDecoder, hashVin, type DecodedVin, type VinDecoder } from "./vin.js";
+import { analyzeVin, type VinCheck } from "./vinCheck.js";
 import { gatherComparables, selectProviders, type GatherResult } from "./providers/router.js";
 import type { ScoredComparable } from "./similarity.js";
 import { median, mean, round } from "./stats.js";
@@ -38,21 +43,39 @@ export interface VehicleValueDependencies {
   timeoutMs?: number;
   cache?: TtlCache<VehicleComparable[]> | null;
   maxListingAgeDays?: number;
+  /** Live exchange-rate service (ignored when `fx` is given). */
+  fxService?: ExchangeRateService | null;
+  vinDecoder?: VinDecoder | null;
+  vinDecoderTimeoutMs?: number;
 }
 
 // ---- runtime (env-configured providers) -----------------------------------------------------------
 
-let runtime: { providers: VehicleMarketProvider[]; cache: TtlCache<VehicleComparable[]> } | null = null;
+interface Runtime { providers: VehicleMarketProvider[]; cache: TtlCache<VehicleComparable[]>; fxService: ExchangeRateService | null; vinDecoder: VinDecoder | null }
+let runtime: Runtime | null = null;
 
-function defaultRuntime() {
-  if (runtime) return runtime;
+/** Builds the provider / FX / VIN-decoder set from the environment. Everything is off by default. */
+export function buildVehicleRuntime(env: NodeJS.ProcessEnv = process.env, fetchImpl?: typeof fetch): Runtime {
   const providers: VehicleMarketProvider[] = [];
-  if (getVehicleMarketDataMode() === "database") {
-    const url = getVehicleMarketDatabaseUrl();
+  if (getVehicleMarketDataMode(env) === "database") {
+    const url = getVehicleMarketDatabaseUrl(env);
     if (!url) throw new Error("VEHICLE_MARKET_DATA_MODE=database requires VEHICLE_MARKET_DATABASE_URL or DATABASE_URL");
-    providers.push(new DatabaseVehicleMarketProvider(new PostgresVehicleMarketRepository(url), getVehicleMarketCountries()));
+    providers.push(new DatabaseVehicleMarketProvider(new PostgresVehicleMarketRepository(url), getVehicleMarketCountries(env)));
   }
-  runtime = { providers, cache: new TtlCache<VehicleComparable[]>(getVehicleSearchCacheTtlMs()) };
+  const marketCheckKey = getMarketCheckApiKey(env);
+  if (marketCheckKey) providers.push(new MarketCheckVehicleProvider({ apiKey: marketCheckKey, pages: getMarketCheckPages(env), fetchImpl }));
+  for (const feed of parseFeedConfigs(env.VEHICLE_MARKET_FEEDS_JSON)) providers.push(new HttpFeedVehicleProvider(feed, { fetchImpl, env }));
+  const fxSources = getVehicleFxSources(env).map(id => (id === "ecb" ? new EcbRateSource({ fetchImpl }) : new ExchangeRateApiSource({ apiKey: getExchangeRateApiKey(env), fetchImpl })));
+  return {
+    providers,
+    cache: new TtlCache<VehicleComparable[]>(getVehicleSearchCacheTtlMs(env)),
+    fxService: fxSources.length ? new ExchangeRateService(fxSources, { ttlMs: getVehicleFxCacheTtlMs(env) }) : null,
+    vinDecoder: getVehicleVinDecoder(env) === "nhtsa" ? new NhtsaVinDecoder({ fetchImpl }) : null
+  };
+}
+
+function defaultRuntime(): Runtime {
+  runtime ??= buildVehicleRuntime();
   return runtime;
 }
 
@@ -71,13 +94,26 @@ export async function runVehicleValueEstimate(rawInput: unknown, deps: VehicleVa
   const now = deps.now ?? Date.now;
   const started = now();
   const subject = buildSubject(input, deps.today ?? (() => new Date()));
+  // Injected providers (tests, examples) never pick up env-configured FX or VIN decoding implicitly.
   const rt = deps.providers ? null : defaultRuntime();
   const providers = deps.providers ?? rt!.providers;
   const cache = deps.cache === undefined ? (rt?.cache ?? null) : deps.cache;
+  const fxService = deps.fxService !== undefined ? deps.fxService : (rt?.fxService ?? null);
+  const vinDecoder = deps.vinDecoder !== undefined ? deps.vinDecoder : (rt?.vinDecoder ?? null);
   const maxAgeDays = deps.maxListingAgeDays ?? getVehicleMaxListingAgeDays();
   const selectedProviders = selectProviders(providers, { country: subject.countryCode, regionalCountries: subject.market.regionalCountries });
 
   let gathered: GatherResult = { comparables: [], runs: [], duplicatesRemoved: 0, invalidRemoved: 0, newVehiclePrice: null };
+  // VIN decoding runs concurrently with the market search (it only fills fields the search does not use).
+  const vinDecode: Promise<{ decoded: DecodedVin | null; failed: boolean }> = subject.vin && vinDecoder
+    ? (async () => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), deps.vinDecoderTimeoutMs ?? getVehicleVinDecoderTimeoutMs());
+      try { return { decoded: await vinDecoder.decode(subject.vin!, controller.signal), failed: false }; }
+      catch { return { decoded: null, failed: true }; }
+      finally { clearTimeout(timer); }
+    })()
+    : Promise.resolve({ decoded: null, failed: false });
   try {
     if (selectedProviders.length) {
       gathered = await gatherComparables(selectedProviders, {
@@ -88,7 +124,24 @@ export async function runVehicleValueEstimate(rawInput: unknown, deps: VehicleVa
       }, { makeKey: subject.makeKey, modelKey: subject.modelKey, year: subject.year, trimKey: subject.trimKey, country: subject.countryCode },
       { timeoutMs: deps.timeoutMs ?? getVehicleProviderTimeoutMs(), cache, now });
     }
-    const output = buildOutput(subject, gathered, selectedProviders.length, deps.fx ?? new SameCurrencyOnly(), maxAgeDays);
+    const { decoded, failed } = await vinDecode;
+    const vinCheck = subject.vin ? analyzeVin(subject, subject.vin, decoded, vinDecoder?.id ?? null, failed) : null;
+    // Never value a vehicle against its own listing.
+    let selfExcluded = 0;
+    if (subject.vin) {
+      const own = hashVin(subject.vin);
+      const before = gathered.comparables.length;
+      gathered = { ...gathered, comparables: gathered.comparables.filter(c => c.vinHash !== own) };
+      selfExcluded = before - gathered.comparables.length;
+    }
+    let fx = deps.fx;
+    if (!fx) {
+      const foreign = gathered.comparables.some(c => c.currency !== subject.currency) || (gathered.newVehiclePrice !== null && gathered.newVehiclePrice.currency !== subject.currency);
+      fx = foreign && fxService ? await fxService.prepare() : new SameCurrencyOnly();
+    }
+    const output = buildOutput(subject, gathered, selectedProviders.length, fx, maxAgeDays, {
+      vinCheck, vinDecoderFailed: failed, selfExcluded, fxSourcesConfigured: deps.fx ? ["injected"] : (fxService?.configured ?? [])
+    });
     recordVehicleValuation({
       at: new Date(now()).toISOString(), country: subject.countryCode, make: subject.make, model: subject.model, modelYear: subject.year,
       status: output.status, comparableCount: output.marketStats.comparableCount, providerCount: selectedProviders.length,
@@ -121,7 +174,11 @@ function positionFor(pct: number): MarketPosition {
   return "well_above_market";
 }
 
-function buildOutput(subject: Subject, gathered: GatherResult, providerCount: number, fx: ExchangeRateProvider, maxAgeDays: number): VehicleValueEstimateOutput {
+interface OutputExtras { vinCheck: VinCheck | null; vinDecoderFailed: boolean; selfExcluded: number; fxSourcesConfigured: readonly string[] }
+
+const sig = (v: number) => Number(v.toPrecision(6));
+
+function buildOutput(subject: Subject, gathered: GatherResult, providerCount: number, fx: ExchangeRateProvider, maxAgeDays: number, extras: OutputExtras): VehicleValueEstimateOutput {
   const flags = new Set<RiskFlag>();
   const assumptions: string[] = [];
   const pool = preparePool(subject, gathered.comparables, fx, maxAgeDays);
@@ -145,6 +202,13 @@ function buildOutput(subject: Subject, gathered: GatherResult, providerCount: nu
   if (subject.accidentHistory === "unknown") flags.add("ACCIDENT_HISTORY_UNKNOWN");
   if (subject.accidentHistory === "reported") flags.add("ACCIDENT_SEVERITY_UNVERIFIED");
   if (subject.accidentHistory === "structural") flags.add("STRUCTURAL_DAMAGE_REPORTED");
+  const vc = extras.vinCheck;
+  if (vc) {
+    if (vc.matches.make === false || vc.matches.model === false || vc.matches.year === false) flags.add("VIN_MISMATCH");
+    if (vc.checkDigit === "invalid") flags.add("VIN_CHECK_DIGIT_INVALID");
+    if (vc.decodeStatus === "unavailable") flags.add("VIN_DECODE_UNAVAILABLE");
+  }
+  if (extras.selfExcluded > 0) flags.add("SUBJECT_LISTING_EXCLUDED");
   const expectedMileageKm = subject.ageYears >= 0.5 ? Math.round(subject.ageYears * subject.market.expectedAnnualKm) : null;
   const mileageVsExpectedPercent = subject.mileageKm !== null && expectedMileageKm ? round((subject.mileageKm / expectedMileageKm - 1) * 100, 1) : null;
   if (mileageVsExpectedPercent !== null && mileageVsExpectedPercent > 50) flags.add("HIGH_MILEAGE_FOR_AGE");
@@ -250,6 +314,11 @@ function buildOutput(subject: Subject, gathered: GatherResult, providerCount: nu
   }
   if (!subject.marketConfigured) assumptions.push(`${subject.countryName} has no dedicated valuation parameters; generic conservative market defaults were used for dealer/private spreads and fallbacks.`);
   if (gathered.newVehiclePrice === null) assumptions.push("No verified original (new) price reference was available, so total depreciation is not reported.");
+  if (vc) {
+    if (flags.has("VIN_MISMATCH")) assumptions.push("The VIN does not match the stated make/model/year; the vehicle was valued as described in the request. Verify the vehicle's identity before relying on the estimate.");
+    if (vc.enrichedFields.length) assumptions.push(`Taken from the VIN decode because they were not supplied: ${vc.enrichedFields.join(", ")}.`);
+  }
+  if (extras.selfExcluded > 0) assumptions.push(`${extras.selfExcluded} listing(s) of this same vehicle (matched by VIN) were excluded from its comparables.`);
 
   // ---- comparables output ----
   const byRelevance = [...used].sort((a, b) => b.similarity - a.similarity || a.comparable.sourceName.localeCompare(b.comparable.sourceName) || (a.comparable.sourceRecordId ?? "").localeCompare(b.comparable.sourceRecordId ?? ""));
@@ -321,6 +390,19 @@ function buildOutput(subject: Subject, gathered: GatherResult, providerCount: nu
       marketDataProviders: gathered.runs.map(r => ({ id: r.providerId, status: r.status, comparablesReturned: r.comparablesReturned })),
       liveMarketDataAvailable: gathered.runs.some(r => r.status === "ok"),
       regionalFallbackCountries: [...subject.market.regionalCountries]
+    },
+    vinCheck: vc,
+    currencyConversion: {
+      resultCurrency: subject.currency,
+      sourcesConfigured: [...extras.fxSourcesConfigured],
+      conversions: [...new Set([...gathered.comparables.map(c => c.currency), ...(gathered.newVehiclePrice ? [gathered.newVehiclePrice.currency] : [])])]
+        .filter(c => c !== subject.currency).sort()
+        .flatMap(from => {
+          const rate = fx.convert(1, from, subject.currency);
+          if (rate === null) return [];
+          const d = fx.describe?.(from, subject.currency) ?? null;
+          return [{ from, to: subject.currency, rate: sig(rate), source: d?.source ?? "unspecified", rateDate: d?.rateDate ?? null }];
+        })
     },
     disclaimer: DISCLAIMER
   };

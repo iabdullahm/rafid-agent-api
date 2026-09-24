@@ -65,7 +65,7 @@ export const ESTIMATED_UPSTREAM_COST_USD: Partial<Record<CapabilityKey, { provid
   },
   vehicle_value_estimate: {
     providerCostUSD: 0, llmCostUSD: 0,
-    assumptions: "The shipped provider reads Rafid's own vehicle_market_records table (imported, licensed/partner evidence): no per-call provider fee and no LLM. A future paid market-data API would add its per-search fee here; provider search results are cached (6h default) per market + make/model + model-year window, so repeat valuations of similar vehicles reuse one search."
+    assumptions: "Default configuration: Rafid's own vehicle_market_records table and partner HTTPS feeds — no per-call provider fee, no LLM. When MARKETCHECK_API_KEY is set (US/Canada), each uncached valuation makes up to MARKETCHECK_PAGES (default 2) search requests per market, estimated at ~$0.002 each by Rafid (not MarketCheck's actual pricing; actual calls are recorded via recordProviderCost), so ≤ ~$0.008 per uncached US/CA valuation. Provider searches are cached (6h default) per market + make/model + model-year window. ECB rates and NHTSA vPIC VIN decoding are free; ExchangeRate-API is free (open access) or a flat monthly plan."
   },
   business_risk_score: {
     providerCostUSD: 0.032, llmCostUSD: 0,

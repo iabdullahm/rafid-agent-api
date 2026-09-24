@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   ACCIDENT_HISTORIES, BODY_TYPES, CONDITIONS, DRIVETRAINS, FUEL_TYPES, SERVICE_HISTORIES, TRANSMISSIONS
 } from "../vehicle-value/types.js";
+import { isVinFormatValid, normalizeVin } from "../vehicle-value/vin.js";
 import {
   ACCIDENT_SYNONYMS, BODY_SYNONYMS, CONDITION_SYNONYMS, DRIVETRAIN_SYNONYMS, FUEL_SYNONYMS, SERVICE_SYNONYMS, TRANSMISSION_SYNONYMS,
   matchKey, normalizeCountry, normalizeCurrencyCode
@@ -54,6 +55,8 @@ export const vehicleValueEstimateInput = z.strictObject({
   owners: z.number().int().min(1).max(MAX_OWNERS).optional().describe(`Number of previous registered owners (1–${MAX_OWNERS}).`),
   color: text(1, 40).optional().describe("Exterior colour (recorded; not priced separately)."),
   options: z.array(text(1, 60)).max(40).optional().describe("Notable equipment, e.g. [\"sunroof\", \"leather seats\", \"360 camera\"] (max 40)."),
+  vin: z.preprocess(v => (typeof v === "string" ? normalizeVin(v) : v), z.string().refine(isVinFormatValid, "vin must be a 17-character VIN (letters and digits, excluding I, O and Q)"))
+    .optional().describe("Optional 17-character VIN. Validated (and decoded when the deployment enables a VIN decoder) to confirm make/model/year, fill missing trim/body/fuel/drivetrain, and exclude the vehicle's own listing from its comparables. Never stored or logged; returned masked."),
   askingPrice: z.number().positive().max(MAX_ASKING_PRICE).optional().describe("Asking price to assess, in `currency` (or the market currency). Adds askingPriceAnalysis with the exact difference from the estimated midpoint."),
   valuationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "valuationDate must be YYYY-MM-DD")
     .refine(v => !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().startsWith(v), "valuationDate must be a real calendar date")

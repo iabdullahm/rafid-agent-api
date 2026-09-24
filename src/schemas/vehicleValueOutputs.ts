@@ -112,6 +112,27 @@ export const vehicleValueEstimateOutput = z.strictObject({
     liveMarketDataAvailable: z.boolean(),
     regionalFallbackCountries: z.array(z.string())
   }),
+  /** null when no VIN was supplied. The VIN itself is never returned — only a masked form. */
+  vinCheck: z.strictObject({
+    vinMasked: z.string(),
+    wmiRegion: z.enum(["north_america", "south_america", "europe", "asia", "africa", "oceania", "unknown"]),
+    checkDigit: z.enum(["valid", "invalid", "not_applicable"]),
+    decoder: z.string(),
+    decodeStatus: z.enum(["decoded", "not_decoded", "unavailable", "not_configured"]),
+    decoded: z.strictObject({
+      make: z.string().nullable(), model: z.string().nullable(), modelYear: z.number().int().nullable(), trim: z.string().nullable(),
+      bodyClass: z.string().nullable(), fuelType: z.string().nullable(), driveType: z.string().nullable(), transmission: z.string().nullable(), engine: z.string().nullable()
+    }),
+    matches: z.strictObject({ make: z.boolean().nullable(), model: z.boolean().nullable(), year: z.boolean().nullable() }),
+    enrichedFields: z.array(z.string()),
+    notes: z.array(z.string())
+  }).nullable(),
+  /** Every currency conversion applied to the evidence, with its dated source. */
+  currencyConversion: z.strictObject({
+    resultCurrency: z.string(),
+    sourcesConfigured: z.array(z.string()),
+    conversions: z.array(z.strictObject({ from: z.string(), to: z.string(), rate: z.number().positive(), source: z.string(), rateDate: z.string().nullable() }))
+  }),
   disclaimer: z.string()
 });
 

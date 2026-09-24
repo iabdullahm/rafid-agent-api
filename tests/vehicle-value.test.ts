@@ -448,7 +448,7 @@ test("21. schema validation: realistic ranges, strict fields, enum normalization
     [{ ...REQ, askingPrice: 0 }, "askingPrice"], [{ ...REQ, askingPrice: -5 }, "askingPrice"], [{ ...REQ, askingPrice: 1e12 }, "askingPrice"],
     [{ ...REQ, country: "Narnia" }, "country"], [{ ...REQ, fuelType: "steam" }, "fuelType"], [{ ...REQ, condition: "shiny" }, "condition"],
     [{ ...REQ, currency: "dollars" }, "currency"], [{ ...REQ, valuationDate: "2999-01-01" }, "valuationDate"], [{ ...REQ, valuationDate: "2026-02-30" }, "valuationDate"],
-    [{ ...REQ, vin: "JTMHV01J804012345" }, ""], [{ ...REQ, sellerPhone: "+96899999999" }, ""]
+    [{ ...REQ, vin: "JTMHV01J8O4012345" }, "vin"], [{ ...REQ, vin: "JTMHV01J8" }, "vin"], [{ ...REQ, sellerPhone: "+96899999999" }, ""]
   ];
   for (const [input, path] of bad) {
     const result = vehicleValueEstimateInput.safeParse(input);

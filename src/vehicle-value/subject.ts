@@ -26,6 +26,8 @@ export interface Subject {
   color: string | null;
   options: string[]; premiumOptions: string[];
   askingPrice: number | null;
+  /** Normalized VIN (request-scoped only; never persisted or logged). */
+  vin: string | null;
   valuationDate: string;
   /** End of the valuation day (UTC, ms) — evidence observed after it is ignored. */
   valuationEndMs: number;
@@ -67,6 +69,7 @@ export function buildSubject(input: VehicleValueEstimateInput, today: () => Date
     color: input.color ? collapseSpaces(input.color).toLowerCase() : null,
     options: options.all, premiumOptions: options.premium,
     askingPrice: input.askingPrice ?? null,
+    vin: input.vin ?? null,
     valuationDate, valuationEndMs, ageYears, market, marketConfigured: configured
   };
 }

@@ -1,5 +1,7 @@
 import type { VehicleComparable, VehicleMarketQuery } from "../types.js";
-import type { VehicleMarketRecord } from "./records.js";
+import { pickNewPrice, type VehicleMarketRecord, type VehicleNewPriceRecord } from "./records.js";
+
+export interface NewPriceQuery { makeKey: string; modelKey: string; year: number; trimKey: string | null; country: string }
 
 /**
  * Storage abstraction for vehicle_market_records. The database provider
@@ -11,6 +13,9 @@ export interface VehicleMarketRepository {
    *  exists; records without one are inserted (they cannot be matched reliably). */
   upsertRecords(records: readonly VehicleMarketRecord[]): Promise<{ inserted: number; updated: number }>;
   findComparables(query: VehicleMarketQuery, limit: number): Promise<VehicleComparable[]>;
+  /** Upsert verified new-vehicle prices, keyed by make/model/year/trim/country/source. */
+  upsertNewPrices(records: readonly VehicleNewPriceRecord[]): Promise<{ inserted: number; updated: number }>;
+  findNewPrice(query: NewPriceQuery): Promise<VehicleNewPriceRecord | null>;
 }
 
 export function recordToComparable(r: VehicleMarketRecord): VehicleComparable {
@@ -28,6 +33,7 @@ export function recordToComparable(r: VehicleMarketRecord): VehicleComparable {
   if (r.city) c.city = r.city;
   if (r.sourceRecordId) c.sourceRecordId = r.sourceRecordId;
   if (r.sourceUrl) c.sourceUrl = r.sourceUrl;
+  if (r.vinHash) c.vinHash = r.vinHash;
   return c;
 }
 
@@ -55,4 +61,20 @@ export class MemoryVehicleMarketRepository implements VehicleMarketRepository {
   }
 
   get size(): number { return this.rows.length; }
+
+  private readonly newPrices: VehicleNewPriceRecord[] = [];
+
+  async upsertNewPrices(records: readonly VehicleNewPriceRecord[]) {
+    let inserted = 0; let updated = 0;
+    for (const r of records) {
+      const idx = this.newPrices.findIndex(x => x.normalizedMake === r.normalizedMake && x.normalizedModel === r.normalizedModel && x.year === r.year
+        && x.normalizedTrim === r.normalizedTrim && x.country === r.country && x.sourceName === r.sourceName);
+      if (idx >= 0) { this.newPrices[idx] = r; updated++; } else { this.newPrices.push(r); inserted++; }
+    }
+    return { inserted, updated };
+  }
+
+  async findNewPrice(q: NewPriceQuery) {
+    return pickNewPrice(this.newPrices.filter(r => r.normalizedMake === q.makeKey && r.normalizedModel === q.modelKey && r.year === q.year && r.country === q.country), q.trimKey);
+  }
 }

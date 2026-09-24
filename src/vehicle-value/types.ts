@@ -54,7 +54,11 @@ export const RISK_FLAGS = [
   "BROADENED_COMPARABLE_SEARCH",
   "HEURISTIC_ADJUSTMENTS_USED",
   "PROVIDER_PARTIAL_FAILURE",
-  "OUTLIERS_REMOVED"
+  "OUTLIERS_REMOVED",
+  "VIN_MISMATCH",
+  "VIN_CHECK_DIGIT_INVALID",
+  "VIN_DECODE_UNAVAILABLE",
+  "SUBJECT_LISTING_EXCLUDED"
 ] as const;
 export type RiskFlag = (typeof RISK_FLAGS)[number];
 
@@ -94,6 +98,9 @@ export interface VehicleComparable {
   observedAt?: string;
   /** "listing" (asking price, default) or "sale" (a recorded transaction price). */
   priceType?: "listing" | "sale";
+  /** SHA-256 of the listing's VIN when the provider supplies one — used only to exclude the
+   *  subject vehicle's own listing from its comparables. The VIN itself is never kept. */
+  vinHash?: string;
 }
 
 /** What the valuation core asks a provider for: a deliberately broad pool (same make/model, a
@@ -128,6 +135,9 @@ export interface VehicleMarketProvider {
    *  I/O, so a provider that cannot serve a market is never called. */
   supports(query: { country: string; regionalCountries: readonly string[] }): boolean;
   searchComparables(query: VehicleMarketQuery, signal: AbortSignal): Promise<VehicleComparable[]>;
+  /** Lower ranks win when several providers return a new-price reference (verified official price
+   *  lists should outrank dealer-reported figures). Default 100. */
+  readonly newPriceRank?: number;
   /** Optional: a verified original/new price for the exact make/model/year/trim in a country. */
   getNewVehiclePrice?(query: { makeKey: string; modelKey: string; year: number; trimKey: string | null; country: string }, signal: AbortSignal): Promise<NewVehiclePriceReference | null>;
 }
@@ -147,4 +157,6 @@ export interface ProviderRun {
  *  rate is available; the valuation then omits that comparable and flags it. */
 export interface ExchangeRateProvider {
   convert(amount: number, from: string, to: string): number | null;
+  /** Where the from→to rate comes from (source id + the date the rate applies to), when known. */
+  describe?(from: string, to: string): { source: string; rateDate: string | null } | null;
 }

@@ -88,6 +88,7 @@ export function sanitizeComparable(raw: VehicleComparable): VehicleComparable | 
   if (sourceUrl) out.sourceUrl = sourceUrl;
   if (Number.isFinite(observedMs)) out.observedAt = new Date(observedMs).toISOString();
   out.priceType = raw.priceType === "sale" ? "sale" : "listing";
+  if (typeof raw.vinHash === "string" && /^[0-9a-f]{64}$/.test(raw.vinHash)) out.vinHash = raw.vinHash;
   return out;
 }
 
@@ -155,7 +156,7 @@ export async function gatherComparables(
   const { kept, removed } = deduplicate(sanitized);
 
   let newVehiclePrice: GatherResult["newVehiclePrice"] = null;
-  for (const provider of [...providers].sort((a, b) => a.id.localeCompare(b.id))) {
+  for (const provider of [...providers].sort((a, b) => (a.newPriceRank ?? 100) - (b.newPriceRank ?? 100) || a.id.localeCompare(b.id))) {
     if (!provider.getNewVehiclePrice) continue;
     try {
       const ref = await withTimeout(signal => provider.getNewVehiclePrice!(newPriceQuery, signal), options.timeoutMs);
