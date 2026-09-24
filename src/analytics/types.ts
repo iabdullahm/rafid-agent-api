@@ -25,7 +25,24 @@
 /** "l402" rows use the same funnel vocabulary as x402 (challenge / payment_failed /
  *  settlement_success) but a separate category, so the x402 funnel and every x402 aggregate stay
  *  exactly as they were. */
-export type AnalyticsCategory = "discovery" | "mcp" | "x402" | "l402" | "tool" | "preview";
+/** "funding" rows track the external payment-collection layer (src/billing/external/) — Stripe
+ *  Checkout and USDC-on-Base top-ups that FUND unified billing's prepaid credits from outside
+ *  this codebase. Deliberately a separate category from "tool"/"x402": a funding event is never a
+ *  capability invocation or an on-chain settlement, and must never be summed together with either
+ *  when computing revenue (see billing/external/types.ts's accounting-model doc comment). Credit
+ *  CONSUMPTION is intentionally NOT re-emitted here — it is already the existing "tool" category's
+ *  `channel: "api_credits"` invocation events (recordToolInvocation below), and duplicating it
+ *  under "funding" too would risk double-counting the same fact under two different labels; see
+ *  recorder.ts's recordFundingEvent() doc comment. */
+export type AnalyticsCategory = "discovery" | "mcp" | "x402" | "l402" | "tool" | "preview" | "funding";
+
+/** The external payment-collection funnel (spec section 25's literal list, minus
+ *  credits_consumed — see AnalyticsCategory's doc comment on "funding" for why). `amount`/
+ *  `currency` on these rows is always the USD amount actually funded/attempted, never a raw
+ *  on-chain atomic value or a card network amount. */
+export type FundingEventType =
+  | "stripe_checkout_created" | "stripe_payment_confirmed" | "stripe_payment_failed" | "stripe_refund"
+  | "usdc_topup_created" | "usdc_topup_confirmed" | "usdc_topup_failed" | "credits_funded";
 
 /** Discovery: always "hit" — which surface was hit is carried in `path`. */
 export type DiscoveryEventType = "hit";
@@ -64,7 +81,7 @@ export type PreviewEventType =
   | "preview_rate_limited" | "preview_cache_hit" | "preview_cache_miss"
   | "paid_capability_started" | "preview_converted";
 
-export type AnalyticsEventType = DiscoveryEventType | McpEventType | X402EventType | ToolEventType | PreviewEventType;
+export type AnalyticsEventType = DiscoveryEventType | McpEventType | X402EventType | ToolEventType | PreviewEventType | FundingEventType;
 
 /** How much of a tool invocation's result was backed by real (partner-fed/imported) data versus
  *  the honest demo/manual fallback — see src/analytics/dataSource.ts's classifyDataSource(),
@@ -150,6 +167,11 @@ export interface AnalyticsEvent {
   previewSeen?: boolean | null;
   /** preview_converted only — milliseconds between the qualifying preview and this paid execution. */
   conversionLatencyMs?: number | null;
+  /** funding category only — "stripe" | "usdc_base" (kept as a bare string literal union here,
+   *  never importing billing/external/types.ts's ExternalPaymentProvider, so this always-loaded
+   *  analytics module has no dependency on that optional, rarely-loaded billing layer). Optional
+   *  so every pre-existing call site keeps compiling unchanged, same as requestFingerprint above. */
+  provider?: "stripe" | "usdc_base" | null;
   createdAt: string;
 }
 

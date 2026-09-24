@@ -26,7 +26,10 @@ export const BILLING_RESPONSE_HEADERS = ["X-Rafid-Billing-Rail", "X-Rafid-Charge
 const run = (mw: RequestHandler, req: Request, res: Response) =>
   new Promise<void>((resolve, reject) => { void mw(req, res, (err?: unknown) => (err ? reject(err) : resolve())); });
 
-function fail(res: Response, status: number, code: string, message: string, extra: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
+/** The shared error envelope for every billing surface (unified billing here, and
+ *  src/billing/external/http.ts) — exported so a new billing route family never invents its own
+ *  error shape. */
+export function fail(res: Response, status: number, code: string, message: string, extra: Record<string, unknown> = {}, headers: Record<string, string> = {}) {
   for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
   res.status(status).json({ success: false, error: { code, message }, ...extra, meta: { requestId: res.locals.requestId } });
 }
@@ -170,8 +173,12 @@ export function createPaymentDispatcher(deps: {
   };
 }
 
-/** Authenticates `Authorization: Bearer raf_…` for the customer account endpoints. */
-function requireBillingKey(engine: BillingEngine): RequestHandler {
+/** Authenticates `Authorization: Bearer raf_…` for the customer account endpoints. Exported so
+ *  other billing surfaces built on the same BillingEngine/API-key system — currently
+ *  src/billing/external/http.ts's Stripe/USDC top-up routes — authenticate identically rather
+ *  than re-implementing header parsing, per this codebase's "reuse existing API customer system /
+ *  API keys" rule. */
+export function requireBillingKey(engine: BillingEngine): RequestHandler {
   return async (req, res, next) => {
     try {
       const alt = req.header("x-rafid-api-key");

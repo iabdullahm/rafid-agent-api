@@ -141,6 +141,8 @@ main { max-width:1400px; margin:0 auto; padding:22px 26px 72px; }
 }
 .kpi:hover { transform:translateY(-1px); border-color:var(--border-soft); }
 .kpi.glow { box-shadow:var(--glow-blue); }
+.kpi.warn { border-color:#f5a623; }
+.kpi.warn .kpi-value { color:#f5a623; }
 .kpi-value { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
 .kpi-label { color:var(--muted); font-size:11.5px; margin-top:2px; }
 .kpi-sub { color:var(--muted-dim); font-size:10.5px; margin-top:4px; }
@@ -219,6 +221,8 @@ tr.clickable:hover td { background:var(--panel2); }
 .error-banner { background:var(--red-soft); border:1px solid #4a1f1f; color:var(--red); border-radius:8px; padding:12px 14px; margin-bottom:14px; font-size:13px; }
 tr.row-highlight { background:rgba(52,224,161,0.04); }
 tr.row-highlight td:first-child { box-shadow: inset 3px 0 0 #1d4a30; }
+tr.row-review { background:rgba(245,166,35,0.06); }
+tr.row-review td:first-child { box-shadow: inset 3px 0 0 #7a5010; }
 tr.row-new { animation: rowFlashIn .9s ease-out; }
 @keyframes rowFlashIn { 0% { background:rgba(52,224,161,0.22); } 100% { background:transparent; } }
 tr.row-new.failed { animation-name: rowFlashInRed; }
@@ -353,7 +357,9 @@ const CLIENT_SCRIPT = `
 
   var CHIP_CLASS = {
     settlement_succeeded: "chip-green", settlement_failed: "chip-red", payment_verified: "chip-blue",
-    Enabled: "chip-green", Disabled: "chip-gray", Active: "chip-green", Unknown: "chip-gray"
+    Enabled: "chip-green", Disabled: "chip-gray", Active: "chip-green", Unknown: "chip-gray",
+    confirmed: "chip-green", created: "chip-blue", pending: "chip-blue", failed: "chip-red",
+    refunded: "chip-gray", requires_review: "chip-red", expired: "chip-gray"
   };
   var chip = function (label) {
     if (label === null || label === undefined || label === "") return '<span class="chip chip-gray">\u2014</span>';
@@ -539,10 +545,53 @@ const CLIENT_SCRIPT = `
     cards.push('<div class="kpi glow"><div class="kpi-value">' + (ov.collectedRevenueUsd !== null ? fmtAmount(ov.collectedRevenueUsd) + " USD" : "—") + '</div><div class="kpi-label">Collected Revenue</div><div class="kpi-spark">' + sparklineSvg(spark, "#34e0a1") + "</div></div>");
     cards.push('<div class="kpi"><div class="kpi-value">' + fmtAmount(ov.pendingInternalBillingRevenueUsd) + ' USD</div><div class="kpi-label">Pending / Internal Billing Revenue</div><div class="kpi-spark">' + sparklineSvg(pendingSpark, "#f5a623") + "</div></div>");
     cards.push('<div class="kpi"><div class="kpi-value">' + (ov.onChainSettledRevenueUsd !== null ? fmtAmount(ov.onChainSettledRevenueUsd) + " USD" : "—") + '</div><div class="kpi-label">On-chain Settled Revenue</div><div class="kpi-sub">x402 / USDC</div><div class="kpi-spark">' + sparklineSvg(onChainSpark, "#2f6bff") + "</div></div>");
-    cards.push('<div class="kpi"><div class="kpi-value">' + (ov.payoutAvailableUsd !== null ? fmtAmount(ov.payoutAvailableUsd) + " USD" : "—") + '</div><div class="kpi-label">Payout Available</div><div class="kpi-sub">on-chain settled funds only</div></div>');
+    cards.push('<div class="kpi"><div class="kpi-value">' + (ov.payoutAvailableUsd !== null ? fmtAmount(ov.payoutAvailableUsd) + " USD" : "—") + '</div><div class="kpi-label">Payout Available</div><div class="kpi-sub">on-chain settled funds only &mdash; never includes Stripe</div></div>');
+    cards.push('<div class="kpi"><div class="kpi-value">' + fmtAmount(ov.externalFundingCollectedUsd) + ' USD</div><div class="kpi-label">External Funding Collected</div><div class="kpi-sub">Stripe + USDC top-ups &mdash; a liability, not revenue</div></div>');
+    cards.push('<div class="kpi"><div class="kpi-value">' + fmtAmount(ov.outstandingPrepaidBalanceUsd) + ' USD</div><div class="kpi-label">Outstanding Customer Credit Balance</div><div class="kpi-sub">current, all-time &mdash; money still owed to customers</div></div>');
     el.innerHTML = cards.join("");
     var note = document.getElementById("revenue-overview-mixed-note");
     note.style.display = ov.onChainSettledRevenueUsd === null ? "block" : "none";
+  }
+
+  // =============================================================================================
+  // Collection & Funding — Stripe Checkout + USDC-on-Base top-ups that FUND prepaid credits from
+  // outside this codebase. Deliberately never summed with Revenue Overview's earned-revenue
+  // figures above (see billing/external/types.ts's accounting model): funding is a liability,
+  // consumption is revenue, and this panel exists to keep them visibly, permanently separate.
+  // =============================================================================================
+  function renderCollectionFunding(data) {
+    var el = document.getElementById("kpi-collection-funding");
+    var cf = data.collectionFunding;
+    var cards = [];
+    cards.push('<div class="kpi glow"><div class="kpi-value">' + fmtAmount(cf.stripeCollectedUsd) + ' USD</div><div class="kpi-label">Stripe Collected</div><div class="kpi-sub">' + fmtNum(cf.byProvider.stripe.confirmedCount) + ' confirmed &mdash; follows Stripe’s own payout/bank flow</div></div>');
+    cards.push('<div class="kpi glow"><div class="kpi-value">' + fmtAmount(cf.usdcTopupsConfirmedUsd) + ' USD</div><div class="kpi-label">USDC Top-ups Confirmed</div><div class="kpi-sub">' + fmtNum(cf.byProvider.usdcBase.confirmedCount) + ' confirmed on-chain (Base)</div></div>');
+    cards.push('<div class="kpi"><div class="kpi-value">' + fmtNum(cf.pendingExternalPaymentsCount) + '</div><div class="kpi-label">Pending External Payments</div><div class="kpi-sub">created / awaiting confirmation</div></div>');
+    cards.push('<div class="kpi' + (cf.refundedOrReviewCount > 0 ? " warn" : "") + '"><div class="kpi-value">' + fmtNum(cf.refundedOrReviewCount) + '</div><div class="kpi-label">Refunded / Review</div></div>');
+    cards.push('<div class="kpi"><div class="kpi-value">' + fmtAmount(cf.prepaidOutstandingBalanceUsd) + ' USD</div><div class="kpi-label">Prepaid Outstanding Balance</div><div class="kpi-sub">current, all-time</div></div>');
+    el.innerHTML = cards.join("");
+  }
+
+  // =============================================================================================
+  // External Payments / Top-up History (spec section 19) — minimal admin table: provider,
+  // customer, amount, status, timestamp, reference, review flag. Reuses this same session-cookie-
+  // protected internal dashboard, never a separate finance ERP.
+  // =============================================================================================
+  function renderExternalPaymentsTable(data) {
+    var el = document.getElementById("external-payments-table");
+    var rows = data.externalPaymentsTable || [];
+    el.innerHTML = table(
+      [
+        { header: "Time", render: function (r) { return fmtDate(r.time); } },
+        { header: "Provider", render: function (r) { return esc(r.provider === "usdc_base" ? "USDC (Base)" : "Stripe"); } },
+        { header: "Customer", render: function (r) { return '<code class="hash">' + esc(r.accountId) + "</code>"; } },
+        { header: "Amount", right: true, render: function (r) { return fmtAmount(r.amountUsd) + " USD"; } },
+        { header: "Status", render: function (r) { return chip(r.status); } },
+        { header: "Reference", render: function (r) { return r.reference ? '<code class="hash" title="' + esc(r.reference) + '">' + esc(r.reference.length > 18 ? r.reference.slice(0, 8) + "…" + r.reference.slice(-6) : r.reference) + "</code>" : "—"; } }
+      ],
+      rows,
+      "No external payments recorded in this period.",
+      function (r) { return r.needsReview ? ' class="row-review"' : ""; }
+    );
   }
 
   // =============================================================================================
@@ -1096,6 +1145,8 @@ const CLIENT_SCRIPT = `
     renderAgents(data);
     renderActivityFeed(data);
     renderRevenueOverview(data);
+    renderCollectionFunding(data);
+    renderExternalPaymentsTable(data);
     renderRevenueKpis(data);
     renderTrend(data);
     renderRevenueByTool(data);
@@ -1288,9 +1339,17 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
 
       <div class="panel">
         <h2>Revenue Overview</h2>
-        <p class="panel-desc">Collected Revenue and Payout Available combine both revenue rails this deployment settles &mdash; x402 on-chain (USDC, treated 1:1 with USD) and unified billing (API credits &amp; subscriptions, always USD). Pending / Internal Billing Revenue is labeled "pending" because, unlike an on-chain settlement, it is never independently confirmed outside this application's own ledger. Payout Available reports only the on-chain settled total: there is no payout/withdrawal system in this codebase, so internal billing revenue is not counted as available to pay out.</p>
+        <p class="panel-desc">Collected Revenue and Payout Available combine both EARNED-revenue rails this deployment settles &mdash; x402 on-chain (USDC, treated 1:1 with USD) and unified billing's prepaid USAGE revenue (API credits &amp; subscriptions, always USD; consumption only, never top-ups). Pending / Internal Billing Revenue is labeled "pending" because, unlike an on-chain settlement, it is never independently confirmed outside this application's own ledger. Payout Available reports only the on-chain settled total: there is no payout/withdrawal system for on-chain funds in this codebase, and Stripe-collected money follows Stripe's own separate payout/bank flow (see the Collection &amp; Funding panel below), so neither internal billing revenue nor Stripe collections are counted as available to pay out. External Funding Collected and Outstanding Customer Credit Balance are shown here too, but as their own distinct figures &mdash; a top-up is a LIABILITY the moment it's collected, not revenue, and is never added into Collected Revenue or Payout Available above.</p>
         <div id="kpi-revenue-overview" class="kpi-grid"></div>
         <p id="revenue-overview-mixed-note" class="empty" style="display:none">Settled x402 payments this period span more than one currency (or a non-USDC asset) &mdash; Collected Revenue and Payout Available can't be safely combined into one USD figure; see the Revenue panel's per-currency breakdown below.</p>
+      </div>
+
+      <div class="panel">
+        <h2>Collection &amp; Funding</h2>
+        <p class="panel-desc">Stripe Checkout and USDC-on-Base top-ups (src/billing/external/) &mdash; external payments that FUND prepaid credits from outside this application. Every figure here is FUNDING, never revenue: it is money collected from a customer that Rafid now owes back to them as spendable balance, until they consume it (which shows up in Unified Billing Revenue and Revenue Overview instead, never here). Stripe Collected follows Stripe's own payout/bank flow and is never implied to be on-chain or in this deployment's wallet; USDC Top-ups Confirmed genuinely are on-chain collected funds, independently verified before being counted.</p>
+        <div id="kpi-collection-funding" class="kpi-grid"></div>
+        <h3 style="margin:18px 0 8px;font-size:13px;color:var(--muted)">External Payments / Top-up History</h3>
+        <div id="external-payments-table"></div>
       </div>
 
       <div class="panel">

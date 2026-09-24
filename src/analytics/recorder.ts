@@ -1,5 +1,5 @@
 import type { Request } from "express";
-import type { AnalyticsRepository, AnalyticsEventType, AnalyticsChannel, DataSource, McpEventType, X402EventType } from "./types.js";
+import type { AnalyticsRepository, AnalyticsEventType, AnalyticsChannel, DataSource, FundingEventType, McpEventType, X402EventType } from "./types.js";
 import { extractClientContext } from "./attribution.js";
 import type { RequestClientContext } from "./context.js";
 
@@ -180,6 +180,22 @@ export function recordL402Event(
  *  fallback usage, success rate, p50/p95 latency). `client` is a full RequestClientContext for
  *  REST/x402 (real `req` access) or mcpClientContext's current value for MCP (see
  *  currentMcpClientContext()'s doc comment). */
+/** src/billing/external/service.ts's own analytics events (Stripe/USDC top-up funnel — see
+ *  types.ts's FundingEventType doc comment) adapted onto AnalyticsRepository. Called from
+ *  src/api/app.ts's `onEvent` wiring, not from inside billing/external/ itself — that module
+ *  stays free of an analytics-package dependency, exactly like billing/mpp/index.ts's `audit`
+ *  callback keeps that module free of a logging dependency. No RequestClientContext is attached:
+ *  a funding event may originate from a server-to-server Stripe webhook with no real end-user
+ *  request to attribute it to, so every client field is honestly null rather than guessed. */
+export function recordFundingEvent(repository: AnalyticsRepository, args: { eventType: FundingEventType; provider: "stripe" | "usdc_base"; success: boolean; amountUSD: number | null }): void {
+  fireAndForget(repository, {
+    category: "funding", eventType: args.eventType, path: null, toolName: null, channel: null,
+    success: args.success, durationMs: null, amount: args.amountUSD, currency: args.amountUSD === null ? null : "USD",
+    txHash: null, dataSource: null, provider: args.provider,
+    clientHash: null, userAgent: null, referer: null, clientName: null
+  });
+}
+
 export function recordToolInvocation(
   repository: AnalyticsRepository,
   args: { toolName: string; channel: AnalyticsChannel; success: boolean; durationMs: number; dataSource: DataSource | null; client: RequestClientContext }

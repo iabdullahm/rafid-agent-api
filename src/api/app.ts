@@ -41,7 +41,7 @@ import { getAnalyticsDatabaseUrl, getAnalyticsInternalApiKey } from "../analytic
 import { createAnalyticsRoutes } from "./analyticsRoutes.js";
 import { classifyDataSource } from "../analytics/dataSource.js";
 import { extractClientContext } from "../analytics/attribution.js";
-import { recordDiscoveryHit, recordToolInvocation, recordX402Event, classifyX402Outcome, decodeX402SettlementHeader } from "../analytics/recorder.js";
+import { recordDiscoveryHit, recordFundingEvent, recordToolInvocation, recordX402Event, classifyX402Outcome, decodeX402SettlementHeader } from "../analytics/recorder.js";
 import type { RevenueLedger } from "../revenue/types.js";
 import { MemoryRevenueLedger } from "../revenue/memoryLedger.js";
 import { PostgresRevenueLedger } from "../db/revenueStore.js";
@@ -58,6 +58,7 @@ import { buildL402SettlementRecord } from "../billing/l402/settlement.js";
 import { recordL402Event } from "../analytics/recorder.js";
 import { createMppMcpHandler, mppMcpPath } from "../billing/mpp/mcp.js";
 import { BillingEngine, MemoryBillingStore, PostgresBillingStore, BILLING_RESPONSE_HEADERS, buildPaymentMethods, createAccountRoutes, createBillingAdminRoutes, createCreditsMcpHandler, createPaymentDispatcher, disabledBillingConfig, mcpCreditsPath, paymentMethodsPath, type BillingStore } from "../billing/unified/index.js";
+import { ExternalPaymentsService, MemoryExternalPaymentStore, PostgresExternalPaymentStore, RealStripeClient, buildJsonRpcCaller, createExternalPaymentsAdminRoutes, createExternalPaymentsRoutes, disabledExternalPaymentsConfig, type ExternalPaymentStore, type JsonRpcCall, type StripeClient } from "../billing/external/index.js";
 import { buildMppService, buildMppInfo, buildMppStatus, createMppDisabledRoutes, createMppRoutes, createMppSessionCreateLimiter, mppBasePath, type MppAuditSink, type MppProvider, type MppSessionRepository, type MppChargeRedemptionStore, type MppKv, type MppService } from "../billing/mpp/index.js";
 /** The largest per-capability JSON body limit (bytes → body-parser string), for shared endpoints. */
 function maxCapabilityBodyLimit(): string {
@@ -67,7 +68,7 @@ function maxCapabilityBodyLimit(): string {
 }
 function formatBytes(n: number): string { return n >= 1024 * 1024 ? `${Math.round(n / 1024 / 1024 * 10) / 10}mb` : `${Math.round(n / 1024)}kb`; }
 
-export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number; mppProvider?: MppProvider; mppSessions?: MppSessionRepository; mppRedemptions?: MppChargeRedemptionStore; mppKv?: MppKv; mppAudit?: MppAuditSink; mppNow?: () => Date; billingStore?: BillingStore; billingNow?: () => Date; previewCache?: PreviewCache; previewConversionIndex?: PreviewConversionIndex } = {}) {
+export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number; mppProvider?: MppProvider; mppSessions?: MppSessionRepository; mppRedemptions?: MppChargeRedemptionStore; mppKv?: MppKv; mppAudit?: MppAuditSink; mppNow?: () => Date; billingStore?: BillingStore; billingNow?: () => Date; previewCache?: PreviewCache; previewConversionIndex?: PreviewConversionIndex; externalPaymentStore?: ExternalPaymentStore; externalPaymentsNow?: () => Date; stripeClient?: StripeClient; usdcRpcCall?: JsonRpcCall } = {}) {
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
   const store = config.authMode === "postgres" ? options.store : undefined;
   const app = express();
@@ -106,6 +107,30 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         store: options.billingStore ?? (billingConfig.databaseUrl ? new PostgresBillingStore(billingConfig.databaseUrl) : new MemoryBillingStore()),
         priceUsd: tool => billingService.getToolPrice(tool as CapabilityName),
         now: options.billingNow
+      })
+    : null;
+  // External payment collection (src/billing/external/): Stripe Checkout + USDC-on-Base top-ups
+  // that FUND unified billing's prepaid credits from outside this codebase — never a replacement
+  // for x402/L402/MPP, never a second credit ledger (see external/types.ts's accounting-model doc
+  // comment). Constructed only when unified billing's prepaid credits exist to fund AND at least
+  // one collection rail is configured; otherwise createExternalPaymentsRoutes/
+  // createExternalPaymentsAdminRoutes answer a consistent 503 below, exactly like unified
+  // billing's own admin routes do until BILLING_ADMIN_SECRET is set.
+  const externalPaymentsConfig = config.externalPayments ?? disabledExternalPaymentsConfig;
+  const externalPaymentsRailsEnabled = externalPaymentsConfig.stripe.enabled || externalPaymentsConfig.usdc.enabled;
+  const externalPaymentStore: ExternalPaymentStore | null = billingEngine && externalPaymentsRailsEnabled
+    ? (options.externalPaymentStore ?? (externalPaymentsConfig.databaseUrl ? new PostgresExternalPaymentStore(externalPaymentsConfig.databaseUrl) : new MemoryExternalPaymentStore()))
+    : null;
+  const stripeClient: StripeClient | null = externalPaymentsConfig.stripe.enabled
+    ? (options.stripeClient ?? new RealStripeClient(externalPaymentsConfig.stripe.secretKey!))
+    : null;
+  const usdcRpcCall: JsonRpcCall | null = externalPaymentsConfig.usdc.enabled
+    ? (options.usdcRpcCall ?? buildJsonRpcCaller(externalPaymentsConfig.usdc.rpcUrl!))
+    : null;
+  const externalPaymentsService = billingEngine && externalPaymentStore
+    ? new ExternalPaymentsService({
+        store: externalPaymentStore, engine: billingEngine, config: externalPaymentsConfig, stripe: stripeClient, rpcCall: usdcRpcCall, now: options.externalPaymentsNow,
+        onEvent: event => recordFundingEvent(analyticsRepository, event)
       })
     : null;
   // Free Preview (src/preview/): a bounded in-memory cache and a bounded in-memory
@@ -547,6 +572,19 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   const billingLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   if (billingEngine) app.use(createAccountRoutes({ engine: billingEngine, limiter: billingLimiter }));
   app.use(createBillingAdminRoutes({ engine: billingEngine, adminSecret: billingConfig.adminSecret, limiter: billingLimiter }));
+  // External payment collection (Stripe Checkout / USDC on Base — src/billing/external/http.ts):
+  // each of the three money-moving actions the spec calls out (Section 22) gets its OWN rate
+  // limiter instance, exactly like x402/l402/mpp/discovery above each get their own budget, so a
+  // burst against one (e.g. repeated USDC confirmation polling) can never exhaust another's.
+  const stripeCheckoutLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
+  const usdcTopupLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
+  const usdcConfirmLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
+  const stripeWebhookLimiter = config.rateLimitEnabled ? createRateLimiter({ windowMs: rateLimitOptions.windowMs, max: Math.max(rateLimitOptions.max, 500) }) : disabledRateLimiter;
+  app.use(createExternalPaymentsRoutes({
+    engine: billingEngine, service: externalPaymentsService,
+    stripeCheckoutLimiter, usdcTopupLimiter, usdcConfirmLimiter, balanceLimiter: billingLimiter, webhookLimiter: stripeWebhookLimiter
+  }));
+  app.use(createExternalPaymentsAdminRoutes({ service: externalPaymentsService, engine: billingEngine, adminSecret: billingConfig.adminSecret, limiter: billingLimiter, usdcNetwork: externalPaymentsConfig.usdc.network, usdcAsset: "USDC" }));
   if (billingEngine && config.mcpRemoteEnabled) {
     app.post(mcpCreditsPath, mcpLimiter, express.json({ limit: maxCapabilityBodyLimit() }), createCreditsMcpHandler({
       engine: billingEngine, config, capabilities,
@@ -617,7 +655,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // in the `capabilities` array; never reachable from /agent.json, MCP, the tool catalog,
   // discovery or the x402 route family; never a public dashboard.
   if (config.adminEnabled) {
-    app.use(createDashboardRoutes({ config, analyticsRepository, revenueLedger, billingService, billingEngine }));
+    app.use(createDashboardRoutes({ config, analyticsRepository, revenueLedger, billingService, billingEngine, externalPaymentsService }));
   }
   // Internal analytics API (discovery/MCP/x402/tool-usage — see analyticsRoutes.ts's doc
   // comment). Always mounted, unlike the Partner Data Feed/Admin routes above: recording itself

@@ -95,13 +95,13 @@ export class PostgresBillingStore implements BillingStore {
   }
   async listApiKeys(accountId: string) { return (await this.q("SELECT * FROM billing_api_keys WHERE account_id=$1 ORDER BY created_at", [accountId])).rows.map(toKey); }
 
-  async applyCredit(input: { accountId: string; amountMicros: number; type: "credit" | "adjustment"; reason: string; externalTransactionId?: string | null; now: Date }) {
-    if (!Number.isSafeInteger(input.amountMicros) || input.amountMicros === 0 || (input.type === "credit" && input.amountMicros < 0)) throw new BillingStoreError("invalid_amount", "Amount must be a non-zero integer number of micros (positive for a credit)");
+  async applyCredit(input: { accountId: string; amountMicros: number; type: "credit" | "adjustment" | "credit_purchase"; reason: string; externalTransactionId?: string | null; now: Date }) {
+    if (!Number.isSafeInteger(input.amountMicros) || input.amountMicros === 0 || ((input.type === "credit" || input.type === "credit_purchase") && input.amountMicros < 0)) throw new BillingStoreError("invalid_amount", "Amount must be a non-zero integer number of micros (positive for a credit)");
     return this.tx(async c => {
       const a = await c.query("SELECT * FROM billing_accounts WHERE id=$1 FOR UPDATE", [input.accountId]);
       if (!a.rows[0]) throw new BillingStoreError("account_not_found", "Billing account not found");
       if (input.externalTransactionId) {
-        const dup = await c.query("SELECT * FROM billing_ledger WHERE account_id=$1 AND external_transaction_id=$2 AND type IN ('credit','adjustment')", [input.accountId, input.externalTransactionId]);
+        const dup = await c.query("SELECT * FROM billing_ledger WHERE account_id=$1 AND external_transaction_id=$2 AND type IN ('credit','adjustment','credit_purchase')", [input.accountId, input.externalTransactionId]);
         if (dup.rows[0]) return { entry: toEntry(dup.rows[0]), balanceMicros: microsFromDb(a.rows[0].credit_balance_micros), duplicate: true };
       }
       const u = await c.query("UPDATE billing_accounts SET credit_balance_micros = credit_balance_micros + $2, updated_at=$3 WHERE id=$1 AND credit_balance_micros + $2 >= 0 RETURNING credit_balance_micros", [input.accountId, input.amountMicros, input.now]);
@@ -242,6 +242,24 @@ export class PostgresBillingStore implements BillingStore {
       ? await this.q("SELECT * FROM billing_ledger WHERE status='settled' AND type IN ('debit','subscription_usage') AND tool_name IS NOT NULL AND created_at >= $1 ORDER BY created_at DESC LIMIT $2", [since, cappedLimit])
       : await this.q("SELECT * FROM billing_ledger WHERE status='settled' AND type IN ('debit','subscription_usage') AND tool_name IS NOT NULL ORDER BY created_at DESC LIMIT $1", [cappedLimit]);
     return r.rows.map(toEntry);
+  }
+
+  async listCreditPurchases(since: Date | null, limit = MAX_QUERY_LEDGER_ENTRIES): Promise<LedgerEntry[]> {
+    const cappedLimit = Math.max(1, Math.min(MAX_QUERY_LEDGER_ENTRIES, Math.trunc(limit)));
+    const r = since
+      ? await this.q("SELECT * FROM billing_ledger WHERE type='credit_purchase' AND created_at >= $1 ORDER BY created_at DESC LIMIT $2", [since, cappedLimit])
+      : await this.q("SELECT * FROM billing_ledger WHERE type='credit_purchase' ORDER BY created_at DESC LIMIT $1", [cappedLimit]);
+    return r.rows.map(toEntry);
+  }
+
+  async pendingReservedMicros(accountId: string): Promise<number> {
+    const r = await this.q("SELECT COALESCE(sum(-amount_micros), 0)::bigint AS pending FROM billing_ledger WHERE account_id=$1 AND status='pending'", [accountId]);
+    return microsFromDb(r.rows[0].pending);
+  }
+
+  async totalOutstandingBalanceMicros(): Promise<number> {
+    const r = await this.q("SELECT COALESCE(sum(credit_balance_micros), 0)::bigint AS total FROM billing_accounts");
+    return microsFromDb(r.rows[0].total);
   }
 
   private async insertEntry(c: PoolClient, e: Omit<LedgerEntry, "id" | "currency" | "createdAt" | "updatedAt">, now: Date): Promise<LedgerEntry> {

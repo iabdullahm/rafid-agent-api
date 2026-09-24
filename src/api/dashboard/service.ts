@@ -23,6 +23,8 @@ import {
   summarizeUnifiedBillingRevenue, summarizeUnifiedBillingRevenueByTool,
   type UnifiedBillingToolRow
 } from "../../billing/unified/reporting.js";
+import type { ExternalPaymentsService } from "../../billing/external/service.js";
+import type { ExternalPayment } from "../../billing/external/types.js";
 
 /**
  * Internal dashboard BFF (backend-for-frontend) business logic (spec sections 2-9, 11, 14).
@@ -897,11 +899,24 @@ export interface RevenueOverview {
    *  onChainSettledRevenueUsd is null (see its own doc comment) — never silently combined with a
    *  guessed on-chain figure. */
   collectedRevenueUsd: number | null;
-  /** See this section's doc comment for why this equals onChainSettledRevenueUsd today. */
+  /** See this section's doc comment for why this equals onChainSettledRevenueUsd today. Section
+   *  17: this deliberately EXCLUDES externalFundingCollectedUsd below — Stripe-collected money
+   *  follows Stripe's own payout/bank flow and is never in this deployment's on-chain wallet, so
+   *  it must never be implied to be "available" the way a confirmed on-chain settlement is. */
   payoutAvailableUsd: number | null;
+  /** = collectionFunding.stripeCollectedUsd + collectionFunding.usdcTopupsConfirmedUsd (spec
+   *  section 16's "External Funding Collected") — money that reached Rafid via a top-up, this
+   *  window. A LIABILITY figure (see billing/external/types.ts's accounting model), never summed
+   *  with onChainSettledRevenueUsd/pendingInternalBillingRevenueUsd/collectedRevenueUsd above,
+   *  which are all genuine EARNED revenue. 0 when both rails are disabled or unused this window. */
+  externalFundingCollectedUsd: number;
+  /** = collectionFunding.prepaidOutstandingBalanceUsd — the CURRENT (never windowed) sum of every
+   *  billing account's spendable balance; spec section 16's "Outstanding Customer Credit
+   *  Balance". */
+  outstandingPrepaidBalanceUsd: number;
 }
 
-function buildRevenueOverview(revenue: RevenueSummary, unifiedBillingRevenue: UnifiedBillingRevenueSummary): RevenueOverview {
+function buildRevenueOverview(revenue: RevenueSummary, unifiedBillingRevenue: UnifiedBillingRevenueSummary, collectionFunding: CollectionFunding): RevenueOverview {
   const currencies = Object.keys(revenue.revenueByCurrency);
   const onChainSettledRevenueUsd: number | null =
     revenue.settledPayments === 0 || currencies.length === 0 ? 0
@@ -915,7 +930,9 @@ function buildRevenueOverview(revenue: RevenueSummary, unifiedBillingRevenue: Un
     onChainSettledRevenueUsd,
     pendingInternalBillingRevenueUsd,
     collectedRevenueUsd,
-    payoutAvailableUsd: onChainSettledRevenueUsd
+    payoutAvailableUsd: onChainSettledRevenueUsd,
+    externalFundingCollectedUsd: round(collectionFunding.stripeCollectedUsd + collectionFunding.usdcTopupsConfirmedUsd, 6),
+    outstandingPrepaidBalanceUsd: collectionFunding.prepaidOutstandingBalanceUsd
   };
 }
 
@@ -940,6 +957,90 @@ function buildOnChainSettledRevenueSparkline(settlements: readonly RevenueSettle
     }
     return round(sum, 6);
   });
+}
+
+// -----------------------------------------------------------------------------------------------
+// Collection & Funding (dashboard section added 2026-09-24, spec section 16) — visibility into the
+// external payment-collection layer (src/billing/external/): Stripe Checkout and USDC-on-Base
+// top-ups that FUND unified billing's prepaid credits from OUTSIDE this codebase. Every figure
+// here comes straight from ExternalPaymentsService.listExternalPayments() (this layer's own
+// system-of-record — never a second accounting pass) plus BillingStore.
+// totalOutstandingBalanceMicros() for the one figure that is a live snapshot rather than a
+// windowed sum. Zeroed out (never fabricated) when externalPaymentsService is null (Stripe/USDC
+// both disabled for this deployment).
+//
+// CRITICAL — see billing/external/types.ts's ACCOUNTING MODEL doc comment: "Stripe Collected" and
+// "USDC Top-ups Confirmed" are FUNDING (money that reached Rafid but is a liability, not revenue).
+// "Prepaid Outstanding Balance" is what Rafid still owes customers as usable credit. NEITHER of
+// these is ever summed with revenue.grossRevenueUSD or unifiedBillingRevenue.totalUsd anywhere in
+// this file — the worked example from the spec (Collected $100, Consumed $22, Outstanding $78,
+// x402 Settled $4.50) is exactly what renderRevenueOverview()/renderCollectionFunding() (page.ts)
+// display side by side, never combined into one number.
+// -----------------------------------------------------------------------------------------------
+
+export interface CollectionFunding {
+  /** Confirmed Stripe checkouts' amount, this window — money collected via Stripe, which follows
+   *  Stripe's OWN payout/bank flow (spec section 17) and is never implied to be "in the wallet". */
+  stripeCollectedUsd: number;
+  /** Confirmed USDC-on-Base top-ups' amount, this window — independently verified on-chain (see
+   *  usdcTopup.ts's verifyUsdcTransfer()) transfers to this deployment's configured receiving
+   *  wallet. Unlike Stripe, this genuinely is on-chain collected funds (section 17). */
+  usdcTopupsConfirmedUsd: number;
+  /** External payment rows still in flight this window (status "created" or "pending") — created
+   *  but not yet independently confirmed, so NOT counted in either figure above. */
+  pendingExternalPaymentsCount: number;
+  /** External payment rows requiring human attention this window (status "refunded" or
+   *  "requires_review" — see service.ts's handleStripeRefund() doc comment for what routes a row
+   *  to "requires_review" instead of a clean reversal). */
+  refundedOrReviewCount: number;
+  /** = BillingStore.totalOutstandingBalanceMicros() / 1e6 — the CURRENT sum of every billing
+   *  account's spendable balance, across ALL time (never windowed by `period`; a balance is a
+   *  stock, not a flow — see that method's own doc comment). This is the true "money Rafid still
+   *  owes its customers" figure, not a derived (funding − consumption) approximation, since a
+   *  balance can also move via admin-granted credit/adjustment rows this layer never touches. */
+  prepaidOutstandingBalanceUsd: number;
+  byProvider: {
+    stripe: { confirmedUsd: number; confirmedCount: number };
+    usdcBase: { confirmedUsd: number; confirmedCount: number };
+  };
+}
+
+function buildCollectionFunding(payments: readonly ExternalPayment[], totalOutstandingBalanceMicros: number): CollectionFunding {
+  const sumUsd = (rows: readonly ExternalPayment[]) => round(rows.reduce((sum, p) => sum + p.amountAtomic, 0) / 1_000_000, 6);
+  const confirmedStripe = payments.filter(p => p.provider === "stripe" && p.status === "confirmed");
+  const confirmedUsdc = payments.filter(p => p.provider === "usdc_base" && p.status === "confirmed");
+  return {
+    stripeCollectedUsd: sumUsd(confirmedStripe),
+    usdcTopupsConfirmedUsd: sumUsd(confirmedUsdc),
+    pendingExternalPaymentsCount: payments.filter(p => p.status === "created" || p.status === "pending").length,
+    refundedOrReviewCount: payments.filter(p => p.status === "refunded" || p.status === "requires_review").length,
+    prepaidOutstandingBalanceUsd: round(totalOutstandingBalanceMicros / 1_000_000, 6),
+    byProvider: {
+      stripe: { confirmedUsd: sumUsd(confirmedStripe), confirmedCount: confirmedStripe.length },
+      usdcBase: { confirmedUsd: sumUsd(confirmedUsdc), confirmedCount: confirmedUsdc.length }
+    }
+  };
+}
+
+/** Spec section 19's minimal admin table: provider, customer, amount, status, timestamp, tx
+ *  hash/Stripe session reference, refund/review flag — reusing this same session-cookie-
+ *  protected internal dashboard (never a separate finance ERP), sourced from the identical
+ *  ExternalPayment rows CollectionFunding is built from. */
+export interface ExternalPaymentRow {
+  time: string;
+  provider: ExternalPayment["provider"];
+  accountId: string;
+  amountUsd: number;
+  status: ExternalPayment["status"];
+  reference: string | null;
+  needsReview: boolean;
+}
+
+function buildExternalPaymentsTable(payments: readonly ExternalPayment[]): ExternalPaymentRow[] {
+  return payments.slice(0, MAX_TRANSACTIONS_SHOWN).map(p => ({
+    time: p.createdAt, provider: p.provider, accountId: p.accountId, amountUsd: round(p.amountAtomic / 1_000_000, 6),
+    status: p.status, reference: p.transactionHash ?? p.providerPaymentId, needsReview: p.status === "requires_review" || p.status === "refunded"
+  }));
 }
 
 export interface TransactionRow {
@@ -1001,9 +1102,14 @@ export interface DashboardData {
     onChainSettledRevenue: number[];
     collectedRevenue: number[];
   };
-  /** Collected / Pending-Internal / On-chain Settled / Payout Available — see RevenueOverview's
-   *  own doc comment. */
+  /** Collected / Pending-Internal / On-chain Settled / Payout Available / External Funding
+   *  Collected / Outstanding Prepaid Balance — see RevenueOverview's own doc comment. */
   revenueOverview: RevenueOverview;
+  /** "COLLECTION & FUNDING" section (spec section 16) — see CollectionFunding's own doc comment. */
+  collectionFunding: CollectionFunding;
+  /** Recent external payments / top-up history (spec section 19) — see ExternalPaymentRow's own
+   *  doc comment. Newest first, capped at MAX_TRANSACTIONS_SHOWN like `transactions` above. */
+  externalPaymentsTable: ExternalPaymentRow[];
 }
 
 export interface DashboardServiceOptions {
@@ -1016,6 +1122,11 @@ export interface DashboardServiceOptions {
    *  see app.ts), in which case unifiedBillingRevenue reports `enabled: false` and every number
    *  zero rather than omitting the section. */
   billingEngine: BillingEngine | null;
+  /** External payment collection (Stripe/USDC top-ups — src/billing/external/). null when this
+   *  deployment has neither rail configured (createApp()'s own externalPaymentsService variable
+   *  is exactly this — see app.ts), in which case collectionFunding/revenueOverview's new fields
+   *  report all zeros rather than omitting the section, same convention as billingEngine above. */
+  externalPaymentsService: ExternalPaymentsService | null;
 }
 
 const MAX_TRANSACTIONS_SHOWN = 20;
@@ -1029,10 +1140,12 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   const revenueSince = periodSince(period, now);
   const eventsSince = analyticsSince(period, now);
 
-  const [settlements, events, unifiedBillingEntries] = await Promise.all([
+  const [settlements, events, unifiedBillingEntries, externalPayments, totalOutstandingBalanceMicros] = await Promise.all([
     opts.revenueLedger.query({ since: revenueSince }),
     opts.analyticsRepository.queryEvents(eventsSince),
-    opts.billingEngine ? opts.billingEngine.store.listSettledCharges(revenueSince) : Promise.resolve<LedgerEntry[]>([])
+    opts.billingEngine ? opts.billingEngine.store.listSettledCharges(revenueSince) : Promise.resolve<LedgerEntry[]>([]),
+    opts.externalPaymentsService ? opts.externalPaymentsService.listExternalPayments({ since: revenueSince }) : Promise.resolve<ExternalPayment[]>([]),
+    opts.billingEngine ? opts.billingEngine.store.totalOutstandingBalanceMicros() : Promise.resolve(0)
   ]);
 
   // ---- Revenue (source of truth: settlement_succeeded rows only — see aggregate.ts) ----
@@ -1200,9 +1313,15 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
     byTool: summarizeUnifiedBillingRevenueByTool(unifiedBillingEntries)
   };
 
-  // ---- Revenue Overview: Collected / Pending-Internal / On-chain Settled / Payout Available
-  // (see RevenueOverview's doc comment above for the reasoning behind each figure) ----
-  const revenueOverview = buildRevenueOverview(revenue, unifiedBillingRevenue);
+  // ---- Collection & Funding: Stripe/USDC top-ups + outstanding prepaid balance (spec section 16;
+  // see CollectionFunding's own doc comment) ----
+  const collectionFunding = buildCollectionFunding(externalPayments, totalOutstandingBalanceMicros);
+  const externalPaymentsTable = buildExternalPaymentsTable(externalPayments);
+
+  // ---- Revenue Overview: Collected / Pending-Internal / On-chain Settled / Payout Available /
+  // External Funding Collected / Outstanding Prepaid Balance (see RevenueOverview's doc comment
+  // above for the reasoning behind each figure) ----
+  const revenueOverview = buildRevenueOverview(revenue, unifiedBillingRevenue, collectionFunding);
   const pendingRevenueSpark = buildUnifiedBillingRevenueSparkline(unifiedBillingEntries, period, now);
   const onChainSettledRevenueSpark = buildOnChainSettledRevenueSparkline(
     settlements, period, now, revenueOverview.onChainSettledRevenueUsd !== null
@@ -1220,7 +1339,7 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
 
   return {
     period, generatedAt: now.toISOString(), revenue, paidCalls, revenueTrend, revenueByTool, toolConversion,
-    capabilityOverview, x402Funnel, previewFunnel, unifiedBillingRevenue, revenueOverview, usage,
+    capabilityOverview, x402Funnel, previewFunnel, unifiedBillingRevenue, revenueOverview, collectionFunding, externalPaymentsTable, usage,
     transactions, reconciliation: { anomalyCount: anomalies.length, anomalies }, systemStatus,
     agents, activityFeed, systemHealth, sparklines
   };

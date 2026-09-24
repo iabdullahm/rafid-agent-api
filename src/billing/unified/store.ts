@@ -23,10 +23,13 @@ export interface BillingStore {
   revokeApiKey(accountId: string, keyId: string, at: Date): Promise<ApiKeyRecord>;
   listApiKeys(accountId: string): Promise<ApiKeyRecord[]>;
 
-  /** Credit (top-up, amount > 0) or signed adjustment. Rejects a result below zero. When
-   *  `externalTransactionId` is given, a repeat with the same id for the same account returns the
-   *  original entry instead of crediting twice. */
-  applyCredit(input: { accountId: string; amountMicros: number; type: "credit" | "adjustment"; reason: string; externalTransactionId?: string | null; now: Date }): Promise<{ entry: LedgerEntry; balanceMicros: number; duplicate: boolean }>;
+  /** Credit (top-up, amount > 0), signed adjustment, or an externally-funded "credit_purchase"
+   *  (also amount > 0 — see types.ts's LedgerType doc comment). Rejects a result below zero. When
+   *  `externalTransactionId` is given, a repeat with the same id for the same account and type
+   *  family returns the original entry instead of crediting twice — this is the ONLY dedup
+   *  mechanism external payment crediting relies on (see src/billing/external/service.ts), so it
+   *  is safe to call this from a replayed Stripe webhook or a re-submitted USDC confirmation. */
+  applyCredit(input: { accountId: string; amountMicros: number; type: "credit" | "adjustment" | "credit_purchase"; reason: string; externalTransactionId?: string | null; now: Date }): Promise<{ entry: LedgerEntry; balanceMicros: number; duplicate: boolean }>;
 
   assignSubscription(input: { accountId: string; plan: string; includedMicros: number; now: Date }): Promise<Subscription>;
   cancelSubscription(accountId: string, now: Date): Promise<Subscription | null>;
@@ -48,6 +51,29 @@ export interface BillingStore {
    *  unified-billing revenue section), analogous to RevenueLedger.query() in
    *  src/revenue/types.ts. Never called from the reserve/settle/release path itself. */
   listSettledCharges(since: Date | null, limit?: number): Promise<LedgerEntry[]>;
+  /** Every "credit_purchase" ledger row (externally-funded top-ups — see types.ts's LedgerType
+   *  doc comment) across ALL accounts, with createdAt >= since (or every such row ever, when
+   *  since is null), newest first — the funding-side counterpart to listSettledCharges(), used by
+   *  src/billing/external/reconciliation.ts to cross-check every confirmed ExternalPayment has
+   *  exactly one matching ledger row (matched by externalTransactionId) and vice versa. Never
+   *  called from the reserve/settle/release or fundExternalCredit path itself. */
+  listCreditPurchases(since: Date | null, limit?: number): Promise<LedgerEntry[]>;
+  /** Sum of every currently-"pending" ledger entry's magnitude for one account (money reserved
+   *  for an in-flight call, already subtracted from creditBalanceMicros but not yet settled or
+   *  released) — always >= 0. Used only for reporting (GET /api/v1/billing/balance's reservedUSD
+   *  — see src/billing/external/http.ts); never read by the reserve/settle/release path itself,
+   *  which already knows the one entry it cares about by id. */
+  pendingReservedMicros(accountId: string): Promise<number>;
+  /** Sum of creditBalanceMicros across EVERY billing account (active, suspended and closed alike)
+   *  — the true, current, point-in-time outstanding prepaid liability this deployment owes its
+   *  customers (spec section 16's "Prepaid Outstanding Balance"). Deliberately NOT derived from
+   *  "funding collected minus consumption" over some time window: an account's balance can also
+   *  move via admin-granted credit/adjustment rows (billing/unified/engine.ts's addCredit/
+   *  adjustCredit — never touched by the external payment-collection layer), so only a direct sum
+   *  of the accounts' own running balance is honest — see billing/external/types.ts's accounting-
+   *  model doc comment on why the balance is never re-derived from a ledger scan. Never windowed
+   *  by a reporting period: a balance is a stock, not a flow. */
+  totalOutstandingBalanceMicros(): Promise<number>;
   close(): Promise<void>;
 }
 

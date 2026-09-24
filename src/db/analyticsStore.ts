@@ -59,6 +59,11 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
         ADD COLUMN IF NOT EXISTS payment_rail text,
         ADD COLUMN IF NOT EXISTS preview_seen boolean,
         ADD COLUMN IF NOT EXISTS conversion_latency_ms double precision`
+    )).then(() => this.pool.query(
+      // Additive column for the "funding" category (src/billing/external/) — see
+      // analytics/types.ts's `provider` doc comment. Same ADD COLUMN IF NOT EXISTS discipline;
+      // existing rows simply read back with provider = null.
+      `ALTER TABLE rafid_analytics_events ADD COLUMN IF NOT EXISTS provider text`
     )).then(() => undefined);
   }
 
@@ -68,13 +73,13 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
       `INSERT INTO rafid_analytics_events(
         category, event_type, path, tool_name, channel, success, duration_ms, amount, currency, tx_hash,
         data_source, client_hash, user_agent, referer, client_name, request_fingerprint, payment_rail,
-        preview_seen, conversion_latency_ms, created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+        preview_seen, conversion_latency_ms, provider, created_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
       [
         event.category, event.eventType, event.path, event.toolName, event.channel, event.success, event.durationMs,
         event.amount, event.currency, event.txHash, event.dataSource, event.clientHash, event.userAgent,
         event.referer, event.clientName, event.requestFingerprint ?? null, event.paymentRail ?? null,
-        event.previewSeen ?? null, event.conversionLatencyMs ?? null, event.createdAt ?? new Date().toISOString()
+        event.previewSeen ?? null, event.conversionLatencyMs ?? null, event.provider ?? null, event.createdAt ?? new Date().toISOString()
       ]
     );
   }
@@ -84,7 +89,7 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
     const result = await this.pool.query(
       `SELECT category, event_type, path, tool_name, channel, success, duration_ms, amount, currency, tx_hash,
               data_source, client_hash, user_agent, referer, client_name, request_fingerprint, payment_rail,
-              preview_seen, conversion_latency_ms, created_at
+              preview_seen, conversion_latency_ms, provider, created_at
        FROM rafid_analytics_events WHERE created_at >= $1 ORDER BY created_at DESC LIMIT $2`,
       [since.toISOString(), MAX_QUERY_EVENTS]
     );
@@ -95,7 +100,7 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
       dataSource: r.data_source, clientHash: r.client_hash, userAgent: r.user_agent, referer: r.referer,
       clientName: r.client_name, requestFingerprint: r.request_fingerprint, paymentRail: r.payment_rail,
       previewSeen: r.preview_seen, conversionLatencyMs: r.conversion_latency_ms === null ? null : Number(r.conversion_latency_ms),
-      createdAt: (r.created_at as Date).toISOString()
+      provider: r.provider, createdAt: (r.created_at as Date).toISOString()
     }));
   }
 

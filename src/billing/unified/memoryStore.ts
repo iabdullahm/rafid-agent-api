@@ -63,11 +63,11 @@ export class MemoryBillingStore implements BillingStore {
   }
   async listApiKeys(accountId: string) { return [...this.keys.values()].filter(k => k.accountId === accountId).map(clone); }
 
-  async applyCredit(input: { accountId: string; amountMicros: number; type: "credit" | "adjustment"; reason: string; externalTransactionId?: string | null; now: Date }) {
+  async applyCredit(input: { accountId: string; amountMicros: number; type: "credit" | "adjustment" | "credit_purchase"; reason: string; externalTransactionId?: string | null; now: Date }) {
     const a = this.mustAccount(input.accountId);
-    if (!Number.isSafeInteger(input.amountMicros) || input.amountMicros === 0 || (input.type === "credit" && input.amountMicros < 0)) throw new BillingStoreError("invalid_amount", "Amount must be a non-zero integer number of micros (positive for a credit)");
+    if (!Number.isSafeInteger(input.amountMicros) || input.amountMicros === 0 || ((input.type === "credit" || input.type === "credit_purchase") && input.amountMicros < 0)) throw new BillingStoreError("invalid_amount", "Amount must be a non-zero integer number of micros (positive for a credit)");
     if (input.externalTransactionId) {
-      const existing = this.ledger.find(e => e.accountId === a.id && e.externalTransactionId === input.externalTransactionId && (e.type === "credit" || e.type === "adjustment"));
+      const existing = this.ledger.find(e => e.accountId === a.id && e.externalTransactionId === input.externalTransactionId && (e.type === "credit" || e.type === "adjustment" || e.type === "credit_purchase"));
       if (existing) return { entry: clone(existing), balanceMicros: a.creditBalanceMicros, duplicate: true };
     }
     const next = a.creditBalanceMicros + input.amountMicros;
@@ -189,6 +189,22 @@ export class MemoryBillingStore implements BillingStore {
       e.status === "settled" && (e.type === "debit" || e.type === "subscription_usage") && e.toolName
       && (sinceMs === null || Date.parse(e.createdAt) >= sinceMs));
     return rows.slice(-limit).reverse().map(clone);
+  }
+
+  async listCreditPurchases(since: Date | null, limit = MAX_QUERY_LEDGER_ENTRIES): Promise<LedgerEntry[]> {
+    const sinceMs = since ? since.getTime() : null;
+    const rows = this.ledger.filter(e => e.type === "credit_purchase" && (sinceMs === null || Date.parse(e.createdAt) >= sinceMs));
+    return rows.slice(-limit).reverse().map(clone);
+  }
+
+  async pendingReservedMicros(accountId: string): Promise<number> {
+    return this.ledger.filter(e => e.accountId === accountId && e.status === "pending").reduce((sum, e) => sum + Math.abs(e.amountMicros), 0);
+  }
+
+  async totalOutstandingBalanceMicros(): Promise<number> {
+    let total = 0;
+    for (const a of this.accounts.values()) total += a.creditBalanceMicros;
+    return total;
   }
 
   /** Test/diagnostic helper: the raw ledger, oldest first. */
