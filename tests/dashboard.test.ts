@@ -30,7 +30,7 @@ const analyticsInternalApiKey = "test-only-analytics-internal-key-0123456789";
  *  server over createApp(), with injected in-memory AnalyticsRepository/RevenueLedger so tests
  *  read exactly the rows seeded directly into them. Admin/dashboard auth is configured so the
  *  dashboard router (config.adminEnabled) actually mounts. */
-async function startDashboardApp(opts: { revenueLedger?: RevenueLedger; adminEnabled?: boolean } = {}) {
+async function startDashboardApp(opts: { revenueLedger?: RevenueLedger; adminEnabled?: boolean; billingEnv?: Record<string, string> } = {}) {
   process.env.REVENUE_INTERNAL_API_KEY = revenueInternalApiKey;
   process.env.ANALYTICS_INTERNAL_API_KEY = analyticsInternalApiKey;
   delete process.env.REVENUE_DATABASE_URL;
@@ -42,7 +42,8 @@ async function startDashboardApp(opts: { revenueLedger?: RevenueLedger; adminEna
     RAFID_API_KEYS: apiKey, LOG_LEVEL: "silent", RATE_LIMIT_ENABLED: "false",
     ...(adminEnabled ? {
       ADMIN_USERNAME: adminUsername, ADMIN_PASSWORD_HASH: hashAdminPassword(adminPassword), ADMIN_SESSION_SECRET: adminSessionSecret
-    } : {})
+    } : {}),
+    ...(opts.billingEnv ?? {})
   });
   const app = createApp(config, { analyticsRepository, revenueLedger });
   const server = app.listen(0, "127.0.0.1");
@@ -163,7 +164,8 @@ function revenueToolStatsFixture(overrides: Partial<RevenueToolStats> = {}): Rev
 
 function systemStatusFixture(overrides: Partial<SystemStatusReport> = {}): SystemStatusReport {
   return {
-    mcp: "Enabled", x402: "Enabled", analytics: "Active", revenueLedger: "Active",
+    mcp: "Enabled", x402: "Enabled", l402: "Disabled", mpp: "Disabled", apiCredits: "Disabled", subscriptions: "Disabled",
+    analytics: "Active", revenueLedger: "Active",
     partnerData: "Unknown", database: "Connected (in-memory — not durable across restarts)",
     lastSuccessfulSettlementAt: null, lastAnalyzeOmanPropertyCallAt: null, lastPartnerFeedAnalysisAt: null,
     ...overrides
@@ -1183,6 +1185,19 @@ test("dashboard UI: sidebar navigation, AI Workforce status, Active Agents, Live
   assert.ok(html.includes("Agents &amp; Tools"));
 });
 
+test("dashboard UI: Unified Billing Revenue and Free Preview Funnel panels are present, and System Status lists L402/MPP/API Credits/Subscriptions", async t => {
+  const { server, base } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const cookie = await loginAndGetSessionCookie(base);
+  const html = await (await fetch(base + "/internal/dashboard", { headers: { Cookie: cookie } })).text();
+  assert.ok(html.includes("Unified Billing Revenue"));
+  assert.ok(html.includes("Free Preview Funnel"));
+  assert.ok(html.includes("id=\"kpi-unified-billing\""));
+  assert.ok(html.includes("id=\"preview-funnel\""));
+  assert.ok(html.includes("<dt>L402</dt>") || html.includes("L402"));
+  assert.ok(html.includes("renderUnifiedBillingRevenue") && html.includes("renderPreviewFunnel"));
+});
+
 // -------------------------------------------------------------------------------------------
 // Backend/API failure: graceful degradation, never a raw crash or leaked internals
 // -------------------------------------------------------------------------------------------
@@ -1204,4 +1219,137 @@ test("dashboard: a revenue ledger failure produces a graceful, generic JSON erro
   const raw = JSON.stringify(body);
   assert.ok(!raw.includes("secret-internal-host"), "the underlying error message must never leak to the client");
   assert.ok(!raw.includes("postgres://"));
+});
+
+// -------------------------------------------------------------------------------------------
+// Payment methods overview (System Status) — which rails are actually enabled/live, in one place
+// -------------------------------------------------------------------------------------------
+test("dashboard system status: reports L402/MPP/API-credits/subscriptions enabled state alongside MCP/x402, never guessed", async t => {
+  const { server, base } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  assert.equal(data.systemStatus.l402, "Disabled");
+  assert.equal(data.systemStatus.mpp, "Disabled");
+  assert.equal(data.systemStatus.apiCredits, "Disabled");
+  assert.equal(data.systemStatus.subscriptions, "Disabled");
+});
+
+test("dashboard system status: API credits and subscriptions flip to Enabled when the deployment turns them on", async t => {
+  const { server, base } = await startDashboardApp({ billingEnv: { API_CREDITS_ENABLED: "true", SUBSCRIPTIONS_ENABLED: "true" } });
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  assert.equal(data.systemStatus.apiCredits, "Enabled");
+  assert.equal(data.systemStatus.subscriptions, "Enabled");
+  assert.equal(data.systemStatus.l402, "Disabled");
+});
+
+// -------------------------------------------------------------------------------------------
+// Unified billing revenue (API credits + subscriptions) — a separate rail family from the x402
+// settlement ledger, reported alongside it without ever being blended into revenue.revenueByCurrency
+// -------------------------------------------------------------------------------------------
+test("dashboard unified billing revenue: disabled by default — honest zeros, never fabricated", async t => {
+  const { server, base } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  assert.equal(data.unifiedBillingRevenue.enabled, false);
+  assert.equal(data.unifiedBillingRevenue.totalUsd, 0);
+  assert.equal(data.unifiedBillingRevenue.settledCharges, 0);
+  assert.deepEqual(data.unifiedBillingRevenue.byRail, { apiCredits: 0, subscription: 0 });
+  assert.deepEqual(data.unifiedBillingRevenue.byTool, []);
+});
+
+test("dashboard unified billing revenue: a settled API-credit charge is counted by rail and by tool, and never blended into x402 revenue", async t => {
+  const ADMIN_SECRET = "billing-admin-secret-for-dashboard-tests-0123456789";
+  const { server, base } = await startDashboardApp({
+    billingEnv: { API_CREDITS_ENABLED: "true", SUBSCRIPTIONS_ENABLED: "true", BILLING_ADMIN_SECRET: ADMIN_SECRET }
+  });
+  t.after(() => { server.closeAllConnections(); server.close(); });
+
+  const admin = async (method: string, path: string, body?: unknown) => {
+    const r = await fetch(base + "/api/internal/billing" + path, {
+      method, headers: { "X-Billing-Admin-Key": ADMIN_SECRET, "Content-Type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body)
+    });
+    return { status: r.status, body: await r.json() as any };
+  };
+  const acct = await admin("POST", "/accounts", { name: "Dashboard Test Co" });
+  assert.equal(acct.status, 201);
+  const accountId = acct.body.data.id as string;
+  assert.equal((await admin("POST", `/accounts/${accountId}/credits`, { amount: "5.00", reason: "test" })).status, 201);
+  const keyRes = await admin("POST", `/accounts/${accountId}/api-keys`, { name: "test" });
+  const apiKeyValue = keyRes.body.data.apiKey as string;
+
+  const tool = capabilities.find(c => c.name === "analyze_property")!; // $0.01, deterministic calculator
+  const call = await fetch(base + "/api/v1" + tool.path, {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKeyValue}` }, body: JSON.stringify(tool.example)
+  });
+  assert.equal(call.status, 200);
+
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+
+  assert.equal(data.unifiedBillingRevenue.enabled, true);
+  assert.equal(data.unifiedBillingRevenue.settledCharges, 1);
+  assert.equal(data.unifiedBillingRevenue.totalUsd, tool.price);
+  assert.equal(data.unifiedBillingRevenue.byRail.apiCredits, tool.price);
+  assert.equal(data.unifiedBillingRevenue.byRail.subscription, 0);
+  const toolRow = data.unifiedBillingRevenue.byTool.find((r: { toolName: string }) => r.toolName === tool.name);
+  assert.ok(toolRow, "the paid capability must appear in the unified-billing by-tool breakdown");
+  assert.equal(toolRow.settledCalls, 1);
+  // Never blended with the x402 settlement ledger's own revenue KPIs.
+  assert.equal(data.revenue.settledPayments, 0);
+  assert.deepEqual(data.revenue.revenueByCurrency, {});
+});
+
+// -------------------------------------------------------------------------------------------
+// Free Preview funnel — preview traffic and preview->paid conversion
+// -------------------------------------------------------------------------------------------
+test("dashboard Free Preview funnel: reports honest zeros when no preview traffic occurred", async t => {
+  const { server, base } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+  assert.equal(data.previewFunnel.requested, 0);
+  assert.equal(data.previewFunnel.cacheHitRatePct, null);
+  assert.equal(data.previewFunnel.conversionRatePct, null);
+});
+
+test("dashboard Free Preview funnel: counts requests, outcomes, cache hit rate, rate-limit hits and preview->paid conversion from recorded preview events", async t => {
+  const { server, base, analyticsRepository } = await startDashboardApp();
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const preview = (overrides: Partial<AnalyticsEventInput> = {}): AnalyticsEventInput => ({
+    category: "preview", eventType: "preview_requested", path: null, toolName: "research_company", channel: null,
+    success: null, durationMs: null, amount: null, currency: null, txHash: null, dataSource: null,
+    clientHash: null, userAgent: null, referer: null, clientName: null, createdAt: new Date().toISOString(),
+    ...overrides
+  });
+  await analyticsRepository.record(preview({ eventType: "preview_requested" }));
+  await analyticsRepository.record(preview({ eventType: "preview_requested" }));
+  await analyticsRepository.record(preview({ eventType: "preview_available" }));
+  await analyticsRepository.record(preview({ eventType: "preview_cache_hit" }));
+  await analyticsRepository.record(preview({ eventType: "preview_cache_miss" }));
+  await analyticsRepository.record(preview({ eventType: "preview_rate_limited" }));
+  await analyticsRepository.record(preview({ eventType: "paid_capability_started", previewSeen: true }));
+  await analyticsRepository.record(preview({ eventType: "preview_converted", conversionLatencyMs: 4200 }));
+
+  const cookie = await loginAndGetSessionCookie(base);
+  const data = (await (await fetch(base + "/internal/dashboard/data?period=all", { headers: { Cookie: cookie } })).json()).data;
+
+  assert.equal(data.previewFunnel.requested, 2);
+  assert.equal(data.previewFunnel.available, 1);
+  assert.equal(data.previewFunnel.rateLimited, 1);
+  assert.equal(data.previewFunnel.cacheHits, 1);
+  assert.equal(data.previewFunnel.cacheMisses, 1);
+  assert.equal(data.previewFunnel.cacheHitRatePct, 50);
+  assert.equal(data.previewFunnel.paidCapabilityStarted, 1);
+  assert.equal(data.previewFunnel.converted, 1);
+  assert.equal(data.previewFunnel.conversionRatePct, 50);
+  // The Live Agent Activity feed must describe a preview event honestly, not fall through to a
+  // generic/misleading "tool call" label (describeActivityEvent's "preview" branch).
+  const labels: string[] = data.activityFeed.map((it: { label: string }) => it.label);
+  assert.ok(labels.some(l => l.toLowerCase().includes("preview")), "activity feed must describe preview events, never mislabel them as tool calls");
+  assert.ok(!labels.some(l => l.startsWith("unknown tool") || l.startsWith("null ")), "a preview event must never fall through to the generic tool-call label");
 });

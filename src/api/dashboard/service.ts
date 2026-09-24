@@ -16,6 +16,13 @@ import { MemoryRevenueLedger } from "../../revenue/memoryLedger.js";
 import type { BillingService } from "../../billing/service.js";
 import { prices, type CapabilityName } from "../../billing/catalog.js";
 import { capabilities } from "../../domain/capabilities.js";
+import type { BillingEngine } from "../../billing/unified/engine.js";
+import type { LedgerEntry } from "../../billing/unified/types.js";
+import { railAvailability } from "../../billing/unified/discovery.js";
+import {
+  summarizeUnifiedBillingRevenue, summarizeUnifiedBillingRevenueByTool,
+  type UnifiedBillingToolRow
+} from "../../billing/unified/reporting.js";
 
 /**
  * Internal dashboard BFF (backend-for-frontend) business logic (spec sections 2-9, 11, 14).
@@ -171,6 +178,15 @@ export function explorerUrlFor(network: string, txHash: string): string | null {
 export interface SystemStatusReport {
   mcp: "Enabled" | "Disabled";
   x402: "Enabled" | "Disabled";
+  /** Payment methods overview (spec section 10 addition) — which OTHER payment rails are live in
+   *  this deployment, alongside x402/MCP above. Computed via billing/unified/discovery.ts's
+   *  railAvailability() (the exact same function GET /api/v1/payment-methods and the payment
+   *  dispatcher already use to decide rail availability), never a second enabled/disabled check
+   *  re-derived here. */
+  l402: "Enabled" | "Disabled";
+  mpp: "Enabled" | "Disabled";
+  apiCredits: "Enabled" | "Disabled";
+  subscriptions: "Enabled" | "Disabled";
   analytics: "Active" | "Unknown";
   revenueLedger: "Active" | "Unknown";
   partnerData: "Active" | "No partner-fed calls observed in this period" | "Unknown";
@@ -222,9 +238,14 @@ async function gatherSystemStatus(args: {
     ? "Unknown"
     : usingPostgres ? "Connected (Postgres)" : usingMemory ? "Connected (in-memory — not durable across restarts)" : "Connected";
 
+  const rails = railAvailability(config);
   return {
     mcp: config.mcpRemoteEnabled ? "Enabled" : "Disabled",
     x402: config.x402Enabled ? "Enabled" : "Disabled",
+    l402: rails.l402 ? "Enabled" : "Disabled",
+    mpp: config.mpp?.enabled ? "Enabled" : "Disabled",
+    apiCredits: rails.apiCredits ? "Enabled" : "Disabled",
+    subscriptions: rails.subscription ? "Enabled" : "Disabled",
     analytics: analyticsOk ? "Active" : "Unknown",
     revenueLedger: revenueOk ? "Active" : "Unknown",
     partnerData: !anyToolCallsInPeriod ? "Unknown" : partnerFeedInPeriod ? "Active" : "No partner-fed calls observed in this period",
@@ -627,6 +648,19 @@ function describeActivityEvent(e: AnalyticsEvent): string {
     if (e.eventType === "settlement_success") return `Settlement succeeded${e.toolName ? ` for ${e.toolName}` : ""}`;
     return `Settlement failed${e.toolName ? ` for ${e.toolName}` : ""}`;
   }
+  if (e.category === "preview") {
+    const tool = e.toolName ? ` for ${e.toolName}` : "";
+    if (e.eventType === "preview_requested") return `Free preview requested${tool}`;
+    if (e.eventType === "preview_available") return `Free preview available${tool}`;
+    if (e.eventType === "preview_limited") return `Free preview limited${tool}`;
+    if (e.eventType === "preview_unavailable") return `Free preview unavailable${tool}`;
+    if (e.eventType === "preview_invalid") return `Free preview rejected invalid input${tool}`;
+    if (e.eventType === "preview_rate_limited") return `Free preview rate-limited${tool}`;
+    if (e.eventType === "preview_cache_hit") return `Free preview served from cache${tool}`;
+    if (e.eventType === "preview_cache_miss") return `Free preview cache miss${tool}`;
+    if (e.eventType === "paid_capability_started") return `Paid call started${tool}${e.previewSeen ? " (preview seen)" : ""}`;
+    return `Preview converted to paid call${tool}`; // preview_converted
+  }
   // "tool"
   const durationLabel = typeof e.durationMs === "number" ? ` (${Math.round(e.durationMs)}ms)` : "";
   return `${e.toolName ?? "unknown tool"} call ${e.success === false ? "failed" : "completed"}${durationLabel}`;
@@ -718,6 +752,101 @@ export function buildSettlementCountSparkline(settlements: readonly RevenueSettl
   }).length);
 }
 
+// -----------------------------------------------------------------------------------------------
+// Free Preview funnel (dashboard section added 2026-09-24) — preview traffic and preview->paid
+// conversion, read straight off the "preview" analytics category (analytics/types.ts's
+// PreviewEventType, written by preview/analytics.ts's recordPreviewEvent()) that already flows
+// into `events` above — no new query, no new aggregation source, same discipline as every other
+// section in this file: real counts only, "—"/null rather than a fabricated 0% when there was no
+// opportunity to convert.
+// -----------------------------------------------------------------------------------------------
+
+export interface PreviewFunnelReport {
+  requested: number;
+  available: number;
+  limited: number;
+  unavailable: number;
+  invalid: number;
+  rateLimited: number;
+  cacheHits: number;
+  cacheMisses: number;
+  /** cacheHits / (cacheHits + cacheMisses) — null when neither was recorded this period. */
+  cacheHitRatePct: number | null;
+  paidCapabilityStarted: number;
+  /** A paid call whose request fingerprint matched a qualifying preview within the conversion
+   *  window (see preview/analytics.ts's PreviewConversionIndex) — the funnel's business metric. */
+  converted: number;
+  /** converted / requested — "out of every free preview served, how many led to a paid call" —
+   *  null when there were zero preview requests to convert from. */
+  conversionRatePct: number | null;
+}
+
+function buildPreviewFunnel(events: readonly AnalyticsEvent[]): PreviewFunnelReport {
+  const previewEvents = events.filter(e => e.category === "preview");
+  const count = (t: AnalyticsEvent["eventType"]) => previewEvents.filter(e => e.eventType === t).length;
+  const requested = count("preview_requested");
+  const cacheHits = count("preview_cache_hit");
+  const cacheMisses = count("preview_cache_miss");
+  const converted = count("preview_converted");
+  return {
+    requested,
+    available: count("preview_available"),
+    limited: count("preview_limited"),
+    unavailable: count("preview_unavailable"),
+    invalid: count("preview_invalid"),
+    rateLimited: count("preview_rate_limited"),
+    cacheHits,
+    cacheMisses,
+    cacheHitRatePct: conversionPct(cacheHits, cacheHits + cacheMisses),
+    paidCapabilityStarted: count("paid_capability_started"),
+    converted,
+    conversionRatePct: conversionPct(converted, requested)
+  };
+}
+
+// -----------------------------------------------------------------------------------------------
+// Unified billing revenue (dashboard section added 2026-09-24) — API credits (prepaid) and
+// subscription allowances (src/billing/unified/), a payment rail family entirely separate from
+// the x402/L402/MPP settlement ledger `revenue` above is built from. Kept as its own summary
+// rather than merged into `revenue.revenueByCurrency`: unified billing is always USD (money.ts)
+// while x402 settles USDC — genuinely different assets — and revenue.currency/grossRevenueUSD/
+// averageRevenuePerPaidCall are documented single-currency convenience fields over the x402
+// ledger specifically, which a silent post-hoc merge could make misleading. Every number here
+// comes straight from billing/unified/reporting.ts's pure aggregation over
+// BillingEngine.store.listSettledCharges() — never a second accounting pass. Zeroed out (never
+// fabricated) when unified billing is disabled for this deployment.
+// -----------------------------------------------------------------------------------------------
+
+export interface UnifiedBillingRevenueSummary {
+  /** Whether this deployment has API credits and/or subscriptions turned on at all
+   *  (billingEngine !== null) — mirrors SystemStatusReport.apiCredits/subscriptions. */
+  enabled: boolean;
+  totalUsd: number;
+  settledCharges: number;
+  byRail: { apiCredits: number; subscription: number };
+  /** Sorted by revenue descending; only tools with at least one settled charge appear (the
+   *  registry-driven "All Capabilities Overview" is what always lists every capability). */
+  byTool: UnifiedBillingToolRow[];
+}
+
+/** Unified-billing-revenue sparkline — reuses the exact same bucketBoundaries() every other
+ *  sparkline in this file buckets against (see buildSettlementCountSparkline() immediately
+ *  above), summing settled charge USD per bucket rather than counting rows: unlike x402's
+ *  multi-currency settlements, unified billing is always a single currency (USD), so summing a
+ *  dollar amount here carries no never-blend-currencies risk. */
+function buildUnifiedBillingRevenueSparkline(entries: readonly LedgerEntry[], period: RevenuePeriod, now: Date): number[] {
+  const boundaries = bucketBoundaries(period, now);
+  return boundaries.map(([start, end]) => {
+    const startMs = start.getTime(), endMs = end.getTime();
+    let sumMicros = 0;
+    for (const e of entries) {
+      const t = Date.parse(e.createdAt);
+      if (t >= startMs && t < endMs) sumMicros += Math.abs(e.amountMicros);
+    }
+    return round(sumMicros / 1_000_000, 6);
+  });
+}
+
 export interface TransactionRow {
   time: string;
   capability: string;
@@ -755,6 +884,11 @@ export interface DashboardData {
    *  activity-filtered one. */
   capabilityOverview: CapabilityOverviewRow[];
   x402Funnel: X402FunnelReport;
+  /** Free Preview traffic and preview->paid conversion (see PreviewFunnelReport's doc comment). */
+  previewFunnel: PreviewFunnelReport;
+  /** API credits + subscriptions revenue (see UnifiedBillingRevenueSummary's doc comment) — a
+   *  separate payment rail family from `revenue` above, never blended into it. */
+  unifiedBillingRevenue: UnifiedBillingRevenueSummary;
   usage: UsageReport;
   transactions: TransactionRow[];
   reconciliation: { anomalyCount: number; anomalies: ReconciliationAnomaly[] };
@@ -768,6 +902,7 @@ export interface DashboardData {
     revenue: number[];
     toolCalls: number[];
     discoveryHits: number[];
+    unifiedBillingRevenue: number[];
   };
 }
 
@@ -776,6 +911,11 @@ export interface DashboardServiceOptions {
   analyticsRepository: AnalyticsRepository;
   revenueLedger: RevenueLedger;
   billingService: BillingService;
+  /** Unified billing (API credits + subscriptions — src/billing/unified/). null when this
+   *  deployment has neither enabled (createApp()'s own billingEngine variable is exactly this —
+   *  see app.ts), in which case unifiedBillingRevenue reports `enabled: false` and every number
+   *  zero rather than omitting the section. */
+  billingEngine: BillingEngine | null;
 }
 
 const MAX_TRANSACTIONS_SHOWN = 20;
@@ -789,9 +929,10 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   const revenueSince = periodSince(period, now);
   const eventsSince = analyticsSince(period, now);
 
-  const [settlements, events] = await Promise.all([
+  const [settlements, events, unifiedBillingEntries] = await Promise.all([
     opts.revenueLedger.query({ since: revenueSince }),
-    opts.analyticsRepository.queryEvents(eventsSince)
+    opts.analyticsRepository.queryEvents(eventsSince),
+    opts.billingEngine ? opts.billingEngine.store.listSettledCharges(revenueSince) : Promise.resolve<LedgerEntry[]>([])
   ]);
 
   // ---- Revenue (source of truth: settlement_succeeded rows only — see aggregate.ts) ----
@@ -947,12 +1088,27 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   const sparklines = {
     revenue: buildSettlementCountSparkline(settlements, period, now),
     toolCalls: buildCountSparkline(events, period, now, e => e.category === "tool"),
-    discoveryHits: buildCountSparkline(events, period, now, e => e.category === "discovery")
+    discoveryHits: buildCountSparkline(events, period, now, e => e.category === "discovery"),
+    unifiedBillingRevenue: buildUnifiedBillingRevenueSparkline(unifiedBillingEntries, period, now)
+  };
+
+  // ---- Free Preview funnel (spec: preview traffic + preview->paid conversion) ----
+  const previewFunnel = buildPreviewFunnel(events);
+
+  // ---- Unified billing revenue (API credits + subscriptions — separate rail family from the
+  // x402 settlement ledger `revenue` above; see UnifiedBillingRevenueSummary's doc comment). ----
+  const unifiedBillingTotals = summarizeUnifiedBillingRevenue(unifiedBillingEntries);
+  const unifiedBillingRevenue: UnifiedBillingRevenueSummary = {
+    enabled: opts.billingEngine !== null,
+    totalUsd: unifiedBillingTotals.totalUsd,
+    settledCharges: unifiedBillingTotals.settledCharges,
+    byRail: unifiedBillingTotals.byRail,
+    byTool: summarizeUnifiedBillingRevenueByTool(unifiedBillingEntries)
   };
 
   return {
     period, generatedAt: now.toISOString(), revenue, paidCalls, revenueTrend, revenueByTool, toolConversion,
-    capabilityOverview, x402Funnel, usage,
+    capabilityOverview, x402Funnel, previewFunnel, unifiedBillingRevenue, usage,
     transactions, reconciliation: { anomalyCount: anomalies.length, anomalies }, systemStatus,
     agents, activityFeed, systemHealth, sparklines
   };

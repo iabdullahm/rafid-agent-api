@@ -9,6 +9,7 @@ import { createRateLimiter, disabledRateLimiter } from "../middleware/rateLimit.
 import type { AnalyticsRepository } from "../analytics/types.js";
 import type { RevenueLedger } from "../revenue/types.js";
 import type { BillingService } from "../billing/service.js";
+import type { BillingEngine } from "../billing/unified/engine.js";
 import { DASHBOARD_PERIODS, buildDashboardData, type DashboardPeriod } from "./dashboard/service.js";
 import { dashboardLoginPageHtml } from "./dashboard/loginPage.js";
 import { dashboardPageHtml } from "./dashboard/page.js";
@@ -43,6 +44,9 @@ export interface DashboardRoutesOptions {
   analyticsRepository: AnalyticsRepository;
   revenueLedger: RevenueLedger;
   billingService: BillingService;
+  /** Unified billing (API credits + subscriptions). null when disabled for this deployment — see
+   *  app.ts's own billingEngine variable, passed straight through here. */
+  billingEngine: BillingEngine | null;
 }
 
 function send(res: express.Response, data: unknown) {
@@ -62,7 +66,7 @@ function stringParam(v: unknown): string | undefined {
 }
 
 export function createDashboardRoutes(options: DashboardRoutesOptions): Router {
-  const { config, analyticsRepository, revenueLedger, billingService } = options;
+  const { config, analyticsRepository, revenueLedger, billingService, billingEngine } = options;
   const router = express.Router();
   router.use(express.urlencoded({ extended: false, limit: "16kb" }));
 
@@ -127,7 +131,7 @@ export function createDashboardRoutes(options: DashboardRoutesOptions): Router {
   router.get("/internal/dashboard", configured, htmlAuth, async (req, res, next) => {
     try {
       const period = parsePeriod(req.query.period);
-      const initialData = await buildDashboardData({ config, analyticsRepository, revenueLedger, billingService }, period);
+      const initialData = await buildDashboardData({ config, analyticsRepository, revenueLedger, billingService, billingEngine }, period);
       res.type("html").send(dashboardPageHtml({ adminUser: res.locals.adminUser, csrfToken: res.locals.adminCsrf, initialData }));
     } catch (error) { next(error); }
   });
@@ -135,7 +139,7 @@ export function createDashboardRoutes(options: DashboardRoutesOptions): Router {
   router.get("/internal/dashboard/data", configured, apiAuth, async (req, res, next) => {
     try {
       const period = parsePeriod(req.query.period);
-      const data = await buildDashboardData({ config, analyticsRepository, revenueLedger, billingService }, period);
+      const data = await buildDashboardData({ config, analyticsRepository, revenueLedger, billingService, billingEngine }, period);
       send(res, data);
     } catch (error) { next(error); }
   });

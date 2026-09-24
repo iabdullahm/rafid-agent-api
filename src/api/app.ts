@@ -617,7 +617,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // in the `capabilities` array; never reachable from /agent.json, MCP, the tool catalog,
   // discovery or the x402 route family; never a public dashboard.
   if (config.adminEnabled) {
-    app.use(createDashboardRoutes({ config, analyticsRepository, revenueLedger, billingService }));
+    app.use(createDashboardRoutes({ config, analyticsRepository, revenueLedger, billingService, billingEngine }));
   }
   // Internal analytics API (discovery/MCP/x402/tool-usage — see analyticsRoutes.ts's doc
   // comment). Always mounted, unlike the Partner Data Feed/Admin routes above: recording itself

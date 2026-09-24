@@ -11,7 +11,8 @@ import { BillingService } from "../src/billing/service.js";
 import { buildOpenapi } from "../src/api/openapi.js";
 import {
   BillingEngine, MemoryBillingStore, createPaymentDispatcher, detectCredentials, formatMicros, loadBillingConfig, selectPayment, usdToMicros,
-  type RailAvailability
+  summarizeUnifiedBillingRevenue, summarizeUnifiedBillingRevenueByTool,
+  type RailAvailability, type LedgerEntry
 } from "../src/billing/unified/index.js";
 import { billingStoreContract } from "./billing-contract.js";
 
@@ -562,4 +563,57 @@ test("MCP + API credits (/mcp/credits): paid tools/call billed to the key's acco
   const free = await (await mcpCall(base, "/mcp", { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "research_company", arguments: research.example } })).json() as any;
   assert.deepEqual(free.result.structuredContent, await research.execute(research.example));
   assert.equal((await balance(apiKey)).credits.available, "0.05");
+});
+
+// -------------------------------------------------------------------------------------------
+// Unified billing revenue reporting (src/billing/unified/reporting.ts) — the internal ops
+// dashboard's pure aggregation over BillingStore.listSettledCharges(), analogous to
+// revenue/aggregate.ts's summarizeRevenue()/summarizeRevenueByTool() for the x402 ledger.
+// -------------------------------------------------------------------------------------------
+function ledgerEntryFixture(overrides: Partial<LedgerEntry> = {}): LedgerEntry {
+  return {
+    id: `txn_${Math.random().toString(36).slice(2)}`, accountId: "acct_fixture", apiKeyId: null,
+    requestId: null, toolName: "research_company", type: "debit", amountMicros: -150_000, currency: "USD",
+    rail: "api_credits", status: "settled", externalTransactionId: null, relatedEntryId: null,
+    createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", metadata: {},
+    ...overrides
+  };
+}
+
+test("summarizeUnifiedBillingRevenue: sums settled charges to USD by rail, never blending api_credits and subscription totals", () => {
+  const entries = [
+    ledgerEntryFixture({ rail: "api_credits", amountMicros: -150_000 }),
+    ledgerEntryFixture({ rail: "api_credits", amountMicros: -250_000 }),
+    ledgerEntryFixture({ rail: "subscription", type: "subscription_usage", amountMicros: -100_000 })
+  ];
+  const summary = summarizeUnifiedBillingRevenue(entries);
+  assert.equal(summary.settledCharges, 3);
+  assert.equal(summary.totalUsd, 0.5);
+  assert.equal(summary.byRail.apiCredits, 0.4);
+  assert.equal(summary.byRail.subscription, 0.1);
+});
+
+test("summarizeUnifiedBillingRevenue: an empty input reports an honest zero, never a fabricated figure", () => {
+  const summary = summarizeUnifiedBillingRevenue([]);
+  assert.equal(summary.settledCharges, 0);
+  assert.equal(summary.totalUsd, 0);
+  assert.deepEqual(summary.byRail, { apiCredits: 0, subscription: 0 });
+});
+
+test("summarizeUnifiedBillingRevenueByTool: groups by tool, sorted by revenue descending, and skips a row with no toolName", () => {
+  const entries = [
+    ledgerEntryFixture({ toolName: "research_company", amountMicros: -150_000 }),
+    ledgerEntryFixture({ toolName: "research_company", amountMicros: -150_000 }),
+    ledgerEntryFixture({ toolName: "analyze_oman_property", amountMicros: -250_000 }),
+    ledgerEntryFixture({ toolName: null, type: "credit", rail: "admin", amountMicros: 1_000_000 })
+  ];
+  const rows = summarizeUnifiedBillingRevenueByTool(entries);
+  assert.equal(rows.length, 2);
+  // Two $0.15 research_company charges ($0.30 total) outrank one $0.25 analyze_oman_property charge.
+  assert.equal(rows[0]!.toolName, "research_company");
+  assert.equal(rows[0]!.revenueUsd, 0.3);
+  assert.equal(rows[0]!.settledCalls, 2);
+  assert.equal(rows[1]!.toolName, "analyze_oman_property");
+  assert.equal(rows[1]!.revenueUsd, 0.25);
+  assert.equal(rows[1]!.settledCalls, 1);
 });

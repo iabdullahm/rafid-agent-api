@@ -4,7 +4,7 @@ import { microsFromDb } from "./money.js";
 import { addMonthsUtc, currentPeriod } from "./plans.js";
 import { BILLING_MIGRATIONS } from "./schema.js";
 import { BillingStoreError, type BillingStore } from "./store.js";
-import type { AccountStatus, ApiKeyEnvironment, ApiKeyRecord, BillingAccount, LedgerEntry, ReleaseInput, ReserveInput, ReserveResult, SettleInput, Subscription, SubscriptionSnapshot, UsageSummaryRow } from "./types.js";
+import { MAX_QUERY_LEDGER_ENTRIES, type AccountStatus, type ApiKeyEnvironment, type ApiKeyRecord, type BillingAccount, type LedgerEntry, type ReleaseInput, type ReserveInput, type ReserveResult, type SettleInput, type Subscription, type SubscriptionSnapshot, type UsageSummaryRow } from "./types.js";
 
 type Row = Record<string, any>;
 const iso = (v: unknown): string => (v instanceof Date ? v : new Date(String(v))).toISOString();
@@ -234,6 +234,14 @@ export class PostgresBillingStore implements BillingStore {
     const r = await this.q(`SELECT tool_name, rail, count(*)::int AS calls, (-sum(amount_micros))::bigint AS charged FROM billing_ledger
       WHERE account_id=$1 AND status='settled' AND type IN ('debit','subscription_usage') AND created_at >= $2 GROUP BY tool_name, rail ORDER BY tool_name, rail`, [accountId, since]);
     return r.rows.map(x => ({ toolName: x.tool_name, rail: x.rail, calls: Number(x.calls), chargedMicros: microsFromDb(x.charged) }));
+  }
+
+  async listSettledCharges(since: Date | null, limit = MAX_QUERY_LEDGER_ENTRIES): Promise<LedgerEntry[]> {
+    const cappedLimit = Math.max(1, Math.min(MAX_QUERY_LEDGER_ENTRIES, Math.trunc(limit)));
+    const r = since
+      ? await this.q("SELECT * FROM billing_ledger WHERE status='settled' AND type IN ('debit','subscription_usage') AND tool_name IS NOT NULL AND created_at >= $1 ORDER BY created_at DESC LIMIT $2", [since, cappedLimit])
+      : await this.q("SELECT * FROM billing_ledger WHERE status='settled' AND type IN ('debit','subscription_usage') AND tool_name IS NOT NULL ORDER BY created_at DESC LIMIT $1", [cappedLimit]);
+    return r.rows.map(toEntry);
   }
 
   private async insertEntry(c: PoolClient, e: Omit<LedgerEntry, "id" | "currency" | "createdAt" | "updatedAt">, now: Date): Promise<LedgerEntry> {

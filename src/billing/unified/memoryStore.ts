@@ -1,7 +1,7 @@
 import { newId } from "./apiKeys.js";
 import { addMonthsUtc, currentPeriod } from "./plans.js";
 import { BillingStoreError, type BillingStore } from "./store.js";
-import type { AccountStatus, ApiKeyEnvironment, ApiKeyRecord, BillingAccount, LedgerEntry, ReleaseInput, ReserveInput, ReserveResult, SettleInput, Subscription, SubscriptionSnapshot, UsageSummaryRow } from "./types.js";
+import { MAX_QUERY_LEDGER_ENTRIES, type AccountStatus, type ApiKeyEnvironment, type ApiKeyRecord, type BillingAccount, type LedgerEntry, type ReleaseInput, type ReserveInput, type ReserveResult, type SettleInput, type Subscription, type SubscriptionSnapshot, type UsageSummaryRow } from "./types.js";
 
 interface SubRow extends Subscription { anchor: string }
 interface IdemRow { requestHash: string; status: "in_progress" | "completed" | "failed"; entryId: string | null; responseStatus: number | null; responseBody: unknown }
@@ -181,6 +181,14 @@ export class MemoryBillingStore implements BillingStore {
       g.calls++; g.chargedMicros += -e.amountMicros; groups.set(k, g);
     }
     return [...groups.values()].sort((a, b) => a.toolName.localeCompare(b.toolName) || a.rail.localeCompare(b.rail));
+  }
+
+  async listSettledCharges(since: Date | null, limit = MAX_QUERY_LEDGER_ENTRIES): Promise<LedgerEntry[]> {
+    const sinceMs = since ? since.getTime() : null;
+    const rows = this.ledger.filter(e =>
+      e.status === "settled" && (e.type === "debit" || e.type === "subscription_usage") && e.toolName
+      && (sinceMs === null || Date.parse(e.createdAt) >= sinceMs));
+    return rows.slice(-limit).reverse().map(clone);
   }
 
   /** Test/diagnostic helper: the raw ledger, oldest first. */

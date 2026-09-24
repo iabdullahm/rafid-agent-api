@@ -154,3 +154,10 @@ export interface ReleaseInput {
 }
 
 export interface UsageSummaryRow { toolName: string; calls: number; chargedMicros: number; rail: LedgerRail }
+
+/** Safety cap for BillingStore.listSettledCharges() (store.ts) — a generous ceiling against a
+ *  pathological unbounded query, not an expected operating limit, mirroring revenue/types.ts's
+ *  MAX_QUERY_SETTLEMENTS for the exact same reason: a deployment settling anywhere near this many
+ *  unified-billing charges in one reporting window has outgrown "fetch everything, aggregate in
+ *  plain JS" and needs SQL-side aggregation instead. */
+export const MAX_QUERY_LEDGER_ENTRIES = 500_000;

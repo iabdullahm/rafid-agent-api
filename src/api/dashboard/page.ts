@@ -623,6 +623,71 @@ const CLIENT_SCRIPT = `
   }
 
   // =============================================================================================
+  // Unified Billing Revenue (API Credits + Subscriptions) — a separate payment-rail family from
+  // the x402 settlement ledger above; always USD, never blended into the Revenue panel's
+  // per-currency (USDC) figures. Same bar-list idiom as Revenue by Capability, USD-only.
+  // =============================================================================================
+  function renderUnifiedBillingRevenue(data) {
+    var u = data.unifiedBillingRevenue;
+    var kpiEl = document.getElementById("kpi-unified-billing");
+    var byToolEl = document.getElementById("unified-billing-by-tool");
+    var noteEl = document.getElementById("unified-billing-disabled-note");
+    if (!u || !u.enabled) {
+      kpiEl.innerHTML = "";
+      byToolEl.innerHTML = "";
+      if (noteEl) noteEl.style.display = "block";
+      return;
+    }
+    if (noteEl) noteEl.style.display = "none";
+    kpiEl.innerHTML =
+      '<div class="kpi glow"><div class="kpi-value">' + fmtAmount(u.totalUsd) + ' USD</div><div class="kpi-label">Total Revenue</div>' +
+      '<div class="kpi-spark">' + sparklineSvg((data.sparklines && data.sparklines.unifiedBillingRevenue) || [], "#34e0a1") + "</div></div>" +
+      '<div class="kpi"><div class="kpi-value">' + fmtAmount(u.byRail.apiCredits) + ' USD</div><div class="kpi-label">API Credits</div></div>' +
+      '<div class="kpi"><div class="kpi-value">' + fmtAmount(u.byRail.subscription) + ' USD</div><div class="kpi-label">Subscriptions</div></div>' +
+      '<div class="kpi"><div class="kpi-value">' + fmtNum(u.settledCharges) + '</div><div class="kpi-label">Settled Charges</div></div>';
+    var rows = u.byTool || [];
+    if (!rows.length) { byToolEl.innerHTML = '<p class="empty">No settled API-credit or subscription charges in this period.</p>'; return; }
+    var maxRevenue = Math.max.apply(null, rows.map(function (r) { return r.revenueUsd || 0; }).concat([0.0001]));
+    byToolEl.innerHTML = '<div class="bar-list">' + rows.map(function (r) {
+      var pct = r.revenueUsd ? Math.max(2, Math.round((r.revenueUsd / maxRevenue) * 100)) : 0;
+      return '<div class="bar-row"><div class="bar-row-head"><span class="name">' + esc(r.toolName) + '</span><span class="value">' +
+        fmtAmount(r.revenueUsd) + " USD · " + fmtNum(r.settledCalls) + ' settled</span></div>' +
+        '<div class="bar-track"><div class="bar-fill' + (pct === 0 ? " zero" : "") + '" data-width="' + pct + '%"></div></div>' +
+        "</div>";
+    }).join("") + "</div>";
+    requestAnimationFrame(function () {
+      byToolEl.querySelectorAll(".bar-fill").forEach(function (b) { b.style.width = b.getAttribute("data-width"); });
+    });
+  }
+
+  // =============================================================================================
+  // Free Preview funnel — preview traffic and preview->paid conversion (src/preview/). Rendered as
+  // KPI tiles (not the x402 linear pipeline component below): available/limited/unavailable/invalid
+  // are parallel outcomes of one preview_requested event, not sequential funnel stages.
+  // =============================================================================================
+  function renderPreviewFunnel(data) {
+    var p = data.previewFunnel;
+    var el = document.getElementById("preview-funnel");
+    function tile(label, value, sub) {
+      return '<div class="kpi"><div class="kpi-value">' + esc(value) + '</div><div class="kpi-label">' + esc(label) + '</div>' +
+        (sub ? '<div class="kpi-sub">' + esc(sub) + "</div>" : "") + "</div>";
+    }
+    el.innerHTML =
+      '<div class="kpi-grid">' +
+      tile("Preview Requests", fmtNum(p.requested)) +
+      tile("Available", fmtNum(p.available)) +
+      tile("Limited", fmtNum(p.limited)) +
+      tile("Unavailable", fmtNum(p.unavailable)) +
+      tile("Invalid Input", fmtNum(p.invalid)) +
+      tile("Rate-Limited", fmtNum(p.rateLimited)) +
+      tile("Cache Hit Rate", fmtPct(p.cacheHitRatePct), fmtNum(p.cacheHits) + " hits / " + fmtNum(p.cacheMisses) + " misses") +
+      tile("Paid Calls Started", fmtNum(p.paidCapabilityStarted)) +
+      tile("Preview → Paid Conversions", fmtNum(p.converted)) +
+      tile("Conversion Rate", fmtPct(p.conversionRatePct), "of preview requests that led to a paid call") +
+      "</div>";
+  }
+
+  // =============================================================================================
   // x402 Funnel — visual pipeline with conversion percentages and drop-off highlight
   // =============================================================================================
   function renderX402Funnel(data) {
@@ -655,6 +720,10 @@ const CLIENT_SCRIPT = `
       '<dl class="fieldlist">' +
       "<dt>MCP</dt><dd>" + chip(s.mcp) + "</dd>" +
       "<dt>x402</dt><dd>" + chip(s.x402) + "</dd>" +
+      "<dt>L402</dt><dd>" + chip(s.l402) + "</dd>" +
+      "<dt>MPP</dt><dd>" + chip(s.mpp) + "</dd>" +
+      "<dt>API Credits</dt><dd>" + chip(s.apiCredits) + "</dd>" +
+      "<dt>Subscriptions</dt><dd>" + chip(s.subscriptions) + "</dd>" +
       "<dt>Analytics</dt><dd>" + chip(s.analytics) + "</dd>" +
       "<dt>Revenue Ledger</dt><dd>" + chip(s.revenueLedger) + "</dd>" +
       "<dt>Partner Data</dt><dd>" + esc(s.partnerData) + "</dd>" +
@@ -1010,8 +1079,10 @@ const CLIENT_SCRIPT = `
     renderRevenueKpis(data);
     renderTrend(data);
     renderRevenueByTool(data);
+    renderUnifiedBillingRevenue(data);
     renderCapabilityOverview(data);
     renderX402Funnel(data);
+    renderPreviewFunnel(data);
     renderUsage(data);
     renderToolConversion(data);
     renderAnalysisPreview(data);
@@ -1213,6 +1284,14 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
       </div>
 
       <div class="panel">
+        <h2>Unified Billing Revenue (API Credits &amp; Subscriptions)</h2>
+        <p class="panel-desc">A separate payment-rail family from the x402 settlement ledger above (always USD) &mdash; never blended into the Revenue panel's per-currency figures.</p>
+        <p id="unified-billing-disabled-note" class="empty" style="display:none">API credits and subscriptions are not enabled on this deployment.</p>
+        <div id="kpi-unified-billing" class="kpi-grid"></div>
+        <div id="unified-billing-by-tool" style="margin-top:14px"></div>
+      </div>
+
+      <div class="panel">
         <div class="panel-head">
           <h2>All Capabilities Overview</h2>
           <label class="sort-control">Sort by
@@ -1238,6 +1317,12 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
           <h2>System Status</h2>
           <div id="system-status"></div>
         </div>
+      </div>
+
+      <div class="panel">
+        <h2>Free Preview Funnel</h2>
+        <p class="panel-desc">Preview traffic and preview&rarr;paid conversion (src/preview/) &mdash; never touches billing or payment.</p>
+        <div id="preview-funnel"></div>
       </div>
 
       <div class="panel">

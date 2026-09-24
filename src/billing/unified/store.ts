@@ -41,6 +41,13 @@ export interface BillingStore {
 
   listLedger(accountId: string, options: { limit: number; before?: string }): Promise<LedgerEntry[]>;
   usageSummary(accountId: string, since: Date): Promise<UsageSummaryRow[]>;
+  /** Every SETTLED charge (type "debit" or "subscription_usage" — i.e. money actually charged to
+   *  an account for a tool call, never a top-up/refund/adjustment) across ALL accounts, with
+   *  createdAt >= since (or every such row ever, when since is null), newest first — a read-only
+   *  cross-account aggregate purpose-built for reporting (e.g. the internal ops dashboard's
+   *  unified-billing revenue section), analogous to RevenueLedger.query() in
+   *  src/revenue/types.ts. Never called from the reserve/settle/release path itself. */
+  listSettledCharges(since: Date | null, limit?: number): Promise<LedgerEntry[]>;
   close(): Promise<void>;
 }
 

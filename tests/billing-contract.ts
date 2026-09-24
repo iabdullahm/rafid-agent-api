@@ -232,6 +232,44 @@ export function billingStoreContract(label: string, makeStore: () => Promise<Bil
     assert.equal(await balance(), 0);
     void engine;
   });
+
+  test(`${label}: listSettledCharges reports every account's settled charges across the whole store, excludes pending/refunded/top-ups, and respects since`, { skip: options.skip }, async () => {
+    const { store, engine, account, authorize } = await setup({ tool_a: 0.10, tool_b: 0.20 });
+    await engine.addCredit({ accountId: account.id, amount: "5.00" });
+    const second = await engine.createAccount({ name: "Second Contract Co" });
+    await engine.addCredit({ accountId: second.id, amount: "5.00" });
+    const secondKey = await engine.createApiKey({ accountId: second.id });
+    const secondAuth = await engine.authenticate(secondKey.apiKey);
+    assert.ok(secondAuth.ok);
+    if (!secondAuth.ok) return;
+
+    const a = await authorize("tool_a", { rails: ["api_credits"] });
+    assert.ok(a.kind === "authorized");
+    if (a.kind === "authorized") await engine.settle(a.authorization); // settled — must appear
+
+    const pending = await authorize("tool_b", { rails: ["api_credits"] });
+    assert.ok(pending.kind === "authorized"); // deliberately left pending — must NOT appear
+
+    const secondCall = await engine.authorize({
+      toolName: "tool_a", account: secondAuth.account, key: secondAuth.key,
+      rails: ["api_credits"], subscriptionFallback: true, requestId: "req-second-account"
+    });
+    assert.ok(secondCall.kind === "authorized");
+    if (secondCall.kind === "authorized") await engine.settle(secondCall.authorization); // settled, OTHER account — must appear
+
+    const all = await store.listSettledCharges(null);
+    assert.ok(all.every(e => e.status === "settled" && (e.type === "debit" || e.type === "subscription_usage")),
+      "listSettledCharges must never return a pending, refunded, credit or adjustment row");
+    const ours = all.filter(e => e.accountId === account.id || e.accountId === second.id);
+    assert.equal(ours.filter(e => e.accountId === account.id && e.toolName === "tool_a").length, 1);
+    assert.equal(ours.filter(e => e.toolName === "tool_b").length, 0, "a pending charge must never be reported as settled");
+    assert.equal(ours.filter(e => e.accountId === second.id && e.toolName === "tool_a").length, 1, "must aggregate across accounts, not just the caller's own");
+
+    const before = await store.listSettledCharges(new Date("2026-01-31T09:59:59.000Z"));
+    assert.ok(before.some(e => e.accountId === account.id && e.toolName === "tool_a"));
+    const after = await store.listSettledCharges(new Date("2026-01-31T10:00:01.000Z"));
+    assert.equal(after.filter(e => e.accountId === account.id || e.accountId === second.id).length, 0, "since must exclude charges created before it");
+  });
 }
 
 export { disabledBillingConfig };
