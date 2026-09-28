@@ -3,7 +3,7 @@
   "name": "io.github.iabdullahm/rafid-agent-api",
   "title": "Rafid Agent Intelligence",
   "description": "Agent-native decision intelligence via MCP for property, business risk, documents, finance and more.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "websiteUrl": "https://api.rafidsystem.com",
   "repository": {
     "url": "https://github.com/iabdullahm/rafid-agent-api",
