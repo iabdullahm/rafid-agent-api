@@ -30,7 +30,7 @@ const billingService = new BillingService(usageRepository);
 const app = createApp(config, { store, billingService });
 if (process.env.VERCEL !== "1") {
   const server = app.listen(config.port, () => {
-    if (config.logLevel === "info") process.stderr.write(`Rafid Agent API listening on port ${config.port}\n`);
+    if (config.logLevel === "info") process.stderr.write(`Rafid Intelligence Network listening on port ${config.port}\n`);
   });
   server.on("error", () => { process.stderr.write("HTTP server failed to start\n"); process.exitCode = 1; void store?.close(); });
   const shutdown = () => {

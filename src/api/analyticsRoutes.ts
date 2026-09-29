@@ -31,7 +31,7 @@ const WIDEST_WINDOW_MS = WINDOW_MS.last30d;
 
 export function createAnalyticsRoutes(options: AnalyticsRoutesOptions): Router {
   const router = express.Router();
-  const internalAuth = requireInternalAuth(options.internalApiKey);
+  const internalAuth = requireInternalAuth(options.internalApiKey, "ANALYTICS_INTERNAL_API_KEY");
 
   async function fetchEvents() {
     return options.repository.queryEvents(new Date(Date.now() - WIDEST_WINDOW_MS));

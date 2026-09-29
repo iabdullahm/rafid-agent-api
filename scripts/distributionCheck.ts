@@ -3,7 +3,7 @@ import { resolve as resolvePath, join as joinPath, relative as relativePath } fr
 import { capabilities } from "../src/domain/capabilities.js";
 import { prices } from "../src/billing/catalog.js";
 import { agentBasePath, pricingBasePath, toolsBasePath, capabilitiesBasePath } from "../src/api/agent.js";
-import { x402BasePath } from "../src/billing/x402.js";
+import { x402BasePath, x402DocsPath } from "../src/billing/x402.js";
 import { mcpRemotePath, mcpStatusBasePath } from "../src/mcp/remote.js";
 import { PRODUCTION_BASE_URL } from "./distributionConfig.js";
 
@@ -57,7 +57,7 @@ const staticEndpoints = new Set<string>([
   "/agent.json", "/.well-known/ai-plugin.json", "/.well-known/agent.json", "/llms.txt",
   agentBasePath, pricingBasePath, toolsBasePath, capabilitiesBasePath,
   mcpStatusBasePath, mcpRemotePath,
-  x402BasePath, x402BasePath + "/status",
+  x402BasePath, x402BasePath + "/status", x402DocsPath,
 ]);
 const capabilityEndpoints = new Set<string>();
 for (const c of capabilities) {

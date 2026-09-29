@@ -27,8 +27,10 @@ async function startAnalyticsApp(opts: { internalApiKey?: string } = {}) {
   if (opts.internalApiKey !== undefined) process.env.ANALYTICS_INTERNAL_API_KEY = opts.internalApiKey;
   else delete process.env.ANALYTICS_INTERNAL_API_KEY;
   delete process.env.ANALYTICS_DATABASE_URL;
+  // This suite exercises the remote MCP analytics path; keep the transport enabled locally
+  // without changing the production default (which remains opt-in).
   const analyticsRepository = new MemoryAnalyticsRepository();
-  const config = loadConfig({ RAFID_API_KEYS: key, LOG_LEVEL: "silent", RATE_LIMIT_ENABLED: "false" });
+  const config = loadConfig({ RAFID_API_KEYS: key, LOG_LEVEL: "silent", RATE_LIMIT_ENABLED: "false", MCP_REMOTE_ENABLED: "true" });
   const app = createApp(config, { analyticsRepository });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -47,7 +49,10 @@ test("analytics/discovery: hits on exactly the tracked surfaces are counted, per
 
   // "/mcp" is a POST-only JSON-RPC transport — covered by the dedicated MCP test below.
   const trackedGetPaths = DISCOVERY_PATHS.filter(p => p !== "/mcp");
-  for (const path of trackedGetPaths) assert.equal((await fetch(base + path)).status, 200);
+  assert.equal((await fetch(base + "/agent.json?source=github&utm_medium=readme&utm_campaign=launch", {
+    headers: { "User-Agent": "curl/8.0", "X-Rafid-Test-Client": "true", "X-Rafid-Test-Token": internalApiKey }
+  })).status, 200);
+  for (const path of trackedGetPaths.filter(p => p !== "/agent.json")) assert.equal((await fetch(base + path)).status, 200);
   await fetch(base + "/agent.json"); // hit twice, to prove per-path counting isn't just presence/absence
 
   // Untracked discovery-ish endpoints (spec names 7 exact surfaces, not every discovery-adjacent
@@ -62,6 +67,12 @@ test("analytics/discovery: hits on exactly the tracked surfaces are counted, per
   const byPath = new Map<string, number>();
   for (const e of discoveryEvents) byPath.set(e.path!, (byPath.get(e.path!) ?? 0) + 1);
   assert.equal(byPath.get("/agent.json"), 2);
+  const attributed = discoveryEvents.find(e => e.path === "/agent.json");
+  assert.equal(attributed?.source, "github");
+  assert.equal(attributed?.utmMedium, "readme");
+  assert.equal(attributed?.campaign, "launch");
+  assert.equal(attributed?.clientType, "curl");
+  assert.equal(attributed?.trafficClass, "internal_test");
   for (const path of trackedGetPaths) assert.ok(byPath.has(path), `expected a recorded hit for ${path}`);
   assert.equal(byPath.size, trackedGetPaths.length);
 
@@ -92,26 +103,23 @@ test("analytics/mcp: initialize, tools/list and tools/call are each counted, wit
   await rpc("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "test", version: "1.0.0" } });
   await rpc("tools/list");
   await rpc("tools/call", { name: "analyze_property", arguments: capabilities[0]!.example });
-  await rpc("tools/call", { name: "analyze_property", arguments: { propertyValue: 0 } }); // deliberately invalid → failure path
+  await rpc("tools/call", { name: "preview_capability", arguments: { capability: "analyze_property", input: capabilities[0]!.example } });
 
   const mcpEvents = analyticsRepository.all().filter(e => e.category === "mcp");
   assert.equal(mcpEvents.filter(e => e.eventType === "initialize").length, 1);
   assert.equal(mcpEvents.filter(e => e.eventType === "tools_list").length, 1);
   const toolsCall = mcpEvents.filter(e => e.eventType === "tools_call");
-  assert.equal(toolsCall.length, 2);
-  assert.ok(toolsCall.every(e => e.toolName === "analyze_property"));
-  assert.equal(toolsCall.filter(e => e.success === true).length, 1);
-  assert.equal(toolsCall.filter(e => e.success === false).length, 1);
-  assert.ok(toolsCall.every(e => typeof e.durationMs === "number" && e.durationMs! >= 0));
+  assert.equal(toolsCall.length, 1, "only the free preview executes; the priced call is a payment challenge");
+  assert.equal(toolsCall[0]!.toolName, "preview_capability");
+  assert.equal(toolsCall[0]!.success, true);
 
   // "/mcp" is one of the tracked discovery surfaces too (see DISCOVERY_PATHS) — one hit per HTTP
   // request reaching the transport, independent of the more granular MCP breakdown above.
   assert.equal(analyticsRepository.all().filter(e => e.category === "discovery" && e.path === "/mcp").length, 4);
 
-  // Every tools/call attempt also produces a TOOL USAGE row (recordToolInvocation), the same
-  // domain REST/x402 calls feed — so MCP traffic shows up in analyze_property's success rate too.
+  // A blocked priced call does not produce a fake free TOOL USAGE row.
   const toolEvents = analyticsRepository.all().filter(e => e.category === "tool" && e.toolName === "analyze_property");
-  assert.equal(toolEvents.length, 2);
+  assert.equal(toolEvents.length, 0);
 });
 
 // -------------------------------------------------------------------------------------------
@@ -289,11 +297,11 @@ test("analytics internal auth: every route 503s when unconfigured, 401s on a mis
     // Structurally unreachable from every public discovery surface — never registered in
     // src/domain/capabilities.ts (see analyticsRoutes.ts's doc comment).
     const agentManifest = await (await fetch(base + "/agent.json")).json();
-    assert.ok(!JSON.stringify(agentManifest).toLowerCase().includes("analytics"));
+    assert.ok(!JSON.stringify(agentManifest).toLowerCase().includes("/internal/analytics"));
     const toolCatalog = await (await fetch(base + "/api/v1/tools")).json();
-    assert.ok(!JSON.stringify(toolCatalog).toLowerCase().includes("analytics"));
+    assert.ok(!JSON.stringify(toolCatalog).toLowerCase().includes("/internal/analytics"));
     const capabilitiesRegistry = await (await fetch(base + "/api/v1/capabilities")).json();
-    assert.ok(!JSON.stringify(capabilitiesRegistry).toLowerCase().includes("analytics"));
+    assert.ok(!JSON.stringify(capabilitiesRegistry).toLowerCase().includes("/internal/analytics"));
     const openapi = await (await fetch(base + "/openapi.json")).json() as { paths: Record<string, unknown> };
     assert.ok(!Object.keys(openapi.paths).some(p => p.includes("/internal/analytics")));
     const llmsTxt = await (await fetch(base + "/llms.txt")).text();

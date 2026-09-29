@@ -66,6 +66,18 @@ test("x402 discovery and OpenAPI expose the pay-per-call routes when enabled", a
   for (const c of capabilities) assert.equal(doc.paths["/api/v1/x402" + c.path].post.operationId, c.name + "_x402");
 });
 
+test("x402 OpenAPI 402 guidance documents additive pay-and-retry aliases", () => {
+  const config = loadConfig({ RAFID_API_KEYS: key, X402_ENABLED: "true", X402_WALLET_ADDRESS: wallet });
+  const doc = buildOpenapi(config) as any;
+  const response = doc.paths["/api/v1/x402" + capabilities[0].path].post.responses["402"];
+  const schema = response.content["application/json"].schema;
+  assert.ok(schema.required.includes("paymentGuidanceVersion"));
+  assert.ok(schema.required.includes("nextAction"));
+  assert.equal(schema.properties.nextAction.properties.type.const, "pay_and_retry");
+  assert.equal(schema.properties.nextAction.properties.retrySameBody.const, true);
+  assert.equal(schema.properties.retry.properties.retrySameBody.type, "boolean");
+});
+
 // Requires real internet access to the public x402.org facilitator, so it's opt-in like
 // the PostgreSQL integration tests (npm run test:db). Run with: RUN_X402_LIVE_TESTS=true npm test
 test("x402 payment gate returns 402 with a PAYMENT-REQUIRED header describing accepted payment options (live facilitator)", { skip: !process.env.RUN_X402_LIVE_TESTS }, async t => {

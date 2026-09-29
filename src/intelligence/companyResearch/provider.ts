@@ -85,17 +85,26 @@ export async function runResearchCompany(rawInput: unknown, options: RunResearch
 
   const provider = buildWebSearchProvider({ requestId: options.requestId ?? null, capability: "research_company" });
   const queries = selectQueries(focusAreas, input.depth);
-  const searchResults = await Promise.all(queries.map(q => provider.search(q(input.company), { maxResults: 5, freshness: "year" })));
-  const flat = dedupeByUrl(searchResults.flat());
+  const outcomes = provider.searchWithStatus
+    ? await Promise.all(queries.map(q => provider.searchWithStatus!(q(input.company), { maxResults: 5, freshness: "year" })))
+    : (await Promise.all(queries.map(q => provider.search(q(input.company), { maxResults: 5, freshness: "year" })))).map(results => ({ status: "ok" as const, results }));
+  const flat = dedupeByUrl(outcomes.flatMap(outcome => [...outcome.results]));
+  const providerStatuses = [...new Set(outcomes.map(outcome => outcome.status))];
 
   if (flat.length === 0) {
+    const providerFailure = providerStatuses.some(status => status !== "ok");
     return buildResult({
       input, sources: [], overview: null, productsAndServices: [], leadership: [],
       fundingSummary: null, knownRounds: [], competitors: [], technologySignals: [], recentDevelopments: [], riskFlags: [],
       industry: null, headquarters: null, founded: null,
       confidence: 0.05, freshness: { latestSourceDate: null, freshnessDays: null },
       dataMode: "live",
-      limitations: ["No relevant web search results were found for this company.", ...baseLimitations]
+      limitations: [
+        providerFailure
+          ? "The web search provider did not return usable results (statuses: " + providerStatuses.join(", ") + "). Check Tavily credentials, quota, network access and timeout logs before treating this as a no-results finding."
+          : "No relevant web search results were found for this company.",
+        ...baseLimitations
+      ]
     }, key);
   }
 
@@ -119,6 +128,9 @@ export async function runResearchCompany(rawInput: unknown, options: RunResearch
   const confidence = Math.round(Math.min(0.9, 0.15 + sourceConfidence + (synthesized ? 0.3 : 0)) * 100) / 100;
 
   const limitations = [...baseLimitations];
+  if (providerStatuses.some(status => status !== "ok")) {
+    limitations.unshift("Some web-search queries did not complete successfully (statuses: " + providerStatuses.join(", ") + "); the result may have incomplete coverage.");
+  }
   if (!synthesized) {
     limitations.unshift(
       "Structured extraction (industry, leadership, funding, competitors, etc.) requires an LLM synthesis provider, which is not configured for this deployment — only raw web sources are returned below for the calling agent to review directly."

@@ -49,6 +49,45 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
       // EXISTS rather than a second CREATE TABLE, so an already-deployed table picks it up
       // without a separate migration step; existing rows simply read back with channel = null.
       `ALTER TABLE rafid_analytics_events ADD COLUMN IF NOT EXISTS channel text`
+    )).then(() => this.pool.query(
+      // Additive columns for the Free Preview funnel + preview->paid conversion tracking (see
+      // analytics/types.ts's requestFingerprint/paymentRail/previewSeen/conversionLatencyMs doc
+      // comments) — same ADD COLUMN IF NOT EXISTS discipline as `channel` above; existing rows
+      // simply read back with these as null.
+      `ALTER TABLE rafid_analytics_events
+        ADD COLUMN IF NOT EXISTS request_fingerprint text,
+        ADD COLUMN IF NOT EXISTS payment_rail text,
+        ADD COLUMN IF NOT EXISTS preview_seen boolean,
+        ADD COLUMN IF NOT EXISTS conversion_latency_ms double precision`
+    )).then(() => this.pool.query(
+      // Additive column for the "funding" category (src/billing/external/) — see
+      // analytics/types.ts's `provider` doc comment. Same ADD COLUMN IF NOT EXISTS discipline;
+      // existing rows simply read back with provider = null.
+      `ALTER TABLE rafid_analytics_events ADD COLUMN IF NOT EXISTS provider text`
+    )).then(() => this.pool.query(
+      // Additive column for the Revenue Conversion Audit (src/audit/) — see analytics/types.ts's
+      // `requestId` doc comment. Same ADD COLUMN IF NOT EXISTS discipline; existing rows simply
+      // read back with request_id = null (correctly meaning "recorded before this field existed").
+      `ALTER TABLE rafid_analytics_events ADD COLUMN IF NOT EXISTS request_id text`
+    )).then(() => this.pool.query(
+      `ALTER TABLE rafid_analytics_events
+        ADD COLUMN IF NOT EXISTS payment_guidance_version text,
+        ADD COLUMN IF NOT EXISTS payment_docs_url text,
+        ADD COLUMN IF NOT EXISTS challenge_parseable boolean`
+    )).then(() => this.pool.query(
+      `ALTER TABLE rafid_analytics_events
+        ADD COLUMN IF NOT EXISTS source text,
+        ADD COLUMN IF NOT EXISTS utm_medium text,
+        ADD COLUMN IF NOT EXISTS campaign text,
+        ADD COLUMN IF NOT EXISTS utm_content text,
+        ADD COLUMN IF NOT EXISTS referrer_host text,
+        ADD COLUMN IF NOT EXISTS client_type text,
+        ADD COLUMN IF NOT EXISTS traffic_class text`
+    )).then(() => this.pool.query(
+      // One request can emit several analytics rows across categories (a "tool" invocation row
+      // plus an "x402"/"l402" funnel row for the same physical HTTP request) that the audit layer
+      // must join efficiently — this index makes that join a fast lookup rather than a table scan.
+      `CREATE INDEX IF NOT EXISTS rafid_analytics_events_request_id_idx ON rafid_analytics_events (request_id) WHERE request_id IS NOT NULL`
     )).then(() => undefined);
   }
 
@@ -57,12 +96,19 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
     await this.pool.query(
       `INSERT INTO rafid_analytics_events(
         category, event_type, path, tool_name, channel, success, duration_ms, amount, currency, tx_hash,
-        data_source, client_hash, user_agent, referer, client_name, created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+        data_source, client_hash, user_agent, referer, client_name, request_fingerprint, payment_rail,
+        preview_seen, conversion_latency_ms, provider, request_id, payment_guidance_version, payment_docs_url,
+        challenge_parseable, source, utm_medium, campaign, utm_content, referrer_host, client_type, traffic_class, created_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)`,
       [
         event.category, event.eventType, event.path, event.toolName, event.channel, event.success, event.durationMs,
         event.amount, event.currency, event.txHash, event.dataSource, event.clientHash, event.userAgent,
-        event.referer, event.clientName, event.createdAt ?? new Date().toISOString()
+        event.referer, event.clientName, event.requestFingerprint ?? null, event.paymentRail ?? null,
+        event.previewSeen ?? null, event.conversionLatencyMs ?? null, event.provider ?? null, event.requestId ?? null,
+        event.paymentGuidanceVersion ?? null, event.paymentDocsUrl ?? null, event.challengeParseable ?? null,
+        event.source ?? null, event.utmMedium ?? null, event.campaign ?? null, event.utmContent ?? null,
+        event.referrerHost ?? null, event.clientType ?? null, event.trafficClass ?? null,
+        event.createdAt ?? new Date().toISOString()
       ]
     );
   }
@@ -71,7 +117,9 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
     await this.ready;
     const result = await this.pool.query(
       `SELECT category, event_type, path, tool_name, channel, success, duration_ms, amount, currency, tx_hash,
-              data_source, client_hash, user_agent, referer, client_name, created_at
+              data_source, client_hash, user_agent, referer, client_name, request_fingerprint, payment_rail,
+              preview_seen, conversion_latency_ms, provider, request_id, payment_guidance_version, payment_docs_url,
+              challenge_parseable, source, utm_medium, campaign, utm_content, referrer_host, client_type, traffic_class, created_at
        FROM rafid_analytics_events WHERE created_at >= $1 ORDER BY created_at DESC LIMIT $2`,
       [since.toISOString(), MAX_QUERY_EVENTS]
     );
@@ -80,7 +128,13 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
       success: r.success, durationMs: r.duration_ms === null ? null : Number(r.duration_ms),
       amount: r.amount === null ? null : Number(r.amount), currency: r.currency, txHash: r.tx_hash,
       dataSource: r.data_source, clientHash: r.client_hash, userAgent: r.user_agent, referer: r.referer,
-      clientName: r.client_name, createdAt: (r.created_at as Date).toISOString()
+      clientName: r.client_name, requestFingerprint: r.request_fingerprint, paymentRail: r.payment_rail,
+      previewSeen: r.preview_seen, conversionLatencyMs: r.conversion_latency_ms === null ? null : Number(r.conversion_latency_ms),
+      provider: r.provider, requestId: r.request_id, paymentGuidanceVersion: r.payment_guidance_version,
+      paymentDocsUrl: r.payment_docs_url, challengeParseable: r.challenge_parseable,
+      source: r.source, utmMedium: r.utm_medium, campaign: r.campaign, utmContent: r.utm_content,
+      referrerHost: r.referrer_host, clientType: r.client_type, trafficClass: r.traffic_class,
+      createdAt: (r.created_at as Date).toISOString()
     }));
   }
 

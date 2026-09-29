@@ -150,7 +150,7 @@ export interface ToolsWindow {
 }
 
 function summarizeToolsWindow(windowEvents: readonly AnalyticsEvent[]): ToolsWindow {
-  const invocations = windowEvents.filter(e => e.category === "tool");
+  const invocations = windowEvents.filter(e => e.category === "tool" && e.trafficClass !== "internal_test");
   const byTool: Record<string, ToolStats> = {};
   for (const invocation of invocations) {
     const name = invocation.toolName ?? "unknown";
@@ -204,6 +204,13 @@ export interface X402Window {
   paymentFailed: number;
   settlementSuccess: number;
   settlementFailure: number;
+  /** Quality signals for the agent-facing 402 guidance, kept separate from payment counts. */
+  challengeQuality?: {
+    parseable: number;
+    docsUrlPresent: number;
+    guidanceVersions: Record<string, number>;
+    clients: Record<string, number>;
+  };
   settledAmountByCurrency: Record<string, number>;
   byTool: Record<string, { challenges: number; settlementSuccess: number; settlementFailure: number }>;
   /** Safe, public on-chain identifiers only (see recorder.ts's doc comment on what txHash may
@@ -215,7 +222,7 @@ export interface X402Window {
 const MAX_RECENT_SETTLEMENTS = 20;
 
 function summarizeX402Window(windowEvents: readonly AnalyticsEvent[]): X402Window {
-  const x402Events = windowEvents.filter(e => e.category === "x402");
+  const x402Events = windowEvents.filter(e => e.category === "x402" && e.trafficClass !== "internal_test");
   const settledAmountByCurrency: Record<string, number> = {};
   const byTool: Record<string, { challenges: number; settlementSuccess: number; settlementFailure: number }> = {};
   for (const event of x402Events) {
@@ -233,12 +240,26 @@ function summarizeX402Window(windowEvents: readonly AnalyticsEvent[]): X402Windo
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, MAX_RECENT_SETTLEMENTS)
     .map(e => ({ toolName: e.toolName, amount: e.amount, currency: e.currency, txHash: e.txHash!, at: e.createdAt }));
+  const challenges = x402Events.filter(e => e.eventType === "challenge");
+  const guidanceVersions: Record<string, number> = {};
+  const clients: Record<string, number> = {};
+  for (const event of challenges) {
+    if (event.paymentGuidanceVersion) guidanceVersions[event.paymentGuidanceVersion] = (guidanceVersions[event.paymentGuidanceVersion] ?? 0) + 1;
+    const client = event.clientName ?? event.userAgent ?? "unknown";
+    clients[client] = (clients[client] ?? 0) + 1;
+  }
   return {
-    challenges: x402Events.filter(e => e.eventType === "challenge").length,
+    challenges: challenges.length,
     paymentVerified: x402Events.filter(e => e.eventType === "payment_verified").length,
     paymentFailed: x402Events.filter(e => e.eventType === "payment_failed").length,
     settlementSuccess: x402Events.filter(e => e.eventType === "settlement_success").length,
     settlementFailure: x402Events.filter(e => e.eventType === "settlement_failure").length,
+    challengeQuality: {
+      parseable: challenges.filter(e => e.challengeParseable === true).length,
+      docsUrlPresent: challenges.filter(e => Boolean(e.paymentDocsUrl)).length,
+      guidanceVersions,
+      clients
+    },
     settledAmountByCurrency, byTool, recentSettlements
   };
 }

@@ -1,0 +1,95 @@
+{
+  "generatedAt": "2026-09-21T07:52:04.738Z",
+  "inputFile": "/home/claude/rafid-mirror/data/source/al-mouj-report-raw.xls",
+  "sourceType": "partner_feed",
+  "sourceName": "Al Mouj Muscat",
+  "sourceRows": 4886,
+  "acceptedRows": 3396,
+  "rejectedRows": 1490,
+  "rejectionReasons": {
+    "UNSUPPORTED_PROPERTY_TYPE": 47,
+    "NOT_A_COMPLETED_SALE": 450,
+    "INVALID_SIZE": 992,
+    "INVALID_DATE": 1
+  },
+  "dateRange": {
+    "earliestObservedAt": "2006-01-04",
+    "latestObservedAt": "2026-09-10"
+  },
+  "ageBuckets": {
+    "0-1y": 224,
+    "1-3y": 436,
+    "3-5y": 309,
+    "5-10y": 564,
+    "10+y": 1863
+  },
+  "phaseCount": 30,
+  "propertyTypes": {
+    "apartment": 2107,
+    "townhouse": 405,
+    "villa": 884
+  },
+  "priceStats": {
+    "count": 3396,
+    "min": 50880,
+    "max": 5800000,
+    "mean": 228588.04,
+    "median": 151000,
+    "p25": 111000,
+    "p75": 232000
+  },
+  "sizeStats": {
+    "count": 3396,
+    "min": 60.09,
+    "max": 6366.94,
+    "mean": 228.21,
+    "median": 144,
+    "p25": 104,
+    "p75": 286
+  },
+  "pricePerSqmStats": {
+    "count": 3396,
+    "min": 392.15686274509807,
+    "max": 3060.5659385624654,
+    "mean": 1017.52,
+    "median": 1011.9147507971136,
+    "p25": 841.0506663709126,
+    "p75": 1172.6190476190477
+  },
+  "partnerIssues": [
+    {
+      "code": "AZURA_ZERO_BUILT_UP_AREA",
+      "affectedRows": 1196,
+      "phase": "Azura Beach Residences",
+      "reason": "Every row in this phase has Built Up Area SqM = 0.00 (or blank), regardless of property type (Apartment/Townhouse/Chalet). The accompanying Plot Area SqM for these rows is a shared building/parcel-level figure (not a per-unit size) and is not a valid substitute. These rows are rejected (INVALID_SIZE, via importPipeline.ts's property-type size bound) and excluded from the accepted dataset rather than imported with a guessed or derived size.",
+      "recommendedPartnerAction": "Request unit-level Built Up Area SqM from the partner. Plot Area appears to be a shared/building-level value and must not be substituted for unit area."
+    }
+  ],
+  "privacyExcludedFields": [
+    "Payment Plan: Payment Plan Name (contains a partner-internal plan identifier/hash) — never copied into any output field or metadata",
+    "Government Number (a low-cardinality internal/official reference; excluded out of an abundance of caution given the field name, regardless of its exact internal meaning, which this file alone cannot confirm) — never copied into any output field or metadata"
+  ],
+  "saleSemantics": {
+    "priceSemantics": "contracted_unit_price",
+    "handoverCompletedTracked": true,
+    "neverExposedOrImplied": [
+      "verified_conveyance_price",
+      "government_registered_transaction",
+      "final_title_transfer_price"
+    ]
+  },
+  "eventIdentityStrategy": {
+    "sourceRecordIdFormula": "sha256(Unit Number + \"|\" + Booking Date (raw) + \"|\" + Unit Price (raw)), truncated to 24 hex characters",
+    "rationale": "Unit Number alone is not treated as a permanent transaction-event identity: a future export may carry a resale or rebooking against the same Unit Number, which must be recorded as a new event (and a routine re-export of the SAME event must still update in place, not duplicate). Hashing (Unit Number, Booking Date, Unit Price) together gives a stable id for the same event across re-imports while correctly distinguishing a genuinely new event on the same unit.",
+    "plaintextUnitNumberPreservedIn": "metadata.unitNumber (group B, provenance-internal) — never dropped, only removed from the dedup key itself"
+  },
+  "freshRecordCount": 224,
+  "staleRecordCount": 3172,
+  "staleDaysThresholdUsed": 365,
+  "recordsObservedWithinLast365Days": 224,
+  "recordsObservedWithinLast730Days": 617,
+  "recordsObservedWithinLast1095Days": 660,
+  "productionImportCandidateFile": "data/al-mouj-partner-sales-import.strict.csv",
+  "notImportedYet": true,
+  "approvalRequired": "Do not run market:import against this dataset until this audit has been reviewed and explicitly approved."
+}

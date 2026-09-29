@@ -104,7 +104,7 @@ function buildCurlExample(baseUrl: string): string {
 }
 
 function buildReadme(partner: PropertyDataPartner, baseUrl: string): string {
-  return `# Rafid Agent API — Partner Onboarding: ${partner.partnerName}
+  return `# Rafid Intelligence Network — Partner Onboarding: ${partner.partnerName}
 
 Partner id: \`${partner.partnerId}\`
 Feed type: \`${partner.feedType}\`

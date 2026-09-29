@@ -175,7 +175,7 @@ test("MPP enabled: discovery (/agent.json, /.well-known/agent.json, /llms.txt, /
   assert.equal(card.skills.length, capabilities.length);
   assert.deepEqual(card, buildAgentCard(config, base));
   const llms = await (await fetch(base + "/llms.txt")).text();
-  assert.equal(llms, buildLlmsTxt(config));
+  assert.equal(llms, buildLlmsTxt(config, base));
   assert.match(llms, /MPP charge: {4}POST \/api\/v1\/mpp\/charge\/analyze_property/);
   assert.match(llms, /## Payment \(MPP \/ Machine Payments Protocol\)/);
   const openapi = await (await fetch(base + "/openapi.json")).json();
@@ -848,9 +848,9 @@ test("MPP Postgres: the mppx AtomicStore adapter is linearizable across concurre
 // MCP — the MPP MCP transport binding, driven by the official mppx McpClient
 // ===============================================================================================
 
-test("MPP over MCP (MPP_MCP_ENABLED): mppx McpClient pays a tools/call on /mcp/mpp; /mcp stays free and unchanged", async t => {
+test("MPP over MCP (MPP_MCP_ENABLED): mppx McpClient pays a tools/call on /mcp/mpp; /mcp also gates priced tools", async t => {
   const { McpClient } = await import("mppx/mcp/client");
-  const { base, facilitator } = await realChargeApp(t, { MPP_MCP_ENABLED: "true" });
+  const { base, facilitator } = await realChargeApp(t, { MPP_MCP_ENABLED: "true", MCP_REMOTE_ENABLED: "true" });
   const rpc = async (path: string, method: string, params: unknown, id = 1) => {
     const r = await fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
     return r.json();
@@ -882,9 +882,10 @@ test("MPP over MCP (MPP_MCP_ENABLED): mppx McpClient pays a tools/call on /mcp/m
   assert.ok(paid.receipt?.reference);
   assert.equal(facilitator.settles, 1);
 
-  // The free /mcp endpoint is untouched: no payment required there.
+  // The public /mcp endpoint requires a payment rail for priced tools.
   const free = await rpc("/mcp", "tools/call", { name: "analyze_property", arguments: analyzeProperty.example });
-  assert.ok(free.result.structuredContent);
+  assert.equal(free.error.code, -32002);
+  assert.equal(free.error.data.paymentEndpoint, "/mcp/credits");
 });
 
 test("MPP over MCP is not mounted unless MPP_MCP_ENABLED=true", async t => {

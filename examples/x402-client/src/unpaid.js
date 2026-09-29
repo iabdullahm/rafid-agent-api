@@ -7,7 +7,7 @@
 // except (optionally) RAFID_API_URL.
 import { ANALYZE_URL, TEST_PAYLOAD, fetchUnpaidQuote, printUnpaidQuote } from "./lib.js";
 
-console.log(`Rafid Agent API x402 client example — unpaid request only (no wallet needed)`);
+console.log(`Rafid Intelligence Network x402 client example — unpaid request only (no wallet needed)`);
 console.log(`POST ${ANALYZE_URL}`);
 console.log(`Payload: ${JSON.stringify(TEST_PAYLOAD)}`);
 

@@ -22,6 +22,7 @@ export interface SafeFeedFetchResult {
   contentType: string | null;
   body: string;
   finalUrl: string;
+  headers: Headers;
   /** Only ever true when the caller opted into truncateAtLimit. */
   truncated?: boolean;
   /** The raw response bytes — only present when the caller opted into returnBytes (binary
@@ -88,11 +89,11 @@ export async function safeFeedFetch(url: string, options: SafeFeedFetchOptions):
     const contentType = response.headers.get("content-type");
     if (options.truncateAtLimit) {
       const { body, truncated } = await readBodyTruncating(response, options.maxResponseBytes);
-      return { status: response.status, contentType, body, finalUrl: currentUrl.toString(), truncated };
+      return { status: response.status, contentType, headers: response.headers, body, finalUrl: currentUrl.toString(), truncated };
     }
     const raw = await readBodyWithLimit(response, options.maxResponseBytes);
     const body = raw.toString("utf8");
-    return { status: response.status, contentType, body, finalUrl: currentUrl.toString(), ...(options.returnBytes ? { bytes: raw } : {}) };
+    return { status: response.status, contentType, headers: response.headers, body, finalUrl: currentUrl.toString(), ...(options.returnBytes ? { bytes: raw } : {}) };
   }
 }
 

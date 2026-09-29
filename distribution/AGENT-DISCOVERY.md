@@ -4,7 +4,7 @@ Every discovery surface below is generated at request time from the same capabil
 
 | Surface | Role |
 |---|---|
-| `GET /agent.json` | The full agent manifest: product identity, every supported protocol (MCP/x402/REST) with role (`primary`/`compatibility`), the OpenAPI URL, x402 terms, and the complete tool catalog with full input/output JSON Schemas — the richest single document. |
+| `GET /agent.json` | The full agent manifest: product identity, every supported protocol (x402/MCP/REST) with role (`primary`/`compatibility`), the OpenAPI URL, x402 terms, and the complete tool catalog with full input/output JSON Schemas — the richest single document. |
 | `GET /.well-known/agent.json` | An Agent Card in the A2A ("Agent2Agent") convention's well-known location, listing each capability as a `skill`. See [`A2A.md`](A2A.md). |
 | `GET /.well-known/ai-plugin.json` | A manifest in the legacy OpenAI ChatGPT-plugin convention, for tooling that still discovers services this way. See [`A2A.md`](A2A.md). |
 | `GET /llms.txt` | A plain-text briefing for an LLM-based agent that hasn't called a JSON endpoint yet: what Rafid is, every tool and how to call it, pricing, the x402 payment model, and known limitations — including the asking-price-vs-contracted-price distinction, in prose. |
@@ -62,6 +62,6 @@ The full agent manifest at `/agent.json` embeds this same object (plus the full 
 
 1. Fetch one discovery surface (whichever fits your framework — `/llms.txt` for a text-only agent, `/api/v1/capabilities` or `/agent.json` for a structured one).
 2. Match the user's question against `whenToUse`/`useCases`/`priorityContexts`/`sampleQueries`, not against generic real-estate keywords alone.
-3. Call the matched tool over whichever transport fits (MCP, REST+API-key, or x402 — see [`QUICKSTART.md`](QUICKSTART.md)).
+3. For paid execution, call the matched tool's `x402Endpoint` (`POST /api/v1/x402/<tool-path>`). Use MCP only for discovery/compatibility; free MCP calls do not generate x402 revenue. REST+API-key is the fallback for agents that cannot sign x402 payments (see [`QUICKSTART.md`](QUICKSTART.md)).
 4. Read `provenance`, `dataQuality`, `confidence`, and `riskFlags` from the result before reporting a number.
 5. If reporting alongside any other evidence (a web-search asking price, another data source), label each by its evidence type and never average them into one figure.

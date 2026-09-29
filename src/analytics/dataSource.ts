@@ -117,6 +117,20 @@ export function classifyDataSource(toolName: string, data: unknown): DataSource 
   // invoice_anomaly_check: analyzes only caller-supplied invoice/context data — no data source applies.
   if (toolName === "invoice_anomaly_check") return null;
 
+  // vehicle_value_estimate: live when any configured market-data provider returned evidence.
+  if (toolName === "vehicle_value_estimate") {
+    const coverage = record.marketCoverage;
+    if (!coverage || typeof coverage !== "object") return "unknown";
+    return (coverage as Record<string, unknown>).liveMarketDataAvailable === true ? "live_provider" : "not_configured";
+  }
+
+  if (toolName === "shipping_cost_estimate") {
+    if (record.rateSource === "live_carrier") return "live_provider";
+    if (record.rateSource === "internal_estimate") return "partner_feed";
+    if (record.rateSource === "heuristic_estimate") return "not_configured";
+    return "unknown";
+  }
+
   return null;
 }
 

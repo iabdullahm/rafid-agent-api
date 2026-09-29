@@ -1,7 +1,15 @@
-// Shared helpers for the Rafid Agent API x402 example client. This file never touches a
+// Shared helpers for the Rafid Intelligence Network x402 example client. This file never touches a
 // wallet or private key by itself — only pay.js does, and only after the confirmation gate.
-import "dotenv/config";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import dotenv from "dotenv";
 import { decodePaymentRequiredHeader } from "@x402/core/http";
+
+// Load the client-local .env relative to this source file, not process.cwd().
+// This keeps the reference client reliable when launched from the repository root
+// or any other working directory, without copying secrets into source code.
+const clientDir = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(clientDir, "..", ".env"), override: true });
 
 export const RAFID_API_URL = (process.env.RAFID_API_URL || "https://api.rafidsystem.com").replace(/\/+$/, "");
 export const ANALYZE_PATH = "/api/v1/x402/property/analyze";
@@ -18,7 +26,7 @@ export const TEST_PAYLOAD = Object.freeze({
 });
 
 // Display-only lookup, so the console output can show "$0.01 USDC" next to the raw atomic
-// amount the server quoted, for the handful of networks Rafid Agent API currently supports.
+// amount the server quoted, for the handful of networks Rafid Intelligence Network currently supports.
 // This is NEVER consulted to decide what to pay: the real payment (in pay.js, via
 // @x402/fetch + @x402/evm) always pays the exact asset address and atomic amount the server
 // returns in real time, regardless of whether this table recognizes that asset.

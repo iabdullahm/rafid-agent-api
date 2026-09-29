@@ -1,3 +1,5 @@
+import type { PaymentMethodDetail } from "../billing/paymentMethods.js";
+
 /**
  * Free Preview layer — shared contract.
  *
@@ -54,7 +56,11 @@ export interface CapabilityPreviewBody {
 export interface CapabilityPreviewFullResult {
   capability: string;
   price: { amount: string; currency: string };
-  paymentMethods?: string[];
+  /** Real, config-derived payment rails an agent can actually use for the paid call — see
+   *  billing/paymentMethods.ts's buildPaymentMethodDetails(). Omitted (never an empty array) when
+   *  no pay-per-call rail is enabled on this deployment, so a caller can check `"paymentMethods"
+   *  in fullResult` rather than checking array length. */
+  paymentMethods?: PaymentMethodDetail[];
   endpoint?: string;
 }
 

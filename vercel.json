@@ -7,5 +7,6 @@
     "src/server.ts": {
       "maxDuration": 60
     }
-  }
+  },
+  "crons": [{ "path": "/api/internal/monitoring/run-due", "schedule": "0 0 * * *" }]
 }

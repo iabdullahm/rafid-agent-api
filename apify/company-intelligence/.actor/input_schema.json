@@ -1,0 +1,46 @@
+{
+  "title": "Global Company Intelligence & Risk input",
+  "description": "Analyze one company or up to 100 companies. Provide at least one stable identifier per company.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "mode": { "title": "Analysis mode", "type": "string", "description": "Product to run.", "editor": "select", "default": "company_reputation", "enum": ["company_basic", "company_reputation", "business_risk"], "enumTitles": ["Company basic", "Company reputation", "Business risk"] },
+    "company": {
+      "title": "Single company",
+      "type": "object",
+      "description": "Use this for one company. Enter only company identifiers here; do not paste the full Actor input envelope.",
+      "editor": "json",
+      "properties": {
+        "name": { "title": "Company name", "type": "string", "description": "Legal or trading name.", "editor": "textfield", "example": "Microsoft" },
+        "domain": { "title": "Domain", "type": "string", "description": "Public domain, e.g. microsoft.com.", "editor": "textfield", "example": "microsoft.com" },
+        "registrationNumber": { "title": "Registration number", "type": "string", "description": "Company registration number in its home registry, if known.", "editor": "textfield" },
+        "country": { "title": "Country", "type": "string", "description": "ISO country code, e.g. US.", "editor": "textfield", "example": "US" },
+        "city": { "title": "City", "type": "string", "description": "City of registration or headquarters, if known.", "editor": "textfield" },
+        "website": { "title": "Website", "type": "string", "description": "Public http(s) URL.", "editor": "textfield" },
+        "address": { "title": "Address", "type": "string", "description": "Street or registered address, if known.", "editor": "textfield" }
+      },
+      "additionalProperties": false,
+      "default": { "name": "Microsoft", "domain": "microsoft.com", "country": "US" }
+    },
+    "companies": {
+      "title": "Companies (batch)",
+      "type": "array",
+      "description": "Optional batch of 1–100 companies. Each item contains only company identifiers. Do not provide company at the same time.",
+      "editor": "json",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "name": { "title": "Company name", "type": "string", "description": "Legal or trading name, if known.", "editor": "textfield" },
+          "domain": { "title": "Domain", "type": "string", "description": "Public company domain, if known.", "editor": "textfield" },
+          "registrationNumber": { "title": "Registration number", "type": "string", "description": "Company registration number in its home registry, if known.", "editor": "textfield" },
+          "country": { "title": "Country", "type": "string", "description": "ISO country code, if known.", "editor": "textfield" },
+          "city": { "title": "City", "type": "string", "description": "City of registration or headquarters, if known.", "editor": "textfield" },
+          "website": { "title": "Website", "type": "string", "description": "Public http(s) company website, if known.", "editor": "textfield" },
+          "address": { "title": "Address", "type": "string", "description": "Street or registered address, if known.", "editor": "textfield" }
+        }
+      }
+    }
+  }
+}

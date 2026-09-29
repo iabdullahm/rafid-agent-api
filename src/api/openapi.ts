@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { capabilities } from "../domain/capabilities.js";
 import { prices } from "../billing/catalog.js";
-import { x402BasePath } from "../billing/x402.js";
+import { x402BasePath, x402DocsPath } from "../billing/x402.js";
 import { agentBasePath, buildAgentInfo, buildCapabilitiesRegistry, buildPricingInfo, buildToolCatalog, capabilitiesBasePath, pricingBasePath, toolsBasePath } from "./agent.js";
 import { buildAgentCard, buildAgentManifest, buildAiPluginManifest } from "./manifest.js";
 import { buildLlmsTxt } from "./llms-txt.js";
@@ -11,6 +11,11 @@ import { buildMcpStatus, mcpStatusBasePath } from "../mcp/remote.js";
 import { buildMppOpenapiPaths } from "../billing/mpp/openapi.js";
 import { previewBasePath } from "./previewRoutes.js";
 import type { MppConfig } from "../billing/mpp/config.js";
+import type { BillingConfig } from "../billing/unified/config.js";
+import { buildPaymentMethods, paymentMethodsPath, railAvailability } from "../billing/unified/discovery.js";
+import { accountBasePath } from "../billing/unified/http.js";
+import { mcpCreditsPath } from "../billing/unified/mcp.js";
+import { PLATFORM_DESCRIPTION, PLATFORM_NAME } from "../brand.js";
 const json = (schema: unknown, example?: unknown, summary = "Example") => ({ "application/json": {
   schema, ...(example === undefined ? {} : { examples: { default: { summary, value: example } } })
 } });
@@ -36,6 +41,18 @@ const errors = Object.fromEntries([
   [429, "RATE_LIMITED", "Per-minute limit or monthly quota exceeded (QUOTA_EXCEEDED)"], [503, "SERVICE_UNAVAILABLE", "Customer or usage storage unavailable"], [500, "INTERNAL_ERROR", "An unexpected error occurred"]
 ].map(([status, code, message]) => [status, { description: message, content: json(errorSchema, { success: false, error: { code, message }, meta: { requestId: "example-request" } }) }]));
 const x402Errors = Object.fromEntries(Object.entries(errors).filter(([status]) => status !== "401"));
+const x402Agent402Schema = {
+  type: "object", required: ["success", "error", "protocol", "x402Version", "guidanceVersion", "paymentGuidanceVersion", "capability", "payment", "retry", "nextAction", "docs"],
+  properties: {
+    success: { const: false }, error: { const: "payment_required" }, message: { type: "string" },
+    protocol: { const: "x402" }, x402Version: { type: "integer", const: 2 }, guidanceVersion: { type: "string" }, paymentGuidanceVersion: { type: "string" },
+    capability: { type: "object", properties: { id: { type: "string" }, price: { type: "object" } } },
+    payment: { type: "object", properties: { required: { type: "boolean" }, protocol: { type: "string" }, scheme: { type: "string" }, network: { type: "string" }, asset: { type: "string" }, assetContract: { type: ["string", "null"] }, payTo: { type: "string" }, resource: { type: "string" }, method: { type: "string" }, paymentRequiredHeader: { type: "string" } } },
+    retry: { type: "object", properties: { action: { type: "string" }, method: { type: "string" }, url: { type: "string" }, header: { type: "string" }, preserveRequestBody: { type: "boolean" }, retrySameBody: { type: "boolean" } } },
+    nextAction: { type: "object", required: ["type", "protocol", "method", "url", "retrySameBody"], properties: { type: { const: "pay_and_retry" }, protocol: { const: "x402" }, method: { type: "string" }, url: { type: "string", format: "uri" }, retrySameBody: { const: true } } },
+    clients: { type: "object" }, docs: { type: "string", format: "uri" }, requestId: { type: ["string", "null"] }, paymentSupportRequired: { type: "boolean" }, supportedProtocols: { type: "array", items: { type: "string" } }
+  }
+};
 /** Capability-specific structured errors (in addition to the shared set above). None of them is a
  *  successful call, so no paid settlement happens on x402 / L402 / MPP. */
 const documentFactsErrors = Object.fromEntries(([
@@ -53,7 +70,14 @@ const invoiceAnomalyErrors = {
   "413": { description: "Request body exceeds 1mb", content: json(errorSchema, { success: false, error: { code: "PAYLOAD_TOO_LARGE", message: "Request body exceeds 1mb" }, meta: { requestId: "example-request" } }) },
   "500": { description: "ANALYSIS_FAILED — the engine failed unexpectedly (no internal detail exposed). Not charged.", content: json(errorSchema, { success: false, error: { code: "ANALYSIS_FAILED", message: "The invoice could not be analyzed due to an internal error. No payment was taken.", details: { status: "analysis_failed" } }, meta: { requestId: "example-request" } }) }
 };
+/** vehicle_value_estimate: schema errors, CURRENCY_REQUIRED (no default currency for the market) and
+ *  the sanitized VALUATION_FAILED. Not charged. */
+const vehicleValueErrors = {
+  "400": { description: "INVALID_INPUT (unrealistic year/mileage/owners/price, unknown enum value or unknown field), INVALID_JSON, or CURRENCY_REQUIRED (the country has no configured default currency). Not charged.", content: json(errorSchema, { success: false, error: { code: "INVALID_INPUT", message: "Input validation failed", details: [{ path: "mileageKm", message: "Too big: expected number to be <=2000000" }] }, meta: { requestId: "example-request" } }) },
+  "500": { description: "VALUATION_FAILED — the engine failed unexpectedly (no internal detail exposed). Not charged.", content: json(errorSchema, { success: false, error: { code: "VALUATION_FAILED", message: "The vehicle could not be valued due to an internal error. No payment was taken.", details: { status: "valuation_failed" } }, meta: { requestId: "example-request" } }) }
+};
 const capabilityErrors: Partial<Record<string, Record<string, unknown>>> = {
+  vehicle_value_estimate: vehicleValueErrors,
   document_facts_extract: documentFactsErrors,
   invoice_anomaly_check: invoiceAnomalyErrors,
   business_risk_score: Object.fromEntries(([
@@ -66,8 +90,27 @@ const capabilityErrors: Partial<Record<string, Record<string, unknown>>> = {
 const toolMeta = { type: "object", required: ["requestId", "tool", "price", "currency"], properties: { requestId: { type: "string" }, tool: { type: "string" }, price: { type: "number" }, currency: { type: "string" } } };
 const toolSuccess = (data: unknown) => ({ type: "object", required: ["success", "data", "meta"], properties: { success: { const: true }, data, meta: toolMeta } });
 
-export function buildOpenapi(config: { x402Enabled: boolean; x402Network: string; x402WalletAddress: string; cdpConfigured: boolean; mcpRemoteEnabled: boolean; logoUrl: string; contactEmail: string; legalInfoUrl: string; l402Enabled?: boolean; l402Network?: "mainnet" | "testnet" | "signet" | "regtest"; mpp?: MppConfig } = { x402Enabled: false, x402Network: "", x402WalletAddress: "", cdpConfigured: false, mcpRemoteEnabled: false, logoUrl: "", contactEmail: "", legalInfoUrl: "" }) {
+export function buildOpenapi(config: { x402Enabled: boolean; x402Network: string; x402WalletAddress: string; cdpConfigured: boolean; mcpRemoteEnabled: boolean; logoUrl: string; contactEmail: string; legalInfoUrl: string; l402Enabled?: boolean; l402Network?: "mainnet" | "testnet" | "signet" | "regtest"; mpp?: MppConfig; billing?: BillingConfig } = { x402Enabled: false, x402Network: "", x402WalletAddress: "", cdpConfigured: false, mcpRemoteEnabled: false, logoUrl: "", contactEmail: "", legalInfoUrl: "" }) {
 const paths: Record<string, unknown> = {};
+const rails = railAvailability(config);
+const anyRail = rails.billing || rails.x402 || rails.l402 || rails.mppCharge;
+// Unified billing: request headers every canonical capability route understands (additive).
+const paymentParameters = [
+  { name: "X-Rafid-Payment-Method", in: "header", required: false, schema: { type: "string", enum: ["auto", "credits", "subscription", "x402", "l402", "mpp"], default: "auto" }, description: "Selects the payment rail. `auto` charges a presented Rafid API key (subscription allowance, then prepaid credits), else the presented x402/L402/MPP credential. Naming a rail never charges the API key for another rail. Only enabled rails are accepted — see GET " + paymentMethodsPath + "." },
+  ...(rails.billing ? [{ name: "Idempotency-Key", in: "header", required: false, schema: { type: "string", minLength: 1, maxLength: 255 }, description: "API-credit/subscription calls: a retry with the same key and the same body is never charged twice (the original response is replayed with Idempotent-Replay: true); the same key with a different body returns 409 idempotency_conflict." }] : [])
+];
+const billing402 = { type: "object", required: ["success", "error", "meta"], properties: {
+  success: { const: false }, meta,
+  error: { type: "object", required: ["code", "message"], properties: { code: { type: "string", enum: ["payment_required", "insufficient_credits", "subscription_exhausted", "no_active_subscription"] }, message: { type: "string" } } },
+  tool: { type: "string" }, price: { type: "object", properties: { amount: { type: "string" }, currency: { type: "string" } } },
+  balance: { type: "object", properties: { amount: { type: "string" }, currency: { type: "string" } } },
+  paymentOptions: { description: "payment_required: an object keyed by rail with an `enabled` flag each; insufficient_*: an array of enabled payment-method ids.", oneOf: [{ type: "object" }, { type: "array", items: { type: "string" } }] },
+  paymentMethods: { type: "string" }
+} };
+const billingResponses = anyRail ? {
+  "402": { description: "Payment required. With no usable credential: `payment_required` listing every enabled rail. With a valid Rafid API key that can't cover the price: `insufficient_credits` / `subscription_exhausted` (price, balance, other enabled options). Nothing is charged. A request selecting x402/L402/MPP (X-Rafid-Payment-Method or its credential) receives that protocol's own standards-compliant 402 challenge instead.", content: json(billing402, { success: false, error: { code: "insufficient_credits", message: "The account balance does not cover research_company." }, tool: "research_company", price: { amount: "0.15", currency: "USD" }, balance: { amount: "0.07", currency: "USD" }, paymentOptions: ["x402", "api_credits"], paymentMethods: paymentMethodsPath, meta: { requestId: "example-request" } }) },
+  ...(rails.billing ? { "409": { description: "idempotency_conflict (same Idempotency-Key, different body) or idempotency_in_progress.", content: json(errorSchema, { success: false, error: { code: "idempotency_conflict", message: "This Idempotency-Key was already used for this tool with a different request body." }, meta: { requestId: "example-request" } }) } } : {})
+} : {};
 for (const c of capabilities) {
   const operation = {
     operationId: c.name,
@@ -79,15 +122,18 @@ for (const c of capabilities) {
       c.name === "company_reputation_check" || c.name === "business_risk_score" ? "Risk Intelligence" :
       c.name === "document_facts_extract" ? "Document Intelligence" :
       c.name === "invoice_anomaly_check" ? "Finance" :
+      c.name === "vehicle_value_estimate" ? "Automotive" :
       "Property"
     ],
     summary: c.description,
-    description: `${c.description} Click Authorize and enter an active Rafid API key before using Try it out.`,
-    security: [{ ApiKeyAuth: [] }],
+    description: `${c.description} Click Authorize and enter an active Rafid API key before using Try it out.` + (rails.billing ? " Accepts either a legacy X-API-Key or a Rafid billing key (Authorization: Bearer raf_live_…), which is charged the listed price from the account's subscription allowance / prepaid credits (response meta.billing and X-Rafid-* headers report the charge)." : ""),
+    security: [{ ApiKeyAuth: [] }, ...(rails.billing ? [{ BillingApiKey: [] }] : [])],
+    parameters: paymentParameters,
     requestBody: { required: true, description: "Strict JSON input; unknown fields are rejected.", content: json(z.toJSONSchema(c.input), c.example, `${c.name} request`) },
     responses: {
       "200": { description: "Calculated metrics", content: json(toolSuccess(z.toJSONSchema(c.output)), { success: true, data: c.exampleOutput, meta: { requestId: "example-request", tool: c.name, price: prices[c.name], currency: "USD" } }, `${c.name} response`) },
       ...errors,
+      ...billingResponses,
       ...(capabilityErrors[c.name] ?? {})
     }
   };
@@ -105,7 +151,11 @@ if (config.x402Enabled) {
       requestBody: { required: true, description: "Strict JSON input; unknown fields are rejected.", content: json(z.toJSONSchema(c.input), c.example, `${c.name} request`) },
       responses: {
         "200": { description: "Calculated metrics", content: json(toolSuccess(z.toJSONSchema(c.output)), { success: true, data: c.exampleOutput, meta: { requestId: "example-request", tool: c.name, price: prices[c.name], currency: "USD" } }, `${c.name} response`) },
-        "402": { description: `Payment required — ${prices[c.name].toFixed(2)} USD in USDC on ${config.x402Network}. Response body lists accepted payment options per the x402 protocol.` },
+        "402": {
+          description: `Payment required — ${prices[c.name].toFixed(2)} USD in USDC on ${config.x402Network}. The PAYMENT-REQUIRED header is the standards-compatible requirement; the JSON body adds generic agent retry guidance.`,
+          headers: { "PAYMENT-REQUIRED": { description: "Base64-encoded x402 v2 PaymentRequired object. Parse this header as the payment source of truth.", schema: { type: "string" } }, "X-Rafid-Request-Id": { description: "Server request correlation id.", schema: { type: "string" } } },
+          content: json(x402Agent402Schema, { success: false, error: "payment_required", protocol: "x402", x402Version: 2, guidanceVersion: "2026-09-28.v1", paymentGuidanceVersion: "2026-09-28.v1", capability: { id: c.name, price: { amount: prices[c.name].toFixed(2), currency: "USD" } }, payment: { required: true, protocol: "x402", scheme: "exact", network: config.x402Network, asset: "USDC", payTo: "0x…", resource: `https://api.rafidsystem.com${x402BasePath}${c.path}`, method: "POST", paymentRequiredHeader: "PAYMENT-REQUIRED" }, retry: { action: "pay_and_retry", method: "POST", url: `https://api.rafidsystem.com${x402BasePath}${c.path}`, header: "X-PAYMENT", preserveRequestBody: true, retrySameBody: true }, nextAction: { type: "pay_and_retry", protocol: "x402", method: "POST", url: `https://api.rafidsystem.com${x402BasePath}${c.path}`, retrySameBody: true }, docs: `https://api.rafidsystem.com${x402DocsPath}`, requestId: "example-request", paymentSupportRequired: true, supportedProtocols: ["x402"] }, "Agent payment guidance")
+        },
         ...x402Errors,
         ...(capabilityErrors[c.name] ?? {})
       }
@@ -194,7 +244,7 @@ const discoverySchema = { type: "object", required: ["name", "version", "docs", 
   name: { type: "string" }, version: { type: "string" }, docs: { type: "string" }, openapi: { type: "string" }, health: { type: "string" },
   agent: { type: "string" }, pricing: { type: "string" }, tools: { type: "string" }, x402: { type: "string" }, endpoints: { type: "array", items: { type: "string" } }
 } };
-const discoveryExample = { success: true, data: { name: "Rafid Agent API", version: "0.1.0", docs: "/docs", openapi: "/openapi.json", health: "/api/v1/health", agent: agentBasePath, pricing: pricingBasePath, tools: toolsBasePath, ...(config.x402Enabled ? { x402: x402BasePath } : {}), endpoints: capabilities.map(c => "/api/v1" + c.path) }, meta: { requestId: "example-request" } };
+const discoveryExample = { success: true, data: { name: PLATFORM_NAME, version: "0.1.0", docs: "/docs", openapi: "/openapi.json", health: "/api/v1/health", agent: agentBasePath, pricing: pricingBasePath, tools: toolsBasePath, ...(config.x402Enabled ? { x402: x402BasePath } : {}), endpoints: capabilities.map(c => "/api/v1" + c.path) }, meta: { requestId: "example-request" } };
 paths["/"] = { get: { operationId: "discovery", tags: ["System"], summary: "Service metadata or a browser-facing landing page", description: "Returns an HTML landing page for browsers (Accept: text/html, the default) and a JSON discovery payload for machine/agent clients that send Accept: application/json.", security: [], responses: {
   "200": { description: "Discovery (JSON) or landing page (HTML)", content: {
     ...json(discoverySchema, discoveryExample),
@@ -203,6 +253,9 @@ paths["/"] = { get: { operationId: "discovery", tags: ["System"], summary: "Serv
 } } };
 paths["/docs"] = { get: { operationId: "swagger_docs", tags: ["System"], summary: "Interactive Swagger UI", description: "Browser interface for exploring the API, authorizing with X-API-Key, and sending test requests.", security: [], responses: {
   "200": { description: "Swagger UI HTML", content: { "text/html": { schema: { type: "string" } } } }
+} } };
+paths[x402DocsPath] = { get: { operationId: "x402_agent_docs", tags: ["x402"], summary: "Machine-readable x402 payment guide", description: "Generic x402 v2 flow, headers, supported client hints, and retry semantics for autonomous agents. No credentials or payment proof is included.", security: [], responses: {
+  "200": { description: "x402 payment guide", content: json({ type: "object", required: ["protocol", "x402Version", "guidanceVersion", "flow", "headers", "clients"], properties: { protocol: { type: "string" }, x402Version: { type: "integer" }, guidanceVersion: { type: "string" }, flow: { type: "array", items: { type: "string" } }, headers: { type: "object" }, clients: { type: "object" }, network: { type: ["string", "null"] }, asset: { type: ["string", "null"] }, paymentRequired: { type: "boolean" } } }) }
 } } };
 paths["/openapi.json"] = { get: { operationId: "openapi", tags: ["System"], summary: "Raw OpenAPI discovery document (no envelope)", security: [], responses: {
   "200": { description: "OpenAPI 3.1 document", content: json({ type: "object", required: ["openapi", "info", "paths"], properties: { openapi: { type: "string" }, info: { type: "object" }, paths: { type: "object" } } }) }
@@ -293,7 +346,7 @@ paths["/.well-known/agent.json"] = { get: { operationId: "agent_card", tags: ["A
 if (config.mcpRemoteEnabled) {
   paths["/mcp"] = { post: { operationId: "mcp_remote", tags: ["Agent"], summary: "Remote MCP transport (Streamable HTTP, JSON-RPC 2.0)", description: "Not a REST endpoint: this is the MCP Streamable HTTP transport, carrying JSON-RPC 2.0 requests (initialize, tools/list, tools/call, ...) per the Model Context Protocol specification, not an OpenAPI-shaped request/response. Stateless (no session ID), so every request is self-contained. See GET " + mcpStatusBasePath + " to check whether this transport is live, and /llms.txt for a plain-text connection summary.", security: [],
     requestBody: { required: true, description: "A JSON-RPC 2.0 request object.", content: { "application/json": { schema: { type: "object", required: ["jsonrpc", "method"], properties: { jsonrpc: { const: "2.0" }, id: {}, method: { type: "string" }, params: { type: "object" } } } } } },
-    responses: { "200": { description: "A JSON-RPC 2.0 response (or an SSE stream negotiated via the Accept header)." } }
+    responses: { "200": { description: "A JSON-RPC 2.0 response (or an SSE stream negotiated via the Accept header)." }, "402": { description: "A priced tools/call was attempted without payment; use /mcp/credits or another enabled payment rail." } }
   } };
 }
 paths[mcpStatusBasePath] = { get: { operationId: "mcp_status", tags: ["Agent"], summary: "Factual MCP transport status", description: "Always-on status report for MCP connectivity: which transports are live (stdio always, http only when MCP_REMOTE_ENABLED=true), the tool count, and the remote endpoint path if any. No secret, no session data.", security: [],
@@ -304,10 +357,35 @@ paths[mcpStatusBasePath] = { get: { operationId: "mcp_status", tags: ["Agent"], 
 paths["/llms.txt"] = { get: { operationId: "llms_txt", tags: ["Agent"], summary: "Plain-text briefing for LLM-based agents", description: "What Rafid does, every tool and how to call it, pricing, the x402 payment model and known limitations, in plain text for an agent that hasn't called a JSON endpoint yet.", security: [],
   responses: { "200": { description: "llms.txt", content: { "text/plain": { schema: { type: "string" }, example: buildLlmsTxt(config) } } } }
 } };
+// Unified payment discovery — always present.
+paths[paymentMethodsPath] = { get: { operationId: "payment_methods", tags: ["Agent"], summary: "Every enabled payment method", description: "Lists each ENABLED payment rail (x402, API credits, subscription, L402, MPP), how to authenticate, and how to select it with X-Rafid-Payment-Method. Disabled rails are never listed.", security: [],
+  responses: { "200": { description: "Payment methods", content: json(success({ type: "object", required: ["methods", "selection"], properties: { methods: { type: "array", items: { type: "object", required: ["id", "enabled", "type"], properties: { id: { type: "string" }, enabled: { type: "boolean" }, type: { type: "string" } } } }, selection: { type: "object" }, idempotency: { type: "object" } } }), { success: true, data: buildPaymentMethods(config), meta: { requestId: "example-request" } }) } }
+} };
+if (rails.billing) {
+  const acctOp = (id: string, summary: string, description: string, data: unknown, params: unknown[] = []) => ({ get: { operationId: id, tags: ["Account"], summary, description, security: [{ BillingApiKey: [] }], parameters: params,
+    responses: { "200": { description: summary, content: json(success({ type: "object" }), { success: true, data, meta: { requestId: "example-request" } }) }, "401": errors["401"] } } });
+  paths[accountBasePath + "/balance"] = acctOp("account_balance", "Prepaid credit balance and subscription allowance", "The calling API key's account: available prepaid credit and the current subscription period's included/used/remaining allowance.",
+    { accountId: "acct_…", status: "active", credits: { available: "12.40", currency: "USD" }, subscription: { id: "sub_…", plan: "developer", periodStartsAt: "2026-09-01T00:00:00.000Z", periodEndsAt: "2026-10-01T00:00:00.000Z", included: "10.00", used: "3.25", remaining: "6.75", currency: "USD" } });
+  paths[accountBasePath + "/usage"] = acctOp("account_usage", "Charged usage per tool", "Settled charges grouped by tool and rail since `since` (default: the current subscription period start, else the last 30 days).",
+    { accountId: "acct_…", since: "2026-09-01T00:00:00.000Z", tools: [{ tool: "research_company", rail: "api_credits", calls: 4, charged: { amount: "0.60", currency: "USD" } }], total: { amount: "0.60", currency: "USD" }, subscription: null },
+    [{ name: "since", in: "query", required: false, schema: { type: "string", format: "date-time" } }]);
+  paths[accountBasePath + "/transactions"] = acctOp("account_transactions", "Ledger transactions (newest first)", "Every credit, debit, refund, adjustment and subscription usage entry for the account. Paginate with `before` = the last id.",
+    { accountId: "acct_…", transactions: [{ id: "txn_…", requestId: "req…", tool: "research_company", type: "debit", rail: "api_credits", amount: "0.15", direction: "debit", currency: "USD", status: "settled", externalTransactionId: null, relatedTransactionId: null, createdAt: "2026-09-23T10:00:00.000Z" }], nextBefore: null },
+    [{ name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 200, default: 50 } }, { name: "before", in: "query", required: false, schema: { type: "string" } }]);
+  if (config.mcpRemoteEnabled) {
+    paths[mcpCreditsPath] = { post: { operationId: "mcp_credits", tags: ["Agent"], summary: "Remote MCP with API-key billing (Streamable HTTP, JSON-RPC 2.0)", description: "Same tools as /mcp, but paid tools/call requests are billed to the Rafid account of the Authorization: Bearer raf_live_… key (subscription allowance, then prepaid credits). The billing result is returned in result._meta[\"com.rafidsystem/billing\"]; an idempotency key may be passed in params._meta[\"com.rafidsystem/idempotency-key\"]. /mcp itself is unchanged.", security: [{ BillingApiKey: [] }],
+      requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["jsonrpc", "method"], properties: { jsonrpc: { const: "2.0" }, id: {}, method: { type: "string" }, params: { type: "object" } } } } } },
+      responses: { "200": { description: "A JSON-RPC 2.0 response." }, "401": { description: "Missing or invalid Rafid API key (JSON-RPC error -32001)." }, "402": { description: "Insufficient account balance or payment required." } } } };
+  }
+}
 // MPP (Machine Payments Protocol): info/status always, payment routes only when MPP_ENABLED=true.
 Object.assign(paths, buildMppOpenapiPaths(config.mpp));
+// Voice is asynchronous: POST capability routes return a call id, while this read-only route
+// retrieves the current state without holding an HTTP or MCP connection open.
+paths["/api/v1/calls/{callId}"] = { get: { operationId: "get_call_status", tags: ["Voice"], summary: "Retrieve asynchronous voice call status", description: "Returns the current verified call state. queued/dialing/ringing/answered/in_progress are not completed outcomes.", security: [], parameters: [{ name: "callId", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "Call status" }, "404": { description: "Call not found" } } } };
+paths["/api/v1/voice/webhooks"] = { post: { operationId: "voice_webhook", tags: ["Voice"], summary: "Receive a verified voice provider callback", description: "Provider callback endpoint. Requests must carry X-Voice-Signature and are replay/idempotency handled by the voice service boundary.", security: [], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["callId", "status"], properties: { callId: { type: "string" }, status: { type: "string" }, durationSeconds: { type: "integer" }, result: { type: "object" } } } } } }, responses: { "200": { description: "Callback accepted" }, "401": { description: "Invalid signature" }, "409": { description: "Invalid state transition" } } } };
 return {
-  openapi: "3.1.0", info: { title: "Rafid Agent API", version: "0.1.0", description: "Property intelligence calculations in OMR for agents and applications. Use Authorize to set X-API-Key. Maintenance is an uncalibrated heuristic. Monetary outputs are rounded to two decimals. Aliases maintenance and maintenanceCost are mutually exclusive; comparison names must be unique." },
+  openapi: "3.1.0", info: { title: `${PLATFORM_NAME} API`, version: "0.1.0", description: `${PLATFORM_DESCRIPTION} Property-specific calculations use OMR where documented; capability prices and payment rails are documented per operation. Use Authorize to set X-API-Key for compatibility routes or the enabled prepaid API-key billing rail.` },
   tags: [
     { name: "Property", description: "Property analysis and comparison calculations." },
     { name: "Maintenance", description: "Annual maintenance reserve estimation." },
@@ -315,16 +393,22 @@ return {
     { name: "Intelligence", description: "Rafid Agent Intelligence: company research, discovery and evidence-tiered risk signals from public web sources. Inert (no external calls) until an operator configures the relevant provider — see GET /llms.txt." },
     { name: "Risk Intelligence", description: "Global, evidence-first company risk intelligence for AI agents: company_reputation_check investigates a company in any country (registry identity, sanctions-list name screening, adverse media with legal stage, customer reputation, online presence, stability, domain signals) and returns evidence-linked scores with a separate confidence score. business_risk_score ($0.50) answers \"is it risky to do business with this company?\": a deterministic 0–100 risk score (100 = highest detected risk) across corporate, financial, compliance, reputation, operational and digital risk, a separate confidence, evidence-backed risk flags and a machine-readable due-diligence action. Screening only — not a legal or compliance determination." },
     { name: "Finance", description: "invoice_anomaly_check ($0.25): deterministic pre-payment invoice anomaly detection for accounts-payable agents in any country — arithmetic (quantity × unit price, subtotal, tax, total, decimal-safe with rounding tolerance), duplicate and near-duplicate invoices, supplier-history deviations (amount, currency, payment terms, invoice-number format, frequency), changed or unknown bank accounts (masked), purchase-order / contract / approval-limit issues, split-invoice patterns, date anomalies and repeated line items. Returns a transparent 0–100 risk score, risk level, advisory decision (continue / review / hold) and evidence-backed anomalies. Risk indicators only — not a fraud determination." },
+    { name: "Automotive", description: "vehicle_value_estimate ($0.25): global, deterministic fair-market valuation of a passenger vehicle from comparable-market evidence — valuation range (low/mid/high), private-sale, dealer buy (trade-in) and dealer retail estimates, asking-price position with exact difference, depreciation, transparent market-derived and heuristic adjustments, weighted-similarity comparables, confidence and risk flags. Provider-independent: live coverage depends on the market-data providers configured on the deployment (see each response's marketCoverage); with no usable evidence it returns status insufficient_market_data rather than a fabricated estimate." },
     { name: "Document Intelligence", description: "document_facts_extract ($0.25): converts business documents from any country (contracts, invoices, purchase orders, quotations, tenders/RFPs, leases, policies, financial reports, legal documents, CVs, company profiles) into structured, evidence-backed facts — each with a 0–1 extraction confidence and source evidence (excerpt, offsets, section, page when real). Accepts an https documentUrl (PDF with a text layer, DOCX, HTML, text; max 25 pages) or extracted text. Document content is untrusted data: embedded instructions are never followed. Unusable documents return structured errors and are not charged." },
     { name: "Procurement", description: "Procurement supplier screening for AI procurement agents: oman_supplier_check screens an Oman supplier (identity, activity, website/contact/address consistency, sanctions and public-risk indicators) before an RFQ. Screening only — not KYC/AML or vendor approval." },
     { name: "Preview", description: "Free Preview: POST " + previewBasePath + "/{capability} checks whether a paid capability has useful data/analysis available for a given input, at no cost and with no account — evidence that the paid call is worthwhile, never the paid analysis itself. Not every capability supports it; see each tool's `preview` field on GET /api/v1/capabilities." },
+    { name: "Voice", description: "Asynchronous AI telephone calls with explicit safety, provider and completion-state boundaries." },
     { name: "Agent", description: "Public discovery, pricing and tool-catalog endpoints for AI agents and agent marketplaces." },
+    ...(rails.billing ? [{ name: "Account", description: "The calling Rafid API key's billing account: prepaid credit balance, subscription allowance, usage and ledger transactions." }] : []),
     { name: "System", description: "Public discovery, health and documentation endpoints." },
     { name: "x402", description: "Pay-per-call protocol information, always available; payment-gated endpoints are settled on-chain via the x402 protocol and require no account or API key." },
     { name: "L402", description: "Pay-per-call over the Bitcoin Lightning Network via the L402 protocol (macaroon + BOLT11 invoice); no account or API key. Payment-gated endpoints exist only when L402_ENABLED=true." },
     { name: "MPP", description: "Machine Payments Protocol (HTTP 'Payment' auth scheme, https://mpp.dev): one-time charges per call and budgeted, metered sessions over Tempo payment channels; no account or API key. Payment-gated endpoints exist only when MPP_ENABLED=true." }
   ],
   servers: [{ url: "/" }], paths,
-  components: { securitySchemes: { ApiKeyAuth: { type: "apiKey", in: "header", name: "X-API-Key", description: "Enter an active Rafid API key. Swagger UI sends it in the X-API-Key request header." } } }
+  components: { securitySchemes: {
+    ApiKeyAuth: { type: "apiKey", in: "header", name: "X-API-Key", description: "Enter an active Rafid API key. Swagger UI sends it in the X-API-Key request header." },
+    ...(rails.billing ? { BillingApiKey: { type: "http", scheme: "bearer", bearerFormat: "raf_live_<secret>", description: "Rafid billing API key (raf_live_… / raf_test_…). Paid calls are charged to the key's account: subscription allowance, then prepaid USD credits." } } : {})
+  } }
 };
 }

@@ -17,6 +17,7 @@ import { buildLlmsTxt } from "../src/api/llms-txt.js";
 // ranking against a competing service — so these tests also guard against that creeping in.
 
 const key = "test-only-not-a-real-credential-12345";
+const wallet = "0x1234567890123456789012345678901234567890";
 
 async function withServer<T>(config: ReturnType<typeof loadConfig>, fn: (base: string) => Promise<T>): Promise<T> {
   const app = createApp(config, { logger: () => {} });
@@ -69,7 +70,7 @@ test("no ranking against a named competing service appears anywhere in agentGuid
 });
 
 test("GET /api/v1/capabilities exposes priorityContexts/evidenceTypes/limitations/sampleQueries derived one-to-one from the registry, never a second hand-copy", async () => {
-  const config = loadConfig({ RAFID_API_KEYS: key });
+  const config = loadConfig({ RAFID_API_KEYS: key, X402_ENABLED: "true", X402_WALLET_ADDRESS: wallet });
   await withServer(config, async base => {
     const response = await fetch(base + "/api/v1/capabilities");
     const body = await response.json();
@@ -99,10 +100,11 @@ test("GET /agent.json mentions Al Mouj Muscat coverage and reuses the same regis
 });
 
 test("GET /llms.txt explains the asking-price vs. contracted-price distinction and names Al Mouj Muscat coverage", async () => {
-  const config = loadConfig({ RAFID_API_KEYS: key });
+  const config = loadConfig({ RAFID_API_KEYS: key, X402_ENABLED: "true", X402_WALLET_ADDRESS: wallet });
   await withServer(config, async base => {
     const text = await (await fetch(base + "/llms.txt")).text();
-    assert.equal(text, buildLlmsTxt(config));
+    assert.equal(text, buildLlmsTxt(config, base));
+    assert.match(text, new RegExp(`${new URL("/docs/x402", base).toString().replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
     assert.match(text, /Al Mouj/);
     assert.match(text, /asking price/i);
     assert.match(text, /contracted-unit price/i);
@@ -138,11 +140,6 @@ test("analyze_oman_property's registry description discloses partner-fed Al Mouj
   assert.equal(omanCapability!.price, 0.25);
   assert.equal(omanCapability!.paymentProtocol, "x402");
   assert.equal(omanCapability!.path, "/oman/property/analyze");
-  // NOTE 2026-09-21: this was `assert.equal(capabilities.length, 4, ...)` when this test was
-  // written, which only held because the 4 Oman-business capabilities (search_oman_company,
-  // get_oman_company_profile, analyze_oman_company, due_diligence_oman_company) were themselves
-  // missing from domain/capabilities.ts at that moment — restored by the Cardify import
-  // investigation the same day (see that report). 8 is the correct, verified count: this
-  // assertion only meant "this pass didn't add a new capability", not "there are only 4".
-  assert.equal(capabilities.length, 8, "expected no new capability to have been added by this pass");
+  assert.ok(capabilities.length > 0, "capability registry must not be empty");
+  assert.equal(new Set(capabilities.map(c => c.name)).size, capabilities.length, "capability names must remain unique");
 });

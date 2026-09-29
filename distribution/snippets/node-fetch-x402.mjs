@@ -1,41 +1,62 @@
-// Node fetch client for the x402 pay-per-call route. This is the same shape shown in
-// ../X402.md's "x402 client example" — `wallet` is a stand-in for a real x402-aware
-// payment signer from your own client library. Never construct or transmit a raw
-// private key by hand; this snippet does not, and cannot, sign a real payment itself.
+// Node x402 client for Rafid's pay-per-call routes.
+// The private key is read only by this local client process and is never sent to Rafid.
+// Use a dedicated wallet with USDC on Base and a strict spend limit in production.
+
+import { x402Client } from "@x402/core/client";
+import { x402HTTPClient } from "@x402/core/http";
+import { registerExactEvmScheme } from "@x402/evm/exact/client";
+import { privateKeyToAccount } from "viem/accounts";
 
 const BASE_URL = "https://api.rafidsystem.com";
+const NETWORK = "eip155:8453";
 
-async function callWithX402(path, body, wallet) {
+function createX402HttpClient() {
+  const privateKey = process.env.X402_CLIENT_PRIVATE_KEY;
+  if (!privateKey?.startsWith("0x")) {
+    throw new Error("Set X402_CLIENT_PRIVATE_KEY in the client environment; never put it in a request or in Vercel server variables.");
+  }
+
+  const account = privateKeyToAccount(privateKey);
+  const coreClient = new x402Client();
+  registerExactEvmScheme(coreClient, {
+    signer: account,
+    networks: [NETWORK],
+    schemeOptions: { 8453: { rpcUrl: process.env.BASE_RPC_URL } },
+  });
+  return { client: new x402HTTPClient(coreClient), payer: account.address };
+}
+
+async function callWithX402(path, body) {
   const url = `${BASE_URL}/api/v1/x402${path}`;
+  const { client, payer } = createX402HttpClient();
 
   const first = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (first.status !== 402) return first.json(); // already paid for, or free
+  if (first.status !== 402) return { payer, response: await first.json() };
 
-  const requirements = JSON.parse(
-    Buffer.from(first.headers.get("PAYMENT-REQUIRED"), "base64").toString("utf8")
+  const paymentRequired = client.getPaymentRequiredResponse(
+    (name) => first.headers.get(name),
+    await first.json(),
   );
-
-  // `wallet.buildPayment` is supplied by a real x402-aware payment library in your own
-  // integration — not implemented here. See the x402 protocol spec, or an existing
-  // x402 client SDK, for how to construct a valid payment proof.
-  const paymentHeader = await wallet.buildPayment(requirements.accepts[0]);
+  const paymentPayload = await client.createPaymentPayload(paymentRequired);
 
   const second = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-PAYMENT": paymentHeader },
+    headers: { "Content-Type": "application/json", ...client.encodePaymentSignatureHeader(paymentPayload) },
     body: JSON.stringify(body),
   });
-  return second.json();
+  const result = await second.json();
+  if (!second.ok) throw new Error(`x402 paid request failed (${second.status}): ${JSON.stringify(result)}`);
+  return { payer, transaction: client.getPaymentSettleResponse((name) => second.headers.get(name))?.transaction, response: result };
 }
 
-// Example call (requires a real `wallet` implementation to actually complete):
+// Example (run with X402_CLIENT_PRIVATE_KEY and BASE_RPC_URL set locally):
 // const result = await callWithX402("/oman/property/analyze", {
 //   governorate: "Muscat", area: "Al Mouj", propertyType: "apartment",
 //   bedrooms: 2, sizeSqm: 130, askingPriceOMR: 118000
-// }, wallet);
+// });
 
 export { callWithX402 };

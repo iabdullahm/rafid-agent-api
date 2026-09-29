@@ -649,7 +649,7 @@ test("x402 pricing is $0.50 and the pay-per-call route is generated from the reg
   assert.equal(billing.getToolPrice("oman_supplier_check"), 0.5);
   const requirement = billing.buildX402PaymentRequirement("oman_supplier_check", "eip155:8453", "0x1234567890123456789012345678901234567890");
   assert.equal(requirement.price, "$0.50");
-  const config = loadConfig({ RAFID_API_KEYS: key, X402_ENABLED: "true", X402_WALLET_ADDRESS: "0x1234567890123456789012345678901234567890" });
+  const config = loadConfig({ RAFID_API_KEYS: key, X402_ENABLED: "true", MCP_REMOTE_ENABLED: "true", X402_WALLET_ADDRESS: "0x1234567890123456789012345678901234567890" });
   const info = buildX402Info(config, billing);
   const tool = info.tools.find(t => t.name === "oman_supplier_check");
   assert.equal(tool?.price, 0.5);
@@ -665,7 +665,7 @@ test("x402 pricing is $0.50 and the pay-per-call route is generated from the reg
 // ---------------------------------------------------------------------------------------------
 
 async function withServer<T>(fn: (base: string) => Promise<T>): Promise<T> {
-  const config = loadConfig({ RAFID_API_KEYS: key, X402_ENABLED: "true", X402_WALLET_ADDRESS: "0x1234567890123456789012345678901234567890" });
+  const config = loadConfig({ RAFID_API_KEYS: key, X402_ENABLED: "true", MCP_REMOTE_ENABLED: "true", X402_WALLET_ADDRESS: "0x1234567890123456789012345678901234567890" });
   const app = createApp(config, { logger: () => {} });
   const server = app.listen(0, "127.0.0.1");
   try {
@@ -691,8 +691,9 @@ test("MCP registration: oman_supplier_check is listed with its registry descript
     assert.deepEqual(tool.inputSchema.required, ["companyName"]);
     assert.equal(tool.annotations.idempotentHint, true);
     const called = await rpc(2, "tools/call", { name: "oman_supplier_check", arguments: { companyName: "Example Technical Services LLC", requiredProductOrService: "HVAC maintenance" } });
-    assert.ok(!called.result.isError);
-    assert.equal(called.result.structuredContent.supplier.country, "OM");
+    assert.equal(called.error?.code, -32002, JSON.stringify(called).slice(0, 300));
+    assert.match(called.error?.message ?? "", /Payment required/i);
+    assert.equal(called.error?.data?.paymentEndpoint, "/mcp/credits");
     const invalid = await rpc(3, "tools/call", { name: "oman_supplier_check", arguments: { website: "https://x.om" } });
     assert.ok(invalid.result?.isError || invalid.error);
   });

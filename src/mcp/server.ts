@@ -7,11 +7,18 @@ import type { Logger } from "../utils/logging.js";
 import { classifyDataSource } from "../analytics/dataSource.js";
 import { runCapabilityPreview } from "../preview/service.js";
 import { buildMcpPaymentRequired, isMcpPaidConversionTool, mcpPaymentRequiredOutput } from "./paidConversion.js";
+import type { PaymentDiscoveryConfig } from "../billing/paymentMethods.js";
+/** Optional execution override (hosted mode — see mcp/hosted.ts): instead of running a
+ *  capability in-process, run it somewhere else (e.g. the hosted REST API, billed to a Rafid API
+ *  key) and optionally attach result `_meta`. Tool names, schemas and descriptions are unchanged. */
 export interface McpServerOptions {
+  execute?: (capability: (typeof capabilities)[number], input: unknown) => Promise<{ data: unknown; meta?: Record<string, unknown> }>;
+  /** Enables real payment-rail discovery on the preview_capability tool's fullResult.paymentMethods
+   *  (see src/billing/paymentMethods.ts). Omitted in stdio/local mode, where no rail is reachable. */
+  previewConfig?: PaymentDiscoveryConfig;
   paidConversionEnabled?: boolean;
   publicBaseUrl?: string;
 }
-
 export function createMcpServer(logger: Logger = () => {}, options: McpServerOptions = {}) {
   const server = new McpServer({ name: "rafid-agent-api", version: "0.1.0" });
   for (const c of capabilities) {
@@ -33,12 +40,13 @@ export function createMcpServer(logger: Logger = () => {}, options: McpServerOpt
           const paymentRequired = buildMcpPaymentRequired(c, requestId, options.publicBaseUrl);
           return { content: [{ type: "text" as const, text: JSON.stringify(paymentRequired) }], structuredContent: paymentRequired };
         }
-        const data = await c.execute(input);
+        const executed = options.execute ? await options.execute(c, input) : { data: await c.execute(input), meta: undefined };
+        const data = executed.data;
         // Analytics only (never changes the response): the same real-vs-demo classification
         // every REST/x402 call site also computes — see analytics/dataSource.ts's doc comment.
         // Read-only over the already-computed result; never a second execute() call.
         dataSource = classifyDataSource(c.name, data);
-        return { content: [{ type: "text" as const, text: JSON.stringify(data) }], structuredContent: data };
+        return { content: [{ type: "text" as const, text: JSON.stringify(data) }], structuredContent: data, ...(executed.meta ? { _meta: executed.meta } : {}) };
       } catch (error) {
         const result = publicError(error);
         status = result.status;
@@ -65,7 +73,7 @@ export function createMcpServer(logger: Logger = () => {}, options: McpServerOpt
     fullResult: z.object({
       capability: z.string(),
       price: z.object({ amount: z.string(), currency: z.string() }),
-      paymentMethods: z.array(z.string()).optional(),
+      paymentMethods: z.array(z.object({ id: z.string(), enabled: z.literal(true), endpoint: z.string() })).optional(),
       endpoint: z.string().optional()
     })
   });
@@ -78,7 +86,7 @@ export function createMcpServer(logger: Logger = () => {}, options: McpServerOpt
     let status = 200;
     try {
       const { capability, input } = previewInputSchema.parse(raw);
-      const data = await runCapabilityPreview(capability, input ?? {});
+      const data = await runCapabilityPreview(capability, input ?? {}, { config: options.previewConfig });
       return { content: [{ type: "text" as const, text: JSON.stringify(data) }], structuredContent: data };
     } catch (error) {
       const result = publicError(error);

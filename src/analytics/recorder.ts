@@ -1,5 +1,5 @@
 import type { Request } from "express";
-import type { AnalyticsRepository, AnalyticsEventType, AnalyticsChannel, DataSource, McpEventType, X402EventType } from "./types.js";
+import type { AnalyticsRepository, AnalyticsEventType, AnalyticsChannel, DataSource, FundingEventType, McpEventType, X402EventType } from "./types.js";
 import { extractClientContext } from "./attribution.js";
 import type { RequestClientContext } from "./context.js";
 
@@ -16,7 +16,7 @@ export const DISCOVERY_PATHS = [
   "/mcp"
 ] as const;
 
-const emptyContext: RequestClientContext = { clientHash: null, userAgent: null, referer: null, clientName: null };
+const emptyContext: RequestClientContext = { clientHash: null, userAgent: null, referer: null, clientName: null, source: null, utmMedium: null, campaign: null, utmContent: null, referrerHost: null, clientType: "unknown", trafficClass: "unknown" };
 
 /** Every record*() below is intentionally fire-and-forget and never throws into its caller —
  *  analytics recording must never slow down, fail, or otherwise affect the real request it is
@@ -148,13 +148,33 @@ const X402_SUCCESS_BY_EVENT_TYPE: Record<X402EventType, boolean | null> = {
 export function recordX402Event(
   repository: AnalyticsRepository,
   req: Request,
-  args: { eventType: X402EventType; toolName: string | null; amount: number | null; currency: string | null; txHash: string | null }
+  args: { eventType: X402EventType; toolName: string | null; amount: number | null; currency: string | null; txHash: string | null; requestId?: string | null; paymentGuidanceVersion?: string | null; paymentDocsUrl?: string | null; challengeParseable?: boolean | null }
 ): void {
   const client = extractClientContext(req);
   fireAndForget(repository, {
     category: "x402", eventType: args.eventType, path: null, toolName: args.toolName, channel: null,
     success: X402_SUCCESS_BY_EVENT_TYPE[args.eventType],
-    durationMs: null, amount: args.amount, currency: args.currency, txHash: args.txHash, dataSource: null, ...client
+    durationMs: null, amount: args.amount, currency: args.currency, txHash: args.txHash, dataSource: null,
+    requestId: args.requestId ?? null, paymentGuidanceVersion: args.paymentGuidanceVersion ?? null,
+    paymentDocsUrl: args.paymentDocsUrl ?? null, challengeParseable: args.challengeParseable ?? null, ...client
+  });
+}
+
+/** Awaitable x402 event writer for paid requests. The normal observer remains best-effort for
+ * challenges and failures, but successful paid calls write before the HTTP response is sent so
+ * a serverless runtime cannot freeze before the durable analytics insert finishes. */
+export async function recordX402EventAwaited(
+  repository: AnalyticsRepository,
+  req: Request,
+  args: { eventType: X402EventType; toolName: string | null; amount: number | null; currency: string | null; txHash: string | null; requestId?: string | null; paymentGuidanceVersion?: string | null; paymentDocsUrl?: string | null; challengeParseable?: boolean | null }
+): Promise<void> {
+  const client = extractClientContext(req);
+  await repository.record({
+    category: "x402", eventType: args.eventType, path: null, toolName: args.toolName, channel: null,
+    success: X402_SUCCESS_BY_EVENT_TYPE[args.eventType], durationMs: null, amount: args.amount,
+    currency: args.currency, txHash: args.txHash, dataSource: null, requestId: args.requestId ?? null,
+    paymentGuidanceVersion: args.paymentGuidanceVersion ?? null, paymentDocsUrl: args.paymentDocsUrl ?? null,
+    challengeParseable: args.challengeParseable ?? null, ...client
   });
 }
 
@@ -165,13 +185,14 @@ export function recordX402Event(
 export function recordL402Event(
   repository: AnalyticsRepository,
   req: Request,
-  args: { eventType: Extract<X402EventType, "challenge" | "payment_failed" | "settlement_success">; toolName: string; amount: number | null; txHash: string | null }
+  args: { eventType: Extract<X402EventType, "challenge" | "payment_failed" | "settlement_success">; toolName: string; amount: number | null; txHash: string | null; requestId?: string | null }
 ): void {
   const client = extractClientContext(req);
   fireAndForget(repository, {
     category: "l402", eventType: args.eventType, path: null, toolName: args.toolName, channel: null,
     success: X402_SUCCESS_BY_EVENT_TYPE[args.eventType],
-    durationMs: null, amount: args.amount, currency: args.amount === null ? null : "USD", txHash: args.txHash, dataSource: null, ...client
+    durationMs: null, amount: args.amount, currency: args.amount === null ? null : "USD", txHash: args.txHash, dataSource: null,
+    requestId: args.requestId ?? null, ...client
   });
 }
 
@@ -180,13 +201,41 @@ export function recordL402Event(
  *  fallback usage, success rate, p50/p95 latency). `client` is a full RequestClientContext for
  *  REST/x402 (real `req` access) or mcpClientContext's current value for MCP (see
  *  currentMcpClientContext()'s doc comment). */
+/** src/billing/external/service.ts's own analytics events (Stripe/USDC top-up funnel — see
+ *  types.ts's FundingEventType doc comment) adapted onto AnalyticsRepository. Called from
+ *  src/api/app.ts's `onEvent` wiring, not from inside billing/external/ itself — that module
+ *  stays free of an analytics-package dependency, exactly like billing/mpp/index.ts's `audit`
+ *  callback keeps that module free of a logging dependency. No RequestClientContext is attached:
+ *  a funding event may originate from a server-to-server Stripe webhook with no real end-user
+ *  request to attribute it to, so every client field is honestly null rather than guessed. */
+export function recordFundingEvent(repository: AnalyticsRepository, args: { eventType: FundingEventType; provider: "stripe" | "usdc_base"; success: boolean; amountUSD: number | null }): void {
+  fireAndForget(repository, {
+    category: "funding", eventType: args.eventType, path: null, toolName: null, channel: null,
+    success: args.success, durationMs: null, amount: args.amountUSD, currency: args.amountUSD === null ? null : "USD",
+    txHash: null, dataSource: null, provider: args.provider,
+    clientHash: null, userAgent: null, referer: null, clientName: null
+  });
+}
+
 export function recordToolInvocation(
   repository: AnalyticsRepository,
-  args: { toolName: string; channel: AnalyticsChannel; success: boolean; durationMs: number; dataSource: DataSource | null; client: RequestClientContext }
+  args: { toolName: string; channel: AnalyticsChannel; success: boolean; durationMs: number; dataSource: DataSource | null; client: RequestClientContext; requestId?: string | null }
 ): void {
   fireAndForget(repository, {
     category: "tool", eventType: "invocation" as AnalyticsEventType, path: null, toolName: args.toolName, channel: args.channel,
     success: args.success, durationMs: args.durationMs, amount: null, currency: null, txHash: null,
-    dataSource: args.dataSource, ...args.client
+    dataSource: args.dataSource, requestId: args.requestId ?? null, ...args.client
+  });
+}
+
+/** Durable counterpart used by the paid x402 handler after the capability has completed. */
+export async function recordToolInvocationAwaited(
+  repository: AnalyticsRepository,
+  args: { toolName: string; channel: AnalyticsChannel; success: boolean; durationMs: number; dataSource: DataSource | null; client: RequestClientContext; requestId?: string | null }
+): Promise<void> {
+  await repository.record({
+    category: "tool", eventType: "invocation" as AnalyticsEventType, path: null, toolName: args.toolName,
+    channel: args.channel, success: args.success, durationMs: args.durationMs, amount: null, currency: null,
+    txHash: null, dataSource: args.dataSource, requestId: args.requestId ?? null, ...args.client
   });
 }

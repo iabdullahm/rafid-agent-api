@@ -1,0 +1,18 @@
+{
+  "actorSpecification": 1,
+  "name": "global-company-intelligence",
+  "title": "Global Company Intelligence & Risk API",
+  "description": "AI-ready company reputation, business risk and due diligence intelligence with structured evidence and confidence scoring.",
+  "version": "1.0",
+  "buildTag": "latest",
+  "input": "../apify/company-intelligence/.actor/input_schema.json",
+  "output": "../apify/company-intelligence/.actor/output_schema.json",
+  "storages": {
+    "dataset": "../apify/company-intelligence/.actor/dataset_schema.json",
+    "keyValueStore": "../apify/company-intelligence/.actor/key_value_store_schema.json"
+  },
+  "usesStandbyMode": false,
+  "dockerfile": "../apify/company-intelligence/Dockerfile",
+  "readme": "../apify/company-intelligence/README.md",
+  "changelog": "../apify/company-intelligence/.actor/CHANGELOG.md"
+}

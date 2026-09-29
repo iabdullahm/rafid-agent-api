@@ -2,7 +2,7 @@ import { esc } from "../admin/layout.js";
 import type { DashboardData, DashboardPeriod } from "./service.js";
 
 /**
- * Rafid Property Intelligence — "AI Agent Operations Command Center" internal dashboard.
+ * Rafid Intelligence Network — "AI Agent Operations Command Center" internal dashboard.
  *
  * Still a plain, dependency-free server-rendered HTML shell, matching the exact idiom every other
  * internal/documentation page in this codebase already uses (src/api/swagger.ts, src/api/
@@ -74,6 +74,9 @@ button { font-family:inherit; }
 .sidebar nav a svg { width:16px; height:16px; flex:none; opacity:0.85; }
 .sidebar nav a:hover { background:var(--panel2); color:var(--text); }
 .sidebar nav a.active { background:linear-gradient(90deg, var(--accent-soft), transparent); color:#fff; box-shadow: inset 2px 0 0 var(--accent); }
+.sidebar .nav-group { margin:16px 0 5px 10px; color:var(--muted-dim); font-size:10px; font-weight:700; letter-spacing:.11em; text-transform:uppercase; }
+.sidebar .nav-group:first-child { margin-top:4px; }
+.sidebar nav a .nav-count { margin-left:auto; color:var(--muted-dim); font-size:10px; }
 .sidebar .spacer { flex:1; }
 .workforce-status {
   margin-top:16px; padding:12px; border-radius:10px; background:var(--panel2); border:1px solid var(--border-soft);
@@ -113,10 +116,25 @@ main { max-width:1400px; margin:0 auto; padding:22px 26px 72px; }
 .period-bar button:hover:not(.active) { color:var(--text); border-color:var(--muted-dim); }
 
 /* ---------------------------------------------------------------- Panels -------------------- */
-.panel {
+.panel { 
   background:var(--panel); backdrop-filter: blur(6px); border:1px solid var(--border); border-radius:var(--radius);
   padding:18px 20px; margin-bottom:18px; position:relative; overflow:hidden;
 }
+.dashboard-section[data-views] { display:none; }
+body[data-dashboard-view="overview"] .dashboard-section[data-views~="overview"],
+body[data-dashboard-view="agents"] .dashboard-section[data-views~="agents"],
+body[data-dashboard-view="revenue"] .dashboard-section[data-views~="revenue"],
+body[data-dashboard-view="capabilities"] .dashboard-section[data-views~="capabilities"],
+body[data-dashboard-view="payments"] .dashboard-section[data-views~="payments"],
+body[data-dashboard-view="operations"] .dashboard-section[data-views~="operations"],
+body[data-dashboard-view="health"] .dashboard-section[data-views~="health"],
+body[data-dashboard-view="platform"] .dashboard-section[data-views~="platform"],
+body[data-dashboard-view="system"] .dashboard-section[data-views~="system"] { display:block; }
+.view-only-note { color:var(--muted); font-size:12px; margin:-4px 0 16px; }
+.global-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 18px; padding:10px 12px; background:rgba(15,23,41,.72); border:1px solid var(--border); border-radius:10px; }
+.global-toolbar .toolbar-left,.global-toolbar .toolbar-right { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.global-search { min-width:240px; }
+.route-title { margin-bottom:3px !important; }
 .panel.glow-blue { box-shadow:var(--glow-blue); }
 .panel h2 { font-size:12.5px; margin:0 0 14px; color:var(--muted); text-transform:uppercase; letter-spacing:0.06em; font-weight:700; }
 .panel-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
@@ -132,6 +150,7 @@ main { max-width:1400px; margin:0 auto; padding:22px 26px 72px; }
 .grid-3 { display:grid; grid-template-columns: repeat(3, 1fr); gap:18px; }
 @media (max-width: 1100px) { .grid-3 { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } main { padding:16px; } }
+@media (max-width: 700px) { .sidebar { position:fixed; left:-250px; transition:left .2s ease; } .sidebar.open { left:0; } .content { width:100%; } .global-toolbar { align-items:stretch; flex-direction:column; } .global-search { min-width:0; width:100%; } }
 
 /* ---------------------------------------------------------------- KPI cards ----------------- */
 .kpi-grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap:12px; }
@@ -141,6 +160,8 @@ main { max-width:1400px; margin:0 auto; padding:22px 26px 72px; }
 }
 .kpi:hover { transform:translateY(-1px); border-color:var(--border-soft); }
 .kpi.glow { box-shadow:var(--glow-blue); }
+.kpi.warn { border-color:#f5a623; }
+.kpi.warn .kpi-value { color:#f5a623; }
 .kpi-value { font-size:22px; font-weight:700; font-variant-numeric:tabular-nums; }
 .kpi-label { color:var(--muted); font-size:11.5px; margin-top:2px; }
 .kpi-sub { color:var(--muted-dim); font-size:10.5px; margin-top:4px; }
@@ -217,8 +238,16 @@ tr.clickable:hover td { background:var(--panel2); }
 .ok-banner .scan { width:14px; height:14px; border-radius:50%; border:2px solid var(--green); border-top-color:transparent; animation: spin 1.1s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
 .error-banner { background:var(--red-soft); border:1px solid #4a1f1f; color:var(--red); border-radius:8px; padding:12px 14px; margin-bottom:14px; font-size:13px; }
+.blocker-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.blocker-list li { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:8px 10px; border:1px solid var(--border-soft); border-radius:8px; }
+.blocker-count { color:var(--muted); font-size:11.5px; }
+.blocker-rec { flex-basis:100%; color:var(--muted-dim); font-size:11.5px; }
+.reason-detail { color:var(--muted-dim); font-size:10.5px; margin-top:3px; max-width:360px; }
+.agent-metric-audit { color:var(--muted-dim); font-size:10px; margin-top:2px; }
 tr.row-highlight { background:rgba(52,224,161,0.04); }
 tr.row-highlight td:first-child { box-shadow: inset 3px 0 0 #1d4a30; }
+tr.row-review { background:rgba(245,166,35,0.06); }
+tr.row-review td:first-child { box-shadow: inset 3px 0 0 #7a5010; }
 tr.row-new { animation: rowFlashIn .9s ease-out; }
 @keyframes rowFlashIn { 0% { background:rgba(52,224,161,0.22); } 100% { background:transparent; } }
 tr.row-new.failed { animation-name: rowFlashInRed; }
@@ -316,6 +345,40 @@ svg.trend-chart { width:100%; height:220px; display:block; }
   animation:none !important;
 }
 .reduced-motion .bar-fill, .reduced-motion .health-ring circle.fill { transition:none !important; }
+
+/* ---------------------------------------------------------------- Operations UX ------------ */
+.attention-panel { border-color: rgba(242,184,75,0.45); box-shadow: 0 0 0 1px rgba(242,184,75,0.12); }
+.attention-panel.is-clear { border-color: rgba(52,224,161,0.35); box-shadow: 0 0 0 1px rgba(52,224,161,0.10); }
+.attention-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:10px; }
+.attention-item { display:flex; gap:10px; align-items:flex-start; border:1px solid var(--border); background:var(--panel2); border-radius:9px; padding:11px 12px; }
+.attention-item .attention-icon { font-size:16px; line-height:1; }
+.attention-item .attention-title { font-size:12.5px; font-weight:700; }
+.attention-item .attention-detail { color:var(--muted); font-size:11px; margin-top:3px; }
+.attention-item button { margin-top:7px; border:0; background:none; color:#8ab4ff; padding:0; cursor:pointer; font-size:11px; }
+.clear-state { display:flex; align-items:center; gap:9px; color:var(--green); font-size:13px; padding:5px 0; }
+.section-nav { position:sticky; top:0; z-index:10; display:flex; gap:6px; overflow-x:auto; padding:8px 0 10px; margin-bottom:4px; background:linear-gradient(var(--bg),rgba(7,11,20,.92)); }
+.section-nav a { white-space:nowrap; border:1px solid var(--border); background:var(--panel2); border-radius:999px; padding:5px 10px; color:var(--muted); font-size:11px; }
+.section-nav a:hover { color:var(--text); border-color:var(--accent); text-decoration:none; }
+.refresh-controls { display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
+.refresh-controls button { border:1px solid var(--border); background:var(--panel2); color:var(--muted); border-radius:7px; padding:5px 9px; cursor:pointer; font-size:11px; }
+.refresh-controls button:hover { color:var(--text); border-color:var(--accent); }
+.freshness-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; }
+.freshness-item { background:var(--panel2); border:1px solid var(--border); border-radius:9px; padding:11px 12px; }
+.freshness-item .label { color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; }
+.freshness-item .value { font-weight:700; margin-top:4px; font-size:13px; }
+.freshness-item .detail { color:var(--muted-dim); font-size:10.5px; margin-top:3px; }
+.compact-table { max-height:520px; overflow:auto; }
+.panel.collapsible > .panel-head, .panel.collapsible > h2 { cursor:pointer; }
+.panel.collapsible.is-collapsed > :not(.panel-head):not(h2) { display:none !important; }
+.panel.collapsible .collapse-mark { color:var(--muted); font-size:12px; }
+html[dir="rtl"] body { font-family: "Segoe UI", Tahoma, Arial, sans-serif; }
+html[dir="rtl"] .sidebar { border-right:0; border-left:1px solid var(--border); }
+html[dir="rtl"] .sidebar nav a.active { box-shadow:inset -2px 0 0 var(--accent); }
+html[dir="rtl"] th, html[dir="rtl"] td { text-align:right; }
+html[dir="rtl"] th.right, html[dir="rtl"] td.right { text-align:left; }
+html[dir="rtl"] .hero-right { align-items:flex-start; }
+html[dir="rtl"] .activity-time { text-align:left; }
+@media (max-width: 700px) { .section-nav { top:48px; } .refresh-controls { width:100%; } }
 `;
 
 // A small, fixed color palette for multi-currency trend lines — never more than a handful of
@@ -353,7 +416,13 @@ const CLIENT_SCRIPT = `
 
   var CHIP_CLASS = {
     settlement_succeeded: "chip-green", settlement_failed: "chip-red", payment_verified: "chip-blue",
-    Enabled: "chip-green", Disabled: "chip-gray", Active: "chip-green", Unknown: "chip-gray"
+    Enabled: "chip-green", Disabled: "chip-gray", Active: "chip-green", Unknown: "chip-gray",
+    confirmed: "chip-green", created: "chip-blue", pending: "chip-blue", failed: "chip-red",
+    refunded: "chip-gray", requires_review: "chip-red", expired: "chip-gray",
+    // Revenue Conversion Audit finalStatus values (src/audit/types.ts's FinalStatus).
+    converted: "chip-green", free_success: "chip-green", not_converted: "chip-gray",
+    failed_before_payment: "chip-red", payment_failed: "chip-red", reconciliation_issue: "chip-red",
+    unknown: "chip-gray"
   };
   var chip = function (label) {
     if (label === null || label === undefined || label === "") return '<span class="chip chip-gray">\u2014</span>';
@@ -418,6 +487,7 @@ const CLIENT_SCRIPT = `
     supplier: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><line x1="12" y1="13" x2="12" y2="21"/></svg>',
     risk: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/></svg>',
     document: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M6 2h9l5 5v15H6z"/><path d="M15 2v5h5"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="15" y2="17"/></svg>',
+    valuation: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 16v-3l2.5-5h13L21 13v3"/><path d="M3 16h18"/><circle cx="7" cy="16.5" r="2"/><circle cx="17" cy="16.5" r="2"/></svg>',
     payment: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/><circle cx="16.5" cy="14.5" r="1.2" fill="currentColor" stroke="none"/></svg>',
     reconciliation: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 6h13M4 12h9M4 18h13"/><path d="M18 15l2 2 4-4" transform="translate(-3 -3)"/></svg>'
   };
@@ -480,6 +550,78 @@ const CLIENT_SCRIPT = `
     renderPipeline("hero-pipeline", data, true);
   }
 
+  // Operational summary: derived only from already measured dashboard fields. Every item is
+  // actionable or explicitly states that it needs review; no alert is inferred from a missing
+  // data source.
+  function renderAttention(data) {
+    var el = document.getElementById("attention-content");
+    if (!el) return;
+    var items = [];
+    var healthChecks = (data.systemHealth && data.systemHealth.checks) || [];
+    healthChecks.filter(function (c) { return c.measured && !c.healthy; }).forEach(function (c) {
+      items.push({ title: c.label + " needs review", detail: "The latest measured health check is not healthy.", target: "#system-health" });
+    });
+    var anomalyCount = data.reconciliation && data.reconciliation.anomalyCount || 0;
+    if (anomalyCount > 0) items.push({ title: anomalyCount + " reconciliation anomal" + (anomalyCount === 1 ? "y" : "ies"), detail: "Settlement and execution records need investigation.", target: "#reconciliation" });
+    (data.agents || []).filter(function (a) { return a.status === "error"; }).forEach(function (a) {
+      items.push({ title: a.name + " is reporting an error", detail: a.currentTask || "Open the agent details for the latest failure.", target: "#active-agents" });
+    });
+    var failedSettlements = data.x402Funnel && data.x402Funnel.settlementFailed || 0;
+    if (failedSettlements > 0) items.push({ title: failedSettlements + " failed settlement" + (failedSettlements === 1 ? "" : "s"), detail: "Review the payment and settlement trail.", target: "#latest-settlements" });
+    var externalReview = (data.externalPaymentsTable || []).filter(function (p) { return p.needsReview; }).length;
+    if (externalReview > 0) items.push({ title: externalReview + " external payment" + (externalReview === 1 ? "" : "s") + " need review", detail: "A payment is marked requires_review or refunded.", target: "#collection-funding" });
+    var html = items.length ? '<div class="attention-list">' + items.slice(0, 12).map(function (item) {
+      return '<div class="attention-item"><div class="attention-icon">\u26a0</div><div><div class="attention-title">' + esc(item.title) + '</div><div class="attention-detail">' + esc(item.detail) + '</div><button type="button" data-jump="' + esc(item.target) + '">View details \u2192</button></div></div>';
+    }).join("") + "</div>" : '<div class="clear-state"><span class="dot dot-green"></span> No measured issues require attention for this period.</div>';
+    el.innerHTML = html;
+    el.closest(".attention-panel").classList.toggle("is-clear", !items.length);
+    el.querySelectorAll("[data-jump]").forEach(function (button) { button.addEventListener("click", function () { var target = document.querySelector(button.getAttribute("data-jump")); if (target) target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" }); }); });
+  }
+
+  function renderFreshness(data) {
+    var el = document.getElementById("freshness-content");
+    if (!el) return;
+    var status = data.systemStatus || {};
+    var latestActivity = data.activityFeed && data.activityFeed[0] ? data.activityFeed[0].at : null;
+    var latestSettlement = status.lastSuccessfulSettlementAt;
+    var database = status.database || "Unknown";
+    el.innerHTML = '<div class="freshness-grid">' +
+      freshnessItem("Dashboard generated", fmtDate(data.generatedAt), fmtRelative(data.generatedAt)) +
+      freshnessItem("Latest measured activity", fmtDate(latestActivity), latestActivity ? fmtRelative(latestActivity) : "No activity recorded") +
+      freshnessItem("Latest successful settlement", fmtDate(latestSettlement), latestSettlement ? fmtRelative(latestSettlement) : "No settlement recorded") +
+      freshnessItem("Database", database, database.indexOf("in-memory") !== -1 ? "Not durable across restarts" : "Storage status from system checks") +
+      freshnessItem("Period scope", data.period === "all" ? "All time" : data.period, "Applied to the current dashboard query") +
+      freshnessItem("Data mode", data.activityFeed && data.activityFeed.some(function (a) { return a.demo; }) ? "Demo activity present" : "Recorded activity", "Demo rows never affect KPIs") +
+      "</div>";
+  }
+  function freshnessItem(label, value, detail) { return '<div class="freshness-item"><div class="label">' + esc(label) + '</div><div class="value">' + esc(value) + '</div><div class="detail">' + esc(detail) + '</div></div>'; }
+
+  function setupOperationsUX() {
+    document.querySelectorAll(".sidebar a[data-view]").forEach(function (a) { a.addEventListener("click", function () { var sidebar = document.getElementById("sidebar"); if (sidebar) sidebar.classList.remove("open"); }); });
+    document.querySelectorAll(".collapsible").forEach(function (panel) { var head = panel.querySelector(":scope > .panel-head") || panel.querySelector(":scope > h2"); if (!head) return; head.setAttribute("role", "button"); head.setAttribute("tabindex", "0"); head.setAttribute("aria-expanded", "true"); var toggle = function (event) { if (event.target.closest("select") || event.target.closest("button") || event.target.closest("input")) return; panel.classList.toggle("is-collapsed"); var collapsed = panel.classList.contains("is-collapsed"); head.setAttribute("aria-expanded", collapsed ? "false" : "true"); var mark = panel.querySelector(".collapse-mark"); if (mark) mark.textContent = collapsed ? "+" : "−"; }; head.addEventListener("click", toggle); head.addEventListener("keydown", function (event) { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); toggle(event); } }); });
+    var directionBtn = document.getElementById("direction-toggle");
+    if (directionBtn) directionBtn.addEventListener("click", function () { var rtl = document.documentElement.dir !== "rtl"; document.documentElement.dir = rtl ? "rtl" : "ltr"; document.documentElement.lang = rtl ? "ar" : "en"; directionBtn.textContent = rtl ? "English" : "العربية"; try { localStorage.setItem("rafid-dashboard-dir", rtl ? "rtl" : "ltr"); } catch (e) {} });
+    try { var savedDir = localStorage.getItem("rafid-dashboard-dir"); if (savedDir === "rtl") { document.documentElement.dir = "rtl"; document.documentElement.lang = "ar"; if (directionBtn) directionBtn.textContent = "English"; } } catch (e) {}
+    var refreshBtn = document.getElementById("refresh-dashboard");
+    if (refreshBtn) refreshBtn.addEventListener("click", function () { refreshBtn.disabled = true; refreshBtn.textContent = "Refreshing…"; loadPeriod(currentPeriod || "24h").finally(function () { refreshBtn.disabled = false; refreshBtn.textContent = "Refresh"; }); });
+    var exportBtn = document.getElementById("export-dashboard");
+    if (exportBtn) exportBtn.addEventListener("click", function () { if (!lastDashboardData) return; var blob = new Blob([JSON.stringify(lastDashboardData, null, 2)], { type: "application/json" }); var url = URL.createObjectURL(blob); var a = document.createElement("a"); a.href = url; a.download = "rafid-dashboard-" + (lastDashboardData.period || "period") + ".json"; a.click(); URL.revokeObjectURL(url); });
+    var csvBtn = document.getElementById("export-capabilities-csv");
+    if (csvBtn) csvBtn.addEventListener("click", function () { if (!lastDashboardData) return; var rows = lastDashboardData.capabilityOverview || []; var header = ["capability","price","currency","calls","success","failed","challenges","settled","conversionPct","revenue","revenueCurrency"]; var csv = [header].concat(rows.map(function (r) { return [r.toolName, r.price, r.priceCurrency, r.calls, r.successCount, r.failureCount, r.challenges, r.settledCalls, r.conversionPct, r.revenue, r.currency]; })).map(function (row) { return row.map(function (v) { var value = v === null || v === undefined ? "" : String(v); return '"' + value.replace(/"/g, '""') + '"'; }).join(","); }).join("\\n"); var blob = new Blob([csv], { type: "text/csv;charset=utf-8" }); var url = URL.createObjectURL(blob); var a = document.createElement("a"); a.href = url; a.download = "rafid-capabilities-" + (lastDashboardData.period || "period") + ".csv"; a.click(); URL.revokeObjectURL(url); });
+    var globalSearch = document.getElementById("global-search");
+    var searchTimer = null;
+    if (globalSearch) globalSearch.addEventListener("input", function () {
+      clearTimeout(searchTimer); var query = globalSearch.value.trim();
+      searchTimer = setTimeout(function () {
+        var capabilitySearch = document.getElementById("capability-search");
+        var toolSearch = document.getElementById("tool-search");
+        if (capabilitySearch) capabilitySearch.value = query;
+        if (toolSearch) toolSearch.value = query;
+        if (lastDashboardData) { capabilitySearchQuery = query; toolSearchQuery = query; renderCapabilityOverview(lastDashboardData); renderToolConversion(lastDashboardData); }
+      }, 250);
+    });
+  }
+
   // =============================================================================================
   // Active Agents
   // =============================================================================================
@@ -494,6 +636,11 @@ const CLIENT_SCRIPT = `
         '<div class="agent-name">' + esc(a.name) + '</div>' +
         '<div class="agent-task">' + esc(a.currentTask) + '</div>' +
         '<div class="agent-metric">' + esc(a.metricLabel) + " \u00b7 " + (a.lastEventAt ? fmtRelative(a.lastEventAt) : "no recent activity") + '</div>' +
+        (a.paidConversions !== undefined
+          ? '<div class="agent-metric agent-metric-audit">' + fmtNum(a.paidConversions) + " paid conversion(s)" +
+            (a.revenueUsd !== null && a.revenueUsd !== undefined ? " \u00b7 " + fmtAmount(a.revenueUsd) + " USD" : "") +
+            (a.topFailureReason ? " \u00b7 top blocker: " + esc(a.topFailureReason) : "") + "</div>"
+          : "") +
         "</div></div>";
     }).join("");
   }
@@ -523,6 +670,68 @@ const CLIENT_SCRIPT = `
       html = html + demoHtml;
     }
     el.innerHTML = html || '<p class="empty">No activity recorded in this period.</p>';
+  }
+
+  // =============================================================================================
+  // Revenue Overview (Collected / Pending-Internal / On-chain Settled / Payout Available)
+  // =============================================================================================
+  function renderRevenueOverview(data) {
+    var el = document.getElementById("kpi-revenue-overview");
+    var ov = data.revenueOverview;
+    var spark = (data.sparklines && data.sparklines.collectedRevenue) || [];
+    var onChainSpark = (data.sparklines && data.sparklines.onChainSettledRevenue) || [];
+    var pendingSpark = (data.sparklines && data.sparklines.unifiedBillingRevenue) || [];
+    var cards = [];
+    cards.push('<div class="kpi glow"><div class="kpi-value">' + (ov.collectedRevenueUsd !== null ? fmtAmount(ov.collectedRevenueUsd) + " USD" : "—") + '</div><div class="kpi-label">Collected Revenue</div><div class="kpi-spark">' + sparklineSvg(spark, "#34e0a1") + "</div></div>");
+    cards.push('<div class="kpi"><div class="kpi-value">' + fmtAmount(ov.pendingInternalBillingRevenueUsd) + ' USD</div><div class="kpi-label">Pending / Internal Billing Revenue</div><div class="kpi-spark">' + sparklineSvg(pendingSpark, "#f5a623") + "</div></div>");
+    cards.push('<div class="kpi"><div class="kpi-value">' + (ov.onChainSettledRevenueUsd !== null ? fmtAmount(ov.onChainSettledRevenueUsd) + " USD" : "—") + '</div><div class="kpi-label">On-chain Settled Revenue</div><div class="kpi-sub">x402 / USDC</div><div class="kpi-spark">' + sparklineSvg(onChainSpark, "#2f6bff") + "</div></div>");
+    cards.push('<div class="kpi"><div class="kpi-value">' + (ov.payoutAvailableUsd !== null ? fmtAmount(ov.payoutAvailableUsd) + " USD" : "—") + '</div><div class="kpi-label">Payout Available</div><div class="kpi-sub">on-chain settled funds only &mdash; never includes Stripe</div></div>');
+    cards.push('<div class="kpi"><div class="kpi-value">' + fmtAmount(ov.externalFundingCollectedUsd) + ' USD</div><div class="kpi-label">External Funding Collected</div><div class="kpi-sub">Stripe + USDC top-ups &mdash; a liability, not revenue</div></div>');
+    cards.push('<div class="kpi"><div class="kpi-value">' + fmtAmount(ov.outstandingPrepaidBalanceUsd) + ' USD</div><div class="kpi-label">Outstanding Customer Credit Balance</div><div class="kpi-sub">current, all-time &mdash; money still owed to customers</div></div>');
+    el.innerHTML = cards.join("");
+    var note = document.getElementById("revenue-overview-mixed-note");
+    note.style.display = ov.onChainSettledRevenueUsd === null ? "block" : "none";
+  }
+
+  // =============================================================================================
+  // Collection & Funding — Stripe Checkout + USDC-on-Base top-ups that FUND prepaid credits from
+  // outside this codebase. Deliberately never summed with Revenue Overview's earned-revenue
+  // figures above (see billing/external/types.ts's accounting model): funding is a liability,
+  // consumption is revenue, and this panel exists to keep them visibly, permanently separate.
+  // =============================================================================================
+  function renderCollectionFunding(data) {
+    var el = document.getElementById("kpi-collection-funding");
+    var cf = data.collectionFunding;
+    var cards = [];
+    cards.push('<div class="kpi glow"><div class="kpi-value">' + fmtAmount(cf.stripeCollectedUsd) + ' USD</div><div class="kpi-label">Stripe Collected</div><div class="kpi-sub">' + fmtNum(cf.byProvider.stripe.confirmedCount) + ' confirmed &mdash; follows Stripe’s own payout/bank flow</div></div>');
+    cards.push('<div class="kpi glow"><div class="kpi-value">' + fmtAmount(cf.usdcTopupsConfirmedUsd) + ' USD</div><div class="kpi-label">USDC Top-ups Confirmed</div><div class="kpi-sub">' + fmtNum(cf.byProvider.usdcBase.confirmedCount) + ' confirmed on-chain (Base)</div></div>');
+    cards.push('<div class="kpi"><div class="kpi-value">' + fmtNum(cf.pendingExternalPaymentsCount) + '</div><div class="kpi-label">Pending External Payments</div><div class="kpi-sub">created / awaiting confirmation</div></div>');
+    cards.push('<div class="kpi' + (cf.refundedOrReviewCount > 0 ? " warn" : "") + '"><div class="kpi-value">' + fmtNum(cf.refundedOrReviewCount) + '</div><div class="kpi-label">Refunded / Review</div></div>');
+    cards.push('<div class="kpi"><div class="kpi-value">' + fmtAmount(cf.prepaidOutstandingBalanceUsd) + ' USD</div><div class="kpi-label">Prepaid Outstanding Balance</div><div class="kpi-sub">current, all-time</div></div>');
+    el.innerHTML = cards.join("");
+  }
+
+  // =============================================================================================
+  // External Payments / Top-up History (spec section 19) — minimal admin table: provider,
+  // customer, amount, status, timestamp, reference, review flag. Reuses this same session-cookie-
+  // protected internal dashboard, never a separate finance ERP.
+  // =============================================================================================
+  function renderExternalPaymentsTable(data) {
+    var el = document.getElementById("external-payments-table");
+    var rows = data.externalPaymentsTable || [];
+    el.innerHTML = table(
+      [
+        { header: "Time", render: function (r) { return fmtDate(r.time); } },
+        { header: "Provider", render: function (r) { return esc(r.provider === "usdc_base" ? "USDC (Base)" : "Stripe"); } },
+        { header: "Customer", render: function (r) { return '<code class="hash">' + esc(r.accountId) + "</code>"; } },
+        { header: "Amount", right: true, render: function (r) { return fmtAmount(r.amountUsd) + " USD"; } },
+        { header: "Status", render: function (r) { return chip(r.status); } },
+        { header: "Reference", render: function (r) { return r.reference ? '<code class="hash" title="' + esc(r.reference) + '">' + esc(r.reference.length > 18 ? r.reference.slice(0, 8) + "…" + r.reference.slice(-6) : r.reference) + "</code>" : "—"; } }
+      ],
+      rows,
+      "No external payments recorded in this period.",
+      function (r) { return r.needsReview ? ' class="row-review"' : ""; }
+    );
   }
 
   // =============================================================================================
@@ -622,6 +831,71 @@ const CLIENT_SCRIPT = `
   }
 
   // =============================================================================================
+  // Unified Billing Revenue (API Credits + Subscriptions) — a separate payment-rail family from
+  // the x402 settlement ledger above; always USD, never blended into the Revenue panel's
+  // per-currency (USDC) figures. Same bar-list idiom as Revenue by Capability, USD-only.
+  // =============================================================================================
+  function renderUnifiedBillingRevenue(data) {
+    var u = data.unifiedBillingRevenue;
+    var kpiEl = document.getElementById("kpi-unified-billing");
+    var byToolEl = document.getElementById("unified-billing-by-tool");
+    var noteEl = document.getElementById("unified-billing-disabled-note");
+    if (!u || !u.enabled) {
+      kpiEl.innerHTML = "";
+      byToolEl.innerHTML = "";
+      if (noteEl) noteEl.style.display = "block";
+      return;
+    }
+    if (noteEl) noteEl.style.display = "none";
+    kpiEl.innerHTML =
+      '<div class="kpi glow"><div class="kpi-value">' + fmtAmount(u.totalUsd) + ' USD</div><div class="kpi-label">Total Revenue</div>' +
+      '<div class="kpi-spark">' + sparklineSvg((data.sparklines && data.sparklines.unifiedBillingRevenue) || [], "#34e0a1") + "</div></div>" +
+      '<div class="kpi"><div class="kpi-value">' + fmtAmount(u.byRail.apiCredits) + ' USD</div><div class="kpi-label">API Credits</div></div>' +
+      '<div class="kpi"><div class="kpi-value">' + fmtAmount(u.byRail.subscription) + ' USD</div><div class="kpi-label">Subscriptions</div></div>' +
+      '<div class="kpi"><div class="kpi-value">' + fmtNum(u.settledCharges) + '</div><div class="kpi-label">Settled Charges</div></div>';
+    var rows = u.byTool || [];
+    if (!rows.length) { byToolEl.innerHTML = '<p class="empty">No settled API-credit or subscription charges in this period.</p>'; return; }
+    var maxRevenue = Math.max.apply(null, rows.map(function (r) { return r.revenueUsd || 0; }).concat([0.0001]));
+    byToolEl.innerHTML = '<div class="bar-list">' + rows.map(function (r) {
+      var pct = r.revenueUsd ? Math.max(2, Math.round((r.revenueUsd / maxRevenue) * 100)) : 0;
+      return '<div class="bar-row"><div class="bar-row-head"><span class="name">' + esc(r.toolName) + '</span><span class="value">' +
+        fmtAmount(r.revenueUsd) + " USD · " + fmtNum(r.settledCalls) + ' settled</span></div>' +
+        '<div class="bar-track"><div class="bar-fill' + (pct === 0 ? " zero" : "") + '" data-width="' + pct + '%"></div></div>' +
+        "</div>";
+    }).join("") + "</div>";
+    requestAnimationFrame(function () {
+      byToolEl.querySelectorAll(".bar-fill").forEach(function (b) { b.style.width = b.getAttribute("data-width"); });
+    });
+  }
+
+  // =============================================================================================
+  // Free Preview funnel — preview traffic and preview->paid conversion (src/preview/). Rendered as
+  // KPI tiles (not the x402 linear pipeline component below): available/limited/unavailable/invalid
+  // are parallel outcomes of one preview_requested event, not sequential funnel stages.
+  // =============================================================================================
+  function renderPreviewFunnel(data) {
+    var p = data.previewFunnel;
+    var el = document.getElementById("preview-funnel");
+    function tile(label, value, sub) {
+      return '<div class="kpi"><div class="kpi-value">' + esc(value) + '</div><div class="kpi-label">' + esc(label) + '</div>' +
+        (sub ? '<div class="kpi-sub">' + esc(sub) + "</div>" : "") + "</div>";
+    }
+    el.innerHTML =
+      '<div class="kpi-grid">' +
+      tile("Preview Requests", fmtNum(p.requested)) +
+      tile("Available", fmtNum(p.available)) +
+      tile("Limited", fmtNum(p.limited)) +
+      tile("Unavailable", fmtNum(p.unavailable)) +
+      tile("Invalid Input", fmtNum(p.invalid)) +
+      tile("Rate-Limited", fmtNum(p.rateLimited)) +
+      tile("Cache Hit Rate", fmtPct(p.cacheHitRatePct), fmtNum(p.cacheHits) + " hits / " + fmtNum(p.cacheMisses) + " misses") +
+      tile("Paid Calls Started", fmtNum(p.paidCapabilityStarted)) +
+      tile("Preview → Paid Conversions", fmtNum(p.converted)) +
+      tile("Conversion Rate", fmtPct(p.conversionRatePct), "of preview requests that led to a paid call") +
+      "</div>";
+  }
+
+  // =============================================================================================
   // x402 Funnel — visual pipeline with conversion percentages and drop-off highlight
   // =============================================================================================
   function renderX402Funnel(data) {
@@ -654,6 +928,10 @@ const CLIENT_SCRIPT = `
       '<dl class="fieldlist">' +
       "<dt>MCP</dt><dd>" + chip(s.mcp) + "</dd>" +
       "<dt>x402</dt><dd>" + chip(s.x402) + "</dd>" +
+      "<dt>L402</dt><dd>" + chip(s.l402) + "</dd>" +
+      "<dt>MPP</dt><dd>" + chip(s.mpp) + "</dd>" +
+      "<dt>API Credits</dt><dd>" + chip(s.apiCredits) + "</dd>" +
+      "<dt>Subscriptions</dt><dd>" + chip(s.subscriptions) + "</dd>" +
       "<dt>Analytics</dt><dd>" + chip(s.analytics) + "</dd>" +
       "<dt>Revenue Ledger</dt><dd>" + chip(s.revenueLedger) + "</dd>" +
       "<dt>Partner Data</dt><dd>" + esc(s.partnerData) + "</dd>" +
@@ -719,6 +997,7 @@ const CLIENT_SCRIPT = `
   // =============================================================================================
   var lastDashboardData = null;
   var toolSearchQuery = "";
+  var capabilitySearchQuery = "";
 
   function sortToolConversion(rows, key) {
     var sorted = rows.slice();
@@ -806,10 +1085,11 @@ const CLIENT_SCRIPT = `
     var el = document.getElementById("capability-overview");
     var sortSelect = document.getElementById("capability-overview-sort");
     var key = sortSelect ? sortSelect.value : "registry";
-    var rows = sortCapabilityOverview(data.capabilityOverview || [], key);
+    var rows = sortCapabilityOverview(data.capabilityOverview || [], key).filter(function (r) { return !capabilitySearchQuery || r.toolName.toLowerCase().indexOf(capabilitySearchQuery.toLowerCase()) !== -1; });
     el.innerHTML = table(
       [
         { header: "Capability", render: function (r) { return esc(r.toolName); } },
+        { header: "Vertical", render: function (r) { return esc(r.vertical || "General Intelligence"); } },
         { header: "Price", right: true, render: function (r) { return fmtPrice(r); } },
         { header: "Calls", right: true, render: function (r) { return fmtNum(r.calls); } },
         { header: "Success", right: true, render: function (r) { return fmtNum(r.successCount); } },
@@ -893,6 +1173,99 @@ const CLIENT_SCRIPT = `
       return '<div class="warning-banner"><strong>' + esc(a.kind) + "</strong>" + (a.toolName ? " \u2014 " + esc(a.toolName) : "") + "<br>" + esc(a.detail) + "</div>";
     }).join("");
     el.innerHTML = rows;
+  }
+
+  // =============================================================================================
+  // Revenue Conversion Audit — "for every capability/tool call, why it did or did not convert
+  // into paid revenue". Augments the panels above; never replaces any of them.
+  // =============================================================================================
+  function fmtStageCount(n) { return n === null || n === undefined ? "unknown / not instrumented" : fmtNum(n); }
+
+  function renderAuditFunnel(data) {
+    var el = document.getElementById("audit-funnel");
+    var stages = (data.revenueConversionAudit && data.revenueConversionAudit.funnel && data.revenueConversionAudit.funnel.stages) || [];
+    if (!stages.length) { el.innerHTML = '<p class="empty">No data.</p>'; return; }
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Stage</th><th class="right">Count</th><th class="right">Drop-off</th><th>Top reason</th><th>Unobserved</th></tr></thead><tbody>' +
+      stages.map(function (s) {
+        var dropOff = s.dropOffCount === null ? "—" : fmtNum(s.dropOffCount) + (s.dropOffPct !== null ? " (" + s.dropOffPct + "%)" : "");
+        return '<tr><td>' + esc(s.name.replace(/_/g, " ")) + '</td><td class="right">' + fmtStageCount(s.count) + '</td><td class="right">' + dropOff + '</td><td>' + (s.topDropOffReason ? chip(s.topDropOffReason) : "—") + '</td><td>' + (s.unobserved > 0 ? fmtNum(s.unobserved) + " unobserved" : "—") + '</td></tr>';
+      }).join("") + "</tbody></table></div>";
+  }
+
+  function renderAuditBlockers(data) {
+    var el = document.getElementById("audit-blockers");
+    var aud = data.revenueConversionAudit;
+    var blockers = (aud && aud.topBlockers) || [];
+    var recs = {};
+    ((aud && aud.recommendations) || []).forEach(function (r) { recs[r.reasonCode] = r.recommendation; });
+    if (!blockers.length) { el.innerHTML = '<p class="empty">No conversion blockers in this period.</p>'; return; }
+    el.innerHTML = '<ul class="blocker-list">' + blockers.map(function (b) {
+      var rec = recs[b.reasonCode] ? '<div class="blocker-rec">' + esc(recs[b.reasonCode]) + "</div>" : "";
+      return "<li>" + chip(b.reasonCode) + ' <span class="blocker-count">' + fmtNum(b.count) + " call(s)</span>" + rec + "</li>";
+    }).join("") + "</ul>";
+  }
+
+  function renderAuditToolTable(data) {
+    var el = document.getElementById("audit-tool-table");
+    var rows = (data.revenueConversionAudit && data.revenueConversionAudit.toolAudit) || [];
+    el.innerHTML = table(
+      [
+        { header: "Tool", render: function (r) { return esc(r.toolName); } },
+        { header: "Calls", right: true, render: function (r) { return fmtNum(r.calls); } },
+        { header: "Success", right: true, render: function (r) { return fmtNum(r.successfulExecutions); } },
+        { header: "402", right: true, render: function (r) { return fmtNum(r.challenges402); } },
+        { header: "Payment Attempts", right: true, render: function (r) { return r.paymentAttempts > 0 ? fmtNum(r.paymentAttempts) : "unavailable"; } },
+        { header: "Verified", right: true, render: function (r) { return fmtNum(r.verified); } },
+        { header: "Settled", right: true, render: function (r) { return fmtNum(r.settled); } },
+        { header: "Revenue", right: true, render: renderAuditRevenueCell },
+        { header: "Conversion", right: true, render: function (r) { return fmtPct(r.conversionPct); } },
+        { header: "Top Blocker", render: function (r) { return r.topFailureReason ? chip(r.topFailureReason) : "—"; } }
+      ],
+      rows,
+      "No tool activity recorded in this period."
+    );
+  }
+
+  function renderAuditRevenueCell(r) {
+    var currencies = Object.keys(r.revenueByCurrency || {});
+    if (r.settled === 0 || currencies.length === 0) return "—";
+    if (currencies.length === 1) return fmtAmount(r.revenueByCurrency[currencies[0]]) + " " + currencies[0];
+    return currencies.map(function (c) { return fmtAmount(r.revenueByCurrency[c]) + " " + c; }).join(", ");
+  }
+
+  function auditCallRow(r) {
+    var execution = r.execution.attempted ? (r.execution.success === true ? "succeeded" : r.execution.success === false ? "failed" : "unknown") : "not attempted";
+    var paymentStage = r.payment.required === false ? "not required" :
+      r.payment.settled === true ? "settled" : r.payment.settled === false ? "settlement failed" :
+      r.payment.verified === true ? "verified, not settled" : r.payment.verified === false ? "verification failed" :
+      r.payment.attempted === true ? "attempted" : r.payment.attempted === false ? "not attempted" : "unknown";
+    return { time: fmtDate(r.calledAt), tool: esc(r.toolName || "—"), channel: esc(r.channel), execution: esc(execution), paymentStage: esc(paymentStage), finalStatus: chip(r.finalStatus), reason: esc(r.reasonCode) + '<div class="reason-detail">' + esc(r.reasonDetail) + "</div>" };
+  }
+
+  function renderAuditCallTable(elId, records) {
+    var el = document.getElementById(elId);
+    el.innerHTML = table(
+      [
+        { header: "Time", render: function (r) { return r.time; } },
+        { header: "Tool", render: function (r) { return r.tool; } },
+        { header: "Channel", render: function (r) { return r.channel; } },
+        { header: "Execution", render: function (r) { return r.execution; } },
+        { header: "Payment Stage", render: function (r) { return r.paymentStage; } },
+        { header: "Final Status", render: function (r) { return r.finalStatus; } },
+        { header: "Reason", render: function (r) { return r.reason; } }
+      ],
+      (records || []).map(auditCallRow),
+      "No calls in this period."
+    );
+  }
+
+  function renderRevenueConversionAudit(data) {
+    renderAuditFunnel(data);
+    renderAuditBlockers(data);
+    renderAuditToolTable(data);
+    var aud = data.revenueConversionAudit || {};
+    renderAuditCallTable("audit-non-converted", aud.recentNonConverted);
+    renderAuditCallTable("audit-converted", aud.recentConverted);
   }
 
   // =============================================================================================
@@ -1003,19 +1376,28 @@ const CLIENT_SCRIPT = `
   // Orchestration
   // =============================================================================================
   function renderDashboard(data) {
+    lastDashboardData = data;
     renderHero(data);
+    renderAttention(data);
+    renderFreshness(data);
     renderAgents(data);
     renderActivityFeed(data);
+    renderRevenueOverview(data);
+    renderCollectionFunding(data);
+    renderExternalPaymentsTable(data);
     renderRevenueKpis(data);
     renderTrend(data);
     renderRevenueByTool(data);
+    renderUnifiedBillingRevenue(data);
     renderCapabilityOverview(data);
     renderX402Funnel(data);
+    renderPreviewFunnel(data);
     renderUsage(data);
     renderToolConversion(data);
     renderAnalysisPreview(data);
     renderTransactions(data);
     renderReconciliation(data);
+    renderRevenueConversionAudit(data);
     renderSystemStatus(data);
     renderHealthRing(data);
     document.getElementById("dashboard-error").style.display = "none";
@@ -1033,7 +1415,7 @@ const CLIENT_SCRIPT = `
   var currentPeriod = null;
   function loadPeriod(period, silent) {
     currentPeriod = period;
-    fetch("/internal/dashboard/data?period=" + encodeURIComponent(period), { credentials: "same-origin", headers: { Accept: "application/json" } })
+    return fetch("/internal/dashboard/data?period=" + encodeURIComponent(period), { credentials: "same-origin", headers: { Accept: "application/json" } })
       .then(function (res) {
         if (res.status === 401) { window.location.href = "/internal/dashboard/login"; return null; }
         if (!res.ok) { throw new Error("Dashboard data request failed (HTTP " + res.status + ")."); }
@@ -1078,6 +1460,10 @@ const CLIENT_SCRIPT = `
     if (capabilitySortSelect) {
       capabilitySortSelect.addEventListener("change", function () { if (lastDashboardData) renderCapabilityOverview(lastDashboardData); });
     }
+    var capabilitySearch = document.getElementById("capability-search");
+    if (capabilitySearch) {
+      capabilitySearch.addEventListener("input", function () { capabilitySearchQuery = capabilitySearch.value; if (lastDashboardData) renderCapabilityOverview(lastDashboardData); });
+    }
     var drawerClose = document.getElementById("drawer-close");
     if (drawerClose) drawerClose.addEventListener("click", closeCapabilityDrawer);
     var backdrop = document.getElementById("drawer-backdrop");
@@ -1086,6 +1472,7 @@ const CLIENT_SCRIPT = `
     var menuBtn = document.getElementById("mobile-menu-btn");
     var sidebar = document.getElementById("sidebar");
     if (menuBtn && sidebar) menuBtn.addEventListener("click", function () { sidebar.classList.toggle("open"); });
+    setupOperationsUX();
     startPolling();
   });
 })();
@@ -1095,7 +1482,7 @@ function safeJson(value: unknown): string {
   return JSON.stringify(value).replace(/</g, "\\u003c").replace(/-->/g, "--\\u003e");
 }
 
-const PERIOD_LABELS: Record<DashboardPeriod, string> = { "24h": "24 Hours", "7d": "7 Days", "30d": "30 Days", all: "All Time" };
+const PERIOD_LABELS: Record<DashboardPeriod, string> = { "24h": "Today", "7d": "Last 7 days", "30d": "Last 30 days", all: "All time" };
 
 const SIDEBAR_ICONS: Record<string, string> = {
   dashboard: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="11" width="8" height="10" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/></svg>',
@@ -1108,36 +1495,41 @@ const SIDEBAR_ICONS: Record<string, string> = {
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.9 2.9l-.1-.1a1.7 1.7 0 00-1.9-.3 1.7 1.7 0 00-1 1.5V21a2 2 0 11-4 0v-.1a1.7 1.7 0 00-1-1.6 1.7 1.7 0 00-1.9.3l-.1.1a2 2 0 11-2.9-2.9l.1-.1a1.7 1.7 0 00.3-1.9 1.7 1.7 0 00-1.5-1H3a2 2 0 110-4h.1a1.7 1.7 0 001.5-1 1.7 1.7 0 00-.3-1.9l-.1-.1a2 2 0 112.9-2.9l.1.1a1.7 1.7 0 001.9.3H9a1.7 1.7 0 001-1.5V3a2 2 0 114 0v.1a1.7 1.7 0 001 1.5 1.7 1.7 0 001.9-.3l.1-.1a2 2 0 112.9 2.9l-.1.1a1.7 1.7 0 00-.3 1.9V9a1.7 1.7 0 001.5 1h.1a2 2 0 110 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg>'
 };
 
-const SIDEBAR_ITEMS: { key: string; label: string; active?: boolean }[] = [
-  { key: "dashboard", label: "Dashboard", active: true },
-  { key: "agents", label: "Agents & Tools" },
-  { key: "analytics", label: "Analytics" },
-  { key: "revenue", label: "Revenue" },
-  { key: "settlements", label: "Settlements" },
-  { key: "reconciliation", label: "Reconciliation" },
-  { key: "health", label: "System Health" },
-  { key: "settings", label: "Settings" }
-];
+export type DashboardView = "overview" | "revenue" | "usage" | "agents" | "capabilities" | "transactions" | "x402" | "l402" | "mpp" | "credits" | "requests" | "errors" | "performance" | "rate-limits" | "mcp" | "discovery" | "api-keys" | "data-sources" | "companies" | "market-data" | "health" | "logs" | "configuration";
 
-export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; initialData: DashboardData }): string {
+const SIDEBAR_GROUPS: { label: string; items: { key: DashboardView; label: string; icon: string }[] }[] = [
+  { label: "", items: [{ key: "overview", label: "Overview", icon: "dashboard" }] },
+  { label: "Analytics", items: [{ key: "revenue", label: "Revenue", icon: "revenue" }, { key: "usage", label: "Usage", icon: "analytics" }, { key: "agents", label: "Agents", icon: "agents" }, { key: "capabilities", label: "Capabilities", icon: "analytics" }] },
+  { label: "Payments", items: [{ key: "transactions", label: "Transactions", icon: "settlements" }, { key: "x402", label: "x402", icon: "settlements" }, { key: "l402", label: "L402", icon: "settlements" }, { key: "mpp", label: "MPP", icon: "settlements" }, { key: "credits", label: "Credits", icon: "settlements" }] },
+  { label: "Operations", items: [{ key: "requests", label: "Requests", icon: "analytics" }, { key: "errors", label: "Errors", icon: "health" }, { key: "performance", label: "Performance", icon: "analytics" }, { key: "rate-limits", label: "Rate Limits", icon: "settings" }] },
+  { label: "Platform", items: [{ key: "mcp", label: "MCP", icon: "analytics" }, { key: "discovery", label: "Discovery", icon: "analytics" }, { key: "api-keys", label: "API Keys", icon: "settings" }] },
+  { label: "Data", items: [{ key: "data-sources", label: "Data Sources", icon: "analytics" }, { key: "companies", label: "Companies", icon: "analytics" }, { key: "market-data", label: "Market Data", icon: "analytics" }] },
+  { label: "System", items: [{ key: "health", label: "Health", icon: "health" }, { key: "logs", label: "Logs", icon: "analytics" }, { key: "configuration", label: "Configuration", icon: "settings" }] }
+];
+const SIDEBAR_ANCHORS: Record<string, string> = {
+  overview: "section-dashboard", agents: "section-agents", usage: "section-analytics", revenue: "section-revenue",
+  capabilities: "capability-overview", transactions: "latest-settlements", x402: "x402-funnel", health: "system-health",
+  requests: "activity-feed", performance: "system-health", errors: "conversion-audit", mcp: "system-status"
+};
+
+export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; initialData: DashboardData; view?: DashboardView }): string {
+  const view = opts.view ?? "overview";
   const periodButtons = (["24h", "7d", "30d", "all"] as DashboardPeriod[])
     .map(p => `<button type="button" data-period="${p}" class="${p === opts.initialData.period ? "active" : ""}">${esc(PERIOD_LABELS[p])}</button>`)
     .join("\n");
 
-  const sidebarNav = SIDEBAR_ITEMS
-    .map(item => `<a href="#" class="${item.active ? "active" : ""}">${SIDEBAR_ICONS[item.key] ?? ""}<span>${esc(item.label)}</span></a>`)
-    .join("\n");
+  const sidebarNav = SIDEBAR_GROUPS.map(group => `${group.label ? `<div class="nav-group">${esc(group.label)}</div>` : ""}${group.items.map(item => `<a href="/internal/dashboard/${esc(item.key)}" data-view="${esc(item.key)}" aria-label="${esc(item.key === "agents" ? "Agents & Tools" : item.label)}" class="${item.key === view ? "active" : ""}">${SIDEBAR_ICONS[item.icon] ?? ""}<span>${esc(item.label)}</span></a>`).join("\n")}`).join("\n");
 
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Dashboard · Rafid Property Intelligence</title>
+<title>Rafid Intelligence Network — Admin Dashboard</title>
 <meta name="robots" content="noindex, nofollow">
 <style>${CSS}</style>
 </head>
-<body>
+<body data-dashboard-view="${esc(view)}">
 <div class="drawer-backdrop" id="drawer-backdrop"></div>
 <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
   <button type="button" class="close" id="drawer-close" aria-label="Close">&times;</button>
@@ -1148,7 +1540,7 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
   <nav class="sidebar" id="sidebar" aria-label="Primary">
     <div class="brand">
       <div class="mark">R</div>
-      <div><div class="name">Rafid</div><div class="sub">Property Intelligence</div></div>
+      <div><div class="name">Rafid</div><div class="sub">Intelligence Network</div></div>
     </div>
     <nav>${sidebarNav}</nav>
     <div class="spacer"></div>
@@ -1160,13 +1552,13 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
   <div class="content">
     <div class="mobile-topbar">
       <button type="button" id="mobile-menu-btn" aria-label="Open menu">&#9776;</button>
-      <strong>Rafid Property Intelligence</strong>
+      <strong>Rafid Intelligence Network</strong>
     </div>
     <main>
       <div class="hero">
         <div>
-          <h1>Rafid Property Intelligence</h1>
-          <div class="sub">AI-powered real estate &amp; business operations, analytics and revenue</div>
+          <h1 class="route-title">${esc(view === "overview" ? "Overview" : (SIDEBAR_GROUPS.flatMap(g => g.items).find(i => i.key === view)?.label ?? "Dashboard"))}</h1>
+          <div class="sub">Rafid Intelligence Platform · Internal operations console</div>
         </div>
         <div class="hero-right">
           <div class="live-indicator" id="live-indicator"><span class="dot dot-green pulse"></span> Live</div>
@@ -1175,81 +1567,135 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
       </div>
       <div id="generated-at" class="meta-row">Data as of ${esc(opts.initialData.generatedAt)} &middot; period: ${esc(opts.initialData.period)}</div>
 
-      <div class="period-bar">${periodButtons}</div>
+      <div class="global-toolbar">
+        <div class="toolbar-left"><span class="chip chip-blue">Production</span><div class="period-bar" style="margin:0">${periodButtons}</div></div>
+        <div class="toolbar-right"><input class="search-input global-search" id="global-search" type="search" placeholder="Search capabilities, agents, IDs…" aria-label="Global search"><button type="button" id="refresh-dashboard">Refresh</button></div>
+      </div>
+      <div class="refresh-controls" style="margin:-8px 0 12px;display:none">
+        <button type="button" id="refresh-dashboard-legacy">Refresh</button>
+        <button type="button" id="export-dashboard">Export JSON</button>
+        <button type="button" id="direction-toggle">العربية</button>
+        <span class="panel-desc" style="margin:0">Auto-refresh every 12 seconds while this tab is visible</span>
+      </div>
+
+      <div class="view-only-note">Use the navigation to open detailed analytics. Overview is intentionally limited to executive signals and active alerts.</div>
 
       <div id="dashboard-error" class="error-banner" style="display:none"></div>
 
-      <div class="panel">
+      <div class="panel attention-panel dashboard-section" data-views="overview" id="section-dashboard">
+        <div class="panel-head"><h2>Needs Attention</h2><span class="panel-desc" style="margin:0">Measured issues and direct paths to investigate them</span></div>
+        <div id="attention-content"></div>
+      </div>
+
+      <div class="panel dashboard-section" data-views="system overview" id="data-freshness">
+        <div class="panel-head"><h2>Data Quality &amp; Freshness</h2><span class="panel-desc" style="margin:0">Source, scope and freshness context for the numbers below</span></div>
+        <div id="freshness-content"></div>
+      </div>
+
+      <div class="panel dashboard-section" data-views="overview operations" id="pipeline">
         <h2>AI Operations Pipeline</h2>
         <div id="hero-pipeline"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel dashboard-section" data-views="agents" id="section-agents">
         <h2>Active Agents</h2>
         <div id="active-agents" class="agent-grid"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel dashboard-section" data-views="usage operations overview" id="section-analytics">
         <h2>Live Agent Activity</h2>
         <div id="activity-feed" class="activity-feed"></div>
       </div>
 
-      <div class="panel">
-        <h2>Revenue</h2>
+      <div class="panel dashboard-section" data-views="revenue overview" id="section-revenue">
+        <h2>Revenue Overview</h2>
+        <p class="panel-desc">Collected Revenue and Payout Available combine both EARNED-revenue rails this deployment settles &mdash; x402 on-chain (USDC, treated 1:1 with USD) and unified billing's prepaid USAGE revenue (API credits &amp; subscriptions, always USD; consumption only, never top-ups). Pending / Internal Billing Revenue is labeled "pending" because, unlike an on-chain settlement, it is never independently confirmed outside this application's own ledger. Payout Available reports only the on-chain settled total: there is no payout/withdrawal system for on-chain funds in this codebase, and Stripe-collected money follows Stripe's own separate payout/bank flow (see the Collection &amp; Funding panel below), so neither internal billing revenue nor Stripe collections are counted as available to pay out. External Funding Collected and Outstanding Customer Credit Balance are shown here too, but as their own distinct figures &mdash; a top-up is a LIABILITY the moment it's collected, not revenue, and is never added into Collected Revenue or Payout Available above.</p>
+        <div id="kpi-revenue-overview" class="kpi-grid"></div>
+        <p id="revenue-overview-mixed-note" class="empty" style="display:none">Settled x402 payments this period span more than one currency (or a non-USDC asset) &mdash; Collected Revenue and Payout Available can't be safely combined into one USD figure; see the Revenue panel's per-currency breakdown below.</p>
+      </div>
+
+      <div class="panel dashboard-section" data-views="revenue payments credits" id="collection-funding">
+        <h2>Collection &amp; Funding</h2>
+        <p class="panel-desc">Stripe Checkout and USDC-on-Base top-ups (src/billing/external/) &mdash; external payments that FUND prepaid credits from outside this application. Every figure here is FUNDING, never revenue: it is money collected from a customer that Rafid now owes back to them as spendable balance, until they consume it (which shows up in Unified Billing Revenue and Revenue Overview instead, never here). Stripe Collected follows Stripe's own payout/bank flow and is never implied to be on-chain or in this deployment's wallet; USDC Top-ups Confirmed genuinely are on-chain collected funds, independently verified before being counted.</p>
+        <div id="kpi-collection-funding" class="kpi-grid"></div>
+        <h3 style="margin:18px 0 8px;font-size:13px;color:var(--muted)">External Payments / Top-up History</h3>
+        <div id="external-payments-table"></div>
+      </div>
+
+      <div class="panel collapsible dashboard-section" data-views="revenue" id="section-settlements">
+        <div class="panel-head"><h2>Revenue</h2><span class="collapse-mark">−</span></div>
         <div id="kpi-revenue" class="kpi-grid"></div>
         <p id="revenue-empty-note" class="empty" style="display:none">No settled x402 payments in this period.</p>
       </div>
 
-      <div class="panel">
+      <div class="panel collapsible dashboard-section" data-views="revenue overview">
         <h2>Revenue Trend</h2>
         <div id="trend-chart"></div>
         <div id="trend-legend" class="legend"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel collapsible dashboard-section" data-views="revenue overview">
         <h2>Revenue by Capability</h2>
         <div id="revenue-by-tool"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel collapsible dashboard-section" data-views="revenue payments credits">
+        <h2>Unified Billing Revenue (API Credits &amp; Subscriptions)</h2>
+        <p class="panel-desc">A separate payment-rail family from the x402 settlement ledger above (always USD) &mdash; never blended into the Revenue panel's per-currency figures.</p>
+        <p id="unified-billing-disabled-note" class="empty" style="display:none">API credits and subscriptions are not enabled on this deployment.</p>
+        <div id="kpi-unified-billing" class="kpi-grid"></div>
+        <div id="unified-billing-by-tool" style="margin-top:14px"></div>
+      </div>
+
+      <div class="panel collapsible dashboard-section" data-views="capabilities platform overview">
         <div class="panel-head">
           <h2>All Capabilities Overview</h2>
-          <label class="sort-control">Sort by
-            <select id="capability-overview-sort">
+          <div class="toolbar-row">
+            <input type="text" id="capability-search" class="search-input" placeholder="Search capabilities…" aria-label="Search capabilities">
+            <button type="button" id="export-capabilities-csv">Export CSV</button>
+            <label class="sort-control">Sort by
+              <select id="capability-overview-sort">
               <option value="registry">Registry Order</option>
               <option value="calls">Calls</option>
               <option value="revenue">Revenue</option>
               <option value="settled">Settled Payments</option>
               <option value="conversion">Conversion</option>
-            </select>
-          </label>
+              </select>
+            </label>
+          </div>
         </div>
         <p class="panel-desc">Every registered capability &mdash; including ones with zero activity yet. The row list comes from the capability registry, not from analytics or revenue.</p>
         <div id="capability-overview"></div>
       </div>
 
-      <div class="grid-2">
-        <div class="panel">
+      <div class="grid-2 dashboard-section" data-views="health overview">
+        <div class="panel" id="section-health">
           <h2>x402 Funnel</h2>
           <div id="x402-funnel"></div>
         </div>
-        <div class="panel">
+        <div class="panel" id="section-reconciliation">
           <h2>System Status</h2>
           <div id="system-status"></div>
         </div>
       </div>
 
-      <div class="panel">
+      <div class="panel collapsible dashboard-section" data-views="health">
+        <h2>Free Preview Funnel</h2>
+        <p class="panel-desc">Preview traffic and preview&rarr;paid conversion (src/preview/) &mdash; never touches billing or payment.</p>
+        <div id="preview-funnel"></div>
+      </div>
+
+      <div class="panel collapsible dashboard-section" data-views="usage operations">
         <h2>System Health</h2>
         <div id="system-health"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel collapsible dashboard-section" data-views="usage capabilities operations">
         <h2>Agent / Tool Usage</h2>
         <div id="usage-metrics"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel collapsible dashboard-section" data-views="capabilities">
         <div class="panel-head">
           <h2>Top Tools / Conversion by Tool</h2>
           <div class="toolbar-row">
@@ -1267,21 +1713,36 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
         <div id="tool-conversion"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel collapsible">
         <h2>Live Analysis &amp; Calculation Preview</h2>
         <p class="panel-desc">Real per-capability call counts and latency from this period, paired with a generic reference pipeline / formula &mdash; no per-call result numbers are stored, so none are invented here.</p>
         <div id="analysis-preview-tabs" class="tab-row"></div>
         <div id="analysis-preview-body"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel dashboard-section" data-views="payments overview" id="latest-settlements">
         <h2>Latest Settlements</h2>
         <div id="latest-transactions"></div>
       </div>
 
-      <div class="panel">
+      <div class="panel dashboard-section" data-views="payments" id="reconciliation-detail">
         <h2>Reconciliation</h2>
         <div id="reconciliation"></div>
+      </div>
+
+      <div class="panel dashboard-section" data-views="payments operations" id="conversion-audit">
+        <h2>Revenue Conversion Audit</h2>
+        <p class="panel-desc">For every capability/tool call this period, why it did or did not convert into paid revenue &mdash; reconstructed from the analytics events, settlement ledger and unified-billing ledger this deployment already records (never a second revenue ledger or a new database). A stage marked "unknown / not instrumented" means this codebase's current instrumentation genuinely cannot observe that stage for those calls &mdash; never a fabricated zero.</p>
+        <h3 style="margin:18px 0 8px;font-size:13px;color:var(--muted)">Commercial Funnel</h3>
+        <div id="audit-funnel"></div>
+        <h3 style="margin:18px 0 8px;font-size:13px;color:var(--muted)">Top Conversion Blockers</h3>
+        <div id="audit-blockers"></div>
+        <h3 style="margin:18px 0 8px;font-size:13px;color:var(--muted)">Per-Tool Audit</h3>
+        <div id="audit-tool-table"></div>
+        <h3 style="margin:18px 0 8px;font-size:13px;color:var(--muted)">Recent Non-Converted Calls</h3>
+        <div id="audit-non-converted"></div>
+        <h3 style="margin:18px 0 8px;font-size:13px;color:var(--muted)">Recent Converted Calls</h3>
+        <div id="audit-converted"></div>
       </div>
     </main>
   </div>

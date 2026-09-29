@@ -1,6 +1,7 @@
 import { capabilities } from "../domain/capabilities.js";
 import { prices } from "../billing/catalog.js";
 import { x402BasePath } from "../billing/x402.js";
+import { PLATFORM_DESCRIPTION, PLATFORM_NAME, PLATFORM_TAGLINE } from "../brand.js";
 
 /** Lightweight, dependency-free landing page for browsers visiting "/". Machine clients get
  *  JSON instead via content negotiation (see api/app.ts) — this file has no framework, no
@@ -33,8 +34,11 @@ export function landingHtml(config: { x402Enabled: boolean }): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Rafid Property Intelligence API</title>
-<meta name="description" content="Property intelligence built for AI agents. Discover. Pay per call. Execute.">
+<title>${PLATFORM_NAME} — AI Intelligence APIs for Agents</title>
+<meta name="description" content="${PLATFORM_DESCRIPTION}">
+<meta property="og:title" content="${PLATFORM_NAME} — AI Intelligence APIs for Agents">
+<meta property="og:description" content="${PLATFORM_DESCRIPTION}">
+<meta property="og:type" content="website">
 <style>
   :root { color-scheme: light dark; }
   body { margin:0; font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background:#0b1220; color:#e6ebf2; }
@@ -65,8 +69,8 @@ export function landingHtml(config: { x402Enabled: boolean }): string {
 </head>
 <body>
 <main>
-  <h1>Rafid Property Intelligence</h1>
-  <p class="tagline">Property intelligence built for AI agents.<br>Discover. Pay per call. Execute.</p>
+  <h1>${PLATFORM_NAME}</h1>
+  <p class="tagline">${PLATFORM_TAGLINE}<br>Discover. Pay per call. Execute.</p>
   <div class="badges">
     <span class="badge primary">MCP</span>
     <span class="badge ${config.x402Enabled ? "primary" : "off"}">${config.x402Enabled ? "x402 ready" : "x402 not enabled"}</span>
@@ -124,7 +128,7 @@ ${rows}
     </div>
   </section>
 
-  <footer>Rafid Property Intelligence &middot; v0.1.0 &middot; <a href="/agent.json">agent manifest</a></footer>
+  <footer>${PLATFORM_NAME} &middot; v0.1.0 &middot; <a href="/agent.json">agent manifest</a></footer>
 </main>
 </body>
 </html>

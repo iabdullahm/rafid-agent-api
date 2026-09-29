@@ -9,12 +9,14 @@ import { createRateLimiter, disabledRateLimiter } from "../middleware/rateLimit.
 import type { AnalyticsRepository } from "../analytics/types.js";
 import type { RevenueLedger } from "../revenue/types.js";
 import type { BillingService } from "../billing/service.js";
+import type { BillingEngine } from "../billing/unified/engine.js";
+import type { ExternalPaymentsService } from "../billing/external/service.js";
 import { DASHBOARD_PERIODS, buildDashboardData, type DashboardPeriod } from "./dashboard/service.js";
 import { dashboardLoginPageHtml } from "./dashboard/loginPage.js";
-import { dashboardPageHtml } from "./dashboard/page.js";
+import { dashboardPageHtml, type DashboardView } from "./dashboard/page.js";
 
 /**
- * Internal Rafid Property Intelligence dashboard — GET-mostly (plus login/logout), session-
+ * Internal Rafid Intelligence Network dashboard — GET-mostly (plus login/logout), session-
  * cookie-protected, never registered in src/domain/capabilities.ts (same structural-
  * unreachability discipline as analyticsRoutes.ts/revenueRoutes.ts: unreachable from /agent.json,
  * the tool catalog, MCP, discovery/OpenAPI output or the x402 route family — spec section 10).
@@ -43,6 +45,13 @@ export interface DashboardRoutesOptions {
   analyticsRepository: AnalyticsRepository;
   revenueLedger: RevenueLedger;
   billingService: BillingService;
+  /** Unified billing (API credits + subscriptions). null when disabled for this deployment — see
+   *  app.ts's own billingEngine variable, passed straight through here. */
+  billingEngine: BillingEngine | null;
+  /** External payment collection (Stripe/USDC top-ups). null when this deployment has neither
+   *  rail configured — see app.ts's own externalPaymentsService variable, passed straight through
+   *  here, same convention as billingEngine above. */
+  externalPaymentsService: ExternalPaymentsService | null;
 }
 
 function send(res: express.Response, data: unknown) {
@@ -61,8 +70,17 @@ function stringParam(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
+const DASHBOARD_VIEWS = new Set<DashboardView>([
+  "overview", "revenue", "usage", "agents", "capabilities", "transactions", "x402", "l402", "mpp", "credits",
+  "requests", "errors", "performance", "rate-limits", "mcp", "discovery", "api-keys", "data-sources", "companies", "market-data", "health", "logs", "configuration"
+]);
+
+function parseView(raw: unknown): DashboardView {
+  return typeof raw === "string" && DASHBOARD_VIEWS.has(raw as DashboardView) ? raw as DashboardView : "overview";
+}
+
 export function createDashboardRoutes(options: DashboardRoutesOptions): Router {
-  const { config, analyticsRepository, revenueLedger, billingService } = options;
+  const { config, analyticsRepository, revenueLedger, billingService, billingEngine, externalPaymentsService } = options;
   const router = express.Router();
   router.use(express.urlencoded({ extended: false, limit: "16kb" }));
 
@@ -127,16 +145,28 @@ export function createDashboardRoutes(options: DashboardRoutesOptions): Router {
   router.get("/internal/dashboard", configured, htmlAuth, async (req, res, next) => {
     try {
       const period = parsePeriod(req.query.period);
-      const initialData = await buildDashboardData({ config, analyticsRepository, revenueLedger, billingService }, period);
-      res.type("html").send(dashboardPageHtml({ adminUser: res.locals.adminUser, csrfToken: res.locals.adminCsrf, initialData }));
+      const initialData = await buildDashboardData({ config, analyticsRepository, revenueLedger, billingService, billingEngine, externalPaymentsService }, period);
+      res.type("html").send(dashboardPageHtml({ adminUser: res.locals.adminUser, csrfToken: res.locals.adminCsrf, initialData, view: parseView(req.query.view) }));
     } catch (error) { next(error); }
   });
 
   router.get("/internal/dashboard/data", configured, apiAuth, async (req, res, next) => {
     try {
       const period = parsePeriod(req.query.period);
-      const data = await buildDashboardData({ config, analyticsRepository, revenueLedger, billingService }, period);
+      const data = await buildDashboardData({ config, analyticsRepository, revenueLedger, billingService, billingEngine, externalPaymentsService }, period);
       send(res, data);
+    } catch (error) { next(error); }
+  });
+
+  // View-specific URLs preserve one authenticated dashboard shell while giving each
+  // information-architecture destination a stable, bookmarkable route. This is registered
+  // after /data so the parameter route cannot shadow the existing JSON BFF endpoint.
+  router.get("/internal/dashboard/:view", configured, htmlAuth, async (req, res, next) => {
+    try {
+      const view = parseView(req.params.view);
+      const period = parsePeriod(req.query.period);
+      const initialData = await buildDashboardData({ config, analyticsRepository, revenueLedger, billingService, billingEngine, externalPaymentsService }, period);
+      res.type("html").send(dashboardPageHtml({ adminUser: res.locals.adminUser, csrfToken: res.locals.adminCsrf, initialData, view }));
     } catch (error) { next(error); }
   });
 

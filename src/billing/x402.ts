@@ -1,8 +1,9 @@
 import type { RequestHandler } from "express";
 import { z } from "zod";
-import { x402ResourceServer, HTTPFacilitatorClient, type RoutesConfig } from "@x402/core/server";
+import { x402ResourceServer, HTTPFacilitatorClient, type FacilitatorClient, type RoutesConfig } from "@x402/core/server";
 import type { Network } from "@x402/core/types";
 import { ExactEvmScheme } from "@x402/evm/exact/server";
+import { getDefaultAsset } from "@x402/evm";
 import { paymentMiddleware } from "@x402/express";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
 import { createFacilitatorConfig } from "@coinbase/x402";
@@ -13,9 +14,77 @@ import type { Config } from "../config/env.js";
 /** Base path for the pay-per-call x402 endpoints. No X-API-Key or customer account is required here;
  *  a valid on-chain payment (X-PAYMENT header) is the sole authorization. */
 export const x402BasePath = "/api/v1/x402";
+export const x402DocsPath = "/docs/x402";
+export const X402_PAYMENT_GUIDANCE_VERSION = "2026-09-28.v1";
 
 export type X402Config = Pick<Config,
   "x402Enabled" | "x402Network" | "x402WalletAddress" | "x402FacilitatorUrl" | "cdpApiKeyId" | "cdpApiKeySecret" | "cdpConfigured">;
+
+type SupportedResponse = {
+  kinds: { x402Version: number; scheme: string; network: Network; extra?: Record<string, unknown> }[];
+  extensions: string[];
+  signers: Record<string, string[]>;
+};
+
+const FACILITATOR_SUPPORTED_TIMEOUT_MS = 3_000;
+const FACILITATOR_VERIFY_SETTLE_TIMEOUT_MS = 90_000;
+const FACILITATOR_SUPPORTED_CACHE_MS = 5 * 60_000;
+
+type FacilitatorHealth = {
+  status: "not_checked" | "reachable" | "unreachable";
+  latencyMs: number | null;
+  errorCategory: "timeout" | "auth" | "http" | "network" | null;
+  checkedAt: string | null;
+};
+
+let facilitatorHealth: FacilitatorHealth = {
+  status: "not_checked", latencyMs: null, errorCategory: null, checkedAt: null
+};
+
+export function getX402FacilitatorHealth(): FacilitatorHealth {
+  return { ...facilitatorHealth };
+}
+
+/**
+ * Facilitator capability discovery is metadata, not payment authorization. Keep it fast and
+ * cache successful responses so an unavailable /supported endpoint cannot turn every unpaid
+ * request into a 90-second 502. Verify and settle still use the normal authenticated facilitator
+ * client and are never replaced by the fallback below.
+ */
+function buildFacilitatorClient(config: X402Config): FacilitatorClient {
+  const facilitatorConfig = config.cdpConfigured
+    ? createFacilitatorConfig(config.cdpApiKeyId, config.cdpApiKeySecret)
+    : { url: config.x402FacilitatorUrl };
+  const paymentClient = new HTTPFacilitatorClient({ ...facilitatorConfig, timeoutMs: FACILITATOR_VERIFY_SETTLE_TIMEOUT_MS });
+  const supportClient = new HTTPFacilitatorClient({ ...facilitatorConfig, timeoutMs: FACILITATOR_SUPPORTED_TIMEOUT_MS });
+  let cached: { response: SupportedResponse; expiresAt: number } | null = null;
+  const fallback: SupportedResponse = {
+    kinds: [{ x402Version: 2, scheme: "exact", network: config.x402Network as Network }],
+    extensions: [],
+    signers: {}
+  };
+
+  return {
+    verify: paymentClient.verify.bind(paymentClient),
+    settle: paymentClient.settle.bind(paymentClient),
+    getSupported: async () => {
+      if (cached && cached.expiresAt > Date.now()) return cached.response;
+      const startedAt = Date.now();
+      try {
+        const response = await supportClient.getSupported();
+        cached = { response, expiresAt: Date.now() + FACILITATOR_SUPPORTED_CACHE_MS };
+        facilitatorHealth = { status: "reachable", latencyMs: Date.now() - startedAt, errorCategory: null, checkedAt: new Date().toISOString() };
+        return response;
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        const errorCategory = /timed out|timeout/i.test(reason) ? "timeout" : /unauthorized|forbidden|invalid key|auth/i.test(reason) ? "auth" : /\bHTTP\s+\d+|failed \(\d+\)/i.test(reason) ? "http" : "network";
+        facilitatorHealth = { status: "unreachable", latencyMs: Date.now() - startedAt, errorCategory, checkedAt: new Date().toISOString() };
+        console.warn(`[x402] facilitator supported metadata unavailable; using local exact/${config.x402Network} capability for 402 generation (category=${errorCategory})`);
+        return cached?.response ?? fallback;
+      }
+    }
+  };
+}
 
 /**
  * Builds the Express payment-gate middleware for the x402 pay-per-call routes. This is REAL
@@ -33,12 +102,10 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
   // The free public x402.org facilitator only settles Base Sepolia (eip155:84532) for EVM.
   // Any other network (Base mainnet included) requires an authenticated Coinbase Developer
   // Platform facilitator, which loadConfig has already confirmed is configured in that case.
-  const facilitatorClient = config.cdpConfigured
-    ? new HTTPFacilitatorClient(createFacilitatorConfig(config.cdpApiKeyId, config.cdpApiKeySecret))
-    : new HTTPFacilitatorClient({ url: config.x402FacilitatorUrl });
+  const facilitatorClient = buildFacilitatorClient(config);
   // registerExtension(bazaarResourceServerExtension) turns on Bazaar discovery-metadata
   // enrichment (e.g. filling in the HTTP `method` field at declaration time) and echoing for
-  // every route below that declares a `bazaar` extension via declareDiscoveryExtension() — see
+  // each eligible route below that declares a `bazaar` extension via declareDiscoveryExtension() — see
   // https://docs.x402.org/extensions/bazaar. This makes each route's request/response shape
   // legible to Bazaar-aware facilitators/clients; it does not itself register Rafid with any
   // catalog. Cataloging only happens once a facilitator processes a real settled payment whose
@@ -49,14 +116,94 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
     .registerExtension(bazaarResourceServerExtension);
   const routes: RoutesConfig = {};
   for (const c of capabilities) {
+    const paymentRequirement = billing.buildX402PaymentRequirement(c.name, network, config.x402WalletAddress as `0x${string}`);
     routes[`POST ${x402BasePath}${c.path}`] = {
-      accepts: billing.buildX402PaymentRequirement(c.name, network, config.x402WalletAddress as `0x${string}`),
+      accepts: paymentRequirement,
       description: `${c.description} Paid per call via x402; no API key required.`,
+      // The PAYMENT-REQUIRED header remains the standards-compatible source of truth. This
+      // additive JSON body is deliberately derived from the same route requirement and gives a
+      // generic agent enough information to decide whether it can pay and how to retry.
+      unpaidResponseBody: context => {
+        const resource = context.adapter.getUrl();
+        const docs = new URL(x402DocsPath, resource).toString();
+        const requestId = context.adapter.getHeader("x-rafid-request-id") ?? null;
+        let assetContract: string | null = null;
+        let assetDecimals: number | null = null;
+        try {
+          const asset = getDefaultAsset(network);
+          assetContract = asset.asset;
+          assetDecimals = asset.decimals;
+        } catch {
+          // Network validation belongs to config loading; a missing SDK asset mapping should not
+          // make an otherwise valid x402 challenge impossible to render.
+        }
+        const amount = typeof paymentRequirement.price === "string"
+          ? paymentRequirement.price.replace(/^\$/, "")
+          : String(paymentRequirement.price);
+        return {
+          contentType: "application/json",
+          body: {
+            success: false,
+            error: "payment_required",
+            message: "This capability requires an x402 payment. Read PAYMENT-REQUIRED, pay the listed requirement, then retry the same request with X-PAYMENT.",
+            protocol: "x402",
+            x402Version: 2,
+            guidanceVersion: X402_PAYMENT_GUIDANCE_VERSION,
+            // Additive aliases for generic agents. Keep the original names above/below for
+            // backwards compatibility with clients that already consume this body.
+            paymentGuidanceVersion: X402_PAYMENT_GUIDANCE_VERSION,
+            capability: { id: c.name, name: c.name, price: { amount, currency: "USD" } },
+            payment: {
+              required: true,
+              protocol: "x402",
+              scheme: paymentRequirement.scheme,
+              network: paymentRequirement.network,
+              asset: "USDC",
+              assetContract,
+              assetDecimals,
+              payTo: paymentRequirement.payTo,
+              resource,
+              method: context.method,
+              paymentRequiredHeader: "PAYMENT-REQUIRED"
+            },
+            retry: {
+              action: "pay_and_retry",
+              method: context.method,
+              url: resource,
+              header: "X-PAYMENT",
+              preserveRequestBody: true,
+              retrySameBody: true,
+              instructions: "Use an x402-compatible client or SDK to create the payment, attach its X-PAYMENT header, and retry the same method, URL, and JSON body."
+            },
+            nextAction: {
+              type: "pay_and_retry",
+              protocol: "x402",
+              method: context.method,
+              url: resource,
+              retrySameBody: true
+            },
+            clients: {
+              recommended: ["@x402/fetch", "@x402/evm"],
+              documentation: docs,
+              javascript: { install: "npm install @x402/fetch @x402/evm", example: "Use wrapFetchWithPayment with an EVM wallet, then fetch the same endpoint and body again." },
+              generic: { flow: ["parse PAYMENT-REQUIRED", "select the exact x402 requirement", "create payment proof", "retry unchanged request with X-PAYMENT"] }
+            },
+            docs,
+            requestId,
+            paymentSupportRequired: true,
+            supportedProtocols: ["x402"],
+            unsupportedClientAction: "Use an x402-compatible client or SDK; do not retry unpaid requests repeatedly."
+          }
+        };
+      },
       // Bazaar discovery declaration: same input/output shape already published via OpenAPI
       // (z.toJSONSchema(c.input)/(c.output), the same conversion src/api/openapi.ts uses) and
       // the same hand-verified example/exampleOutput used everywhere else in this registry —
-      // no second copy of a schema or example is maintained here.
-      extensions: discoveryDeclaration(c)
+      // no second copy of a schema or example is maintained here. The exceptionally large invoice
+      // schema is intentionally excluded below rather than emitting a malformed header.
+      // The invoice schema is too large for a valid Bazaar declaration inside a payment header.
+      // Its complete, tested contract remains available in OpenAPI and the capability registry.
+      ...(c.name === "invoice_anomaly_check" ? {} : { extensions: discoveryDeclaration(c) })
     };
   }
   // syncFacilitatorOnStart (default true): the returned handler awaits the facilitator's
@@ -94,7 +241,13 @@ export function discoveryDeclaration(c: (typeof capabilities)[number]): ReturnTy
     const declaration = declareDiscoveryExtension(candidate);
     if (JSON.stringify(declaration).length <= MAX_DISCOVERY_DECLARATION_CHARS) return declaration;
   }
-  return declareDiscoveryExtension({ bodyType: "json" as const, inputSchema: compactInputSchema });
+  return declareDiscoveryExtension({ bodyType: "json" as const, input: minimumDiscoveryInput(c) });
+}
+
+/** Keeps Bazaar declarations valid when a full JSON Schema cannot fit in a payment header. */
+function minimumDiscoveryInput(c: (typeof capabilities)[number]): Record<string, unknown> {
+  if (c.name === "invoice_anomaly_check") return { invoice: { total: 0 } };
+  return c.example as Record<string, unknown>;
 }
 
 /** A JSON Schema without its `description` annotations (validation keywords unchanged). */
@@ -121,6 +274,9 @@ export function buildX402Info(config: X402Config, billing: BillingService) {
     network: config.x402Enabled ? config.x402Network : null,
     payTo: config.x402Enabled ? config.x402WalletAddress : null,
     facilitator: config.x402Enabled ? (config.cdpConfigured ? "coinbase-cdp" : "public") : null,
+    asset: config.x402Enabled ? "USDC" : null,
+    docs: x402DocsPath,
+    executionFlow: ["POST without payment", "parse PAYMENT-REQUIRED", "pay exact requirement", "retry same request with X-PAYMENT"],
     tools: capabilities.map(c => ({ name: c.name, endpoint: x402BasePath + c.path, price: billing.getToolPrice(c.name) }))
   };
 }

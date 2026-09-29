@@ -76,14 +76,29 @@ export async function runFindCompanies(rawInput: unknown, options: RunFindCompan
 
   const provider = buildWebSearchProvider({ requestId: options.requestId ?? null, capability: "find_companies" });
   const query = buildSearchQuery(input);
-  const results = await provider.search(query, { maxResults: Math.min(appliedLimit, 20), freshness: "year" });
-  const deduped = dedupeByUrl(results);
+  // Providers are expected to degrade to a status, but a third-party adapter or a malformed
+  // response must not turn a paid capability into an opaque 500/execution_failed. Keep the
+  // result honest: no companies, no fabricated sources, and an explicit unavailable status.
+  let outcome: { status: "ok" | "unavailable" | "timeout" | "rate_limited"; results: readonly WebSearchResult[] };
+  try {
+    outcome = provider.searchWithStatus
+      ? await provider.searchWithStatus(query, { maxResults: Math.min(appliedLimit, 20), freshness: "year" })
+      : { status: "ok" as const, results: await provider.search(query, { maxResults: Math.min(appliedLimit, 20), freshness: "year" }) };
+  } catch {
+    outcome = { status: "unavailable", results: [] };
+  }
+  const deduped = dedupeByUrl(outcome.results);
 
   if (deduped.length === 0) {
     return buildResult({
       companies: [], sources: [], confidence: 0.05, dataMode: "live",
       requestedLimit: input.limit, appliedLimit,
-      limitations: ["No web search results were found for the given criteria.", ...baseLimitations]
+      limitations: [
+        outcome.status === "ok"
+          ? "No web search results were found for the given criteria."
+          : "The web search provider did not return usable results (status: " + outcome.status + "). Check Tavily credentials, quota, network access and timeout logs before treating this as a no-results finding.",
+        ...baseLimitations
+      ]
     }, key);
   }
 
@@ -104,6 +119,9 @@ export async function runFindCompanies(rawInput: unknown, options: RunFindCompan
   );
 
   const limitations = [...baseLimitations];
+  if (outcome.status !== "ok") {
+    limitations.unshift("The web-search provider returned status " + outcome.status + "; discovery coverage may be incomplete.");
+  }
   if (!synthesized) {
     limitations.unshift(
       "Structured company extraction requires an LLM synthesis provider, which is not configured for this deployment — no candidate companies could be safely extracted from raw search results without risking fabrication; the underlying search sources are returned below for the calling agent to review directly."

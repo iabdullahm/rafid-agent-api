@@ -1,0 +1,12 @@
+.git/
+.github/
+.codex/
+.agents/
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+apify/company-intelligence/node_modules/
+storage/
+*.log

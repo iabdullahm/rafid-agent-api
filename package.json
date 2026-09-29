@@ -17,11 +17,15 @@
     "start": "node --env-file-if-exists=.env dist/server.js",
     "mcp": "node --env-file-if-exists=.env dist/mcp.js",
     "admin": "node --env-file-if-exists=.env --import tsx src/admin.ts",
+    "billing": "node --env-file-if-exists=.env --import tsx src/billingCli.ts",
     "market:import": "node --env-file-if-exists=.env --import tsx src/marketImportCli.ts",
+    "vehicle:import": "node --env-file-if-exists=.env --import tsx src/vehicleImportCli.ts",
     "ncsi:discover": "node --env-file-if-exists=.env --import tsx src/ncsiDiscoverCli.ts",
     "partner:feeds": "node --env-file-if-exists=.env --import tsx src/partnerFeedsCli.ts",
     "analytics:summary": "node --env-file-if-exists=.env --import tsx src/analyticsSummaryCli.ts",
     "revenue:summary": "node --env-file-if-exists=.env --import tsx src/revenueSummaryCli.ts",
+    "revenue:reconcile-x402": "node --env-file-if-exists=.env --import tsx src/reconcileX402Cli.ts",
+    "audit:revenue": "node --env-file-if-exists=.env --import tsx src/revenueConversionAuditCli.ts",
     "test:ncsi-live": "node --env-file-if-exists=.env --import tsx --test tests/ncsi-live.test.ts",
     "test:db": "node --env-file-if-exists=.env --import tsx scripts/test-db.ts",
     "test:partner-e2e": "node --env-file-if-exists=.env --import tsx scripts/partner-e2e.ts",
@@ -29,7 +33,7 @@
     "predistribution:check": "npm run distribution:manifest",
     "distribution:check": "node --import tsx scripts/distributionCheck.ts",
     "pretest": "npm run build",
-    "test": "tsx --test tests/*.test.ts"
+    "test": "node scripts/runTests.mjs"
   },
   "dependencies": {
     "@coinbase/x402": "^2.1.0",
@@ -42,6 +46,7 @@
     "express": "^5.1.0",
     "mppx": "^0.11.0",
     "pg": "^8.23.0",
+    "stripe": "^18.5.0",
     "unpdf": "^1.8.1",
     "viem": "^2.56.8",
     "zod": "^4.1.0"

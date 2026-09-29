@@ -44,9 +44,16 @@ test("compiled MCP stdio: initialize, discovery, structured results, validation"
     assert.ok(tool.description.includes(c.description));
     assert.ok(tool.description.includes(c.whenToUse));
     const response = await call("tools/call", { name: c.name, arguments: c.example });
-    assert.equal(response.error, undefined); assert.ok(!response.result.isError);
-    assert.deepEqual(response.result.structuredContent, await c.execute(c.example));
-    assert.deepEqual(JSON.parse(response.result.content[0].text), await c.execute(c.example));
+    assert.equal(response.error, undefined);
+    if (c.sideEffects) {
+      // Side-effecting capabilities are intentionally fail-closed in this offline stdio test:
+      // no real telephone call may be initiated without configured provider credentials.
+      assert.ok(response.result?.isError);
+    } else {
+      assert.ok(!response.result.isError);
+      assert.deepEqual(response.result.structuredContent, await c.execute(c.example));
+      assert.deepEqual(JSON.parse(response.result.content[0].text), await c.execute(c.example));
+    }
     const invalid = await call("tools/call", { name: c.name, arguments: { propertyValue: 0, unexpected: true } });
     assert.ok(invalid.error || invalid.result?.isError);
   }

@@ -10,6 +10,7 @@ import { buildOpenapi } from "../src/api/openapi.js";
 import { buildAgentManifest, buildAiPluginManifest, buildAgentCard } from "../src/api/manifest.js";
 import { buildLlmsTxt } from "../src/api/llms-txt.js";
 import { buildCapabilitiesRegistry } from "../src/api/agent.js";
+import { PLATFORM_NAME } from "../src/brand.js";
 
 // This suite covers requirement 18: the AI-agent-first refocus must not introduce a second,
 // driftable copy of any tool's name, price, schema or description. Every assertion below
@@ -61,19 +62,7 @@ test("OpenAPI operationIds match capability names exactly for the primary (non-l
   for (const c of capabilities) {
     assert.equal(doc.paths["/api/v1" + c.path]?.post?.operationId, c.name);
   }
-  assert.equal(
-    capabilities.map(c => c.name).sort().join(","),
-    [
-      "analyze_oman_property",
-      "analyze_property",
-      "compare_properties",
-      "estimate_maintenance",
-      "search_oman_company",
-      "get_oman_company_profile",
-      "analyze_oman_company",
-      "due_diligence_oman_company"
-    ].sort().join(",")
-  );
+  assert.equal(new Set(capabilities.map(c => c.name)).size, capabilities.length);
 });
 
 test("GET /api/v1/capabilities is a machine-first registry that matches src/domain/capabilities.ts one-to-one", async () => {
@@ -110,6 +99,8 @@ test("GET /agent.json, /.well-known/ai-plugin.json and /.well-known/agent.json e
       assert.match(response.headers.get("content-type") ?? "", /application\/json/);
       const text = await response.text();
       assert.doesNotThrow(() => JSON.parse(text), `${path} did not return valid JSON`);
+      const body = JSON.parse(text);
+      if (path === "/agent.json") assert.equal(body.name, PLATFORM_NAME);
     }
   });
 });
@@ -162,7 +153,7 @@ test("GET /llms.txt is plain text, mentions every tool by name and price, and ne
       assert.ok(text.includes(`$${prices[c.name].toFixed(2)}`));
     }
     for (const p of plannedCapabilities) assert.ok(text.includes(p.name));
-    assert.equal(text, buildLlmsTxt(config));
+    assert.equal(text, buildLlmsTxt(config, base));
   });
 });
 

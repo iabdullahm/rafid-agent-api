@@ -36,7 +36,7 @@ export function ambiguousEntityError(q: BusinessRiskQuery, resolution: Resolutio
   ];
   return new ApiError(409, "AMBIGUOUS_ENTITY",
     `"${q.companyName}" matches ${resolution.candidates.length} different registered companies and the supplied identifiers do not distinguish them. No risk score was computed and no payment was taken; retry with one of the candidates' registration numbers.`,
-    { status: "ambiguous_entity", candidates: resolution.candidates.slice(0, LIMITS.maxCandidatesInError).map(candidateView), suggestedIdentifiers: suggested });
+    { status: "ambiguous_entity", candidateCount: resolution.candidates.length, candidates: resolution.candidates.slice(0, LIMITS.maxCandidatesInError).map(candidateView), suggestedIdentifiers: suggested });
 }
 
 export function entityNotFoundError(q: BusinessRiskQuery, registries: readonly string[]): ApiError {

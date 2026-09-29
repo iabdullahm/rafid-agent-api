@@ -29,7 +29,7 @@ import { PRODUCTION_BASE_URL } from "./distributionConfig.js";
  */
 
 const manifest = {
-  name: "Rafid Property Intelligence",
+  name: "Rafid Intelligence Network",
   tagline: "Property intelligence built for AI agents.",
   description:
     "Property and facility intelligence tools built for autonomous AI agents: discover a capability, " +

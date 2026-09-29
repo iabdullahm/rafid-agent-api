@@ -1,3 +1,5 @@
+import { PLATFORM_DESCRIPTION, PLATFORM_NAME } from "../brand.js";
+
 const swaggerVersion = "5.32.11";
 const assetBase = `https://unpkg.com/swagger-ui-dist@${swaggerVersion}`;
 
@@ -6,8 +8,8 @@ export const swaggerHtml = `<!doctype html>
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="description" content="Interactive documentation for the Rafid Agent API">
-    <title>Rafid Agent API Docs</title>
+    <meta name="description" content="${PLATFORM_DESCRIPTION}">
+    <title>${PLATFORM_NAME} API Docs</title>
     <link rel="stylesheet" href="${assetBase}/swagger-ui.css" crossorigin="anonymous">
     <style>
       html { box-sizing: border-box; overflow-y: scroll; }
@@ -15,7 +17,7 @@ export const swaggerHtml = `<!doctype html>
       body { margin: 0; background: #f5f7fb; }
       .swagger-ui .topbar { background: #10253f; }
       .swagger-ui .topbar-wrapper img { display: none; }
-      .swagger-ui .topbar-wrapper::before { color: #fff; content: "Rafid Agent API"; font: 600 18px/1 system-ui, sans-serif; }
+      .swagger-ui .topbar-wrapper::before { color: #fff; content: "${PLATFORM_NAME} API"; font: 600 18px/1 system-ui, sans-serif; }
     </style>
   </head>
   <body>

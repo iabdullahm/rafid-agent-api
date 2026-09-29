@@ -1,0 +1,6 @@
+governorate,wilayat,area,propertyType,bedrooms,bathrooms,sizeSqm,transactionType,priceOMR,rentPeriod,furnished,sourceType,sourceName,sourceRecordId,sourceUrl,observedAt,metadata
+Muscat,Muscat,Al Mouj,apartment,2,2,132,rental,780,monthly,furnished,listing_asking_price,Example Licensed Listing Feed,LST-10021,https://example.com/listings/10021,2026-07-01,
+Muscat,Muscat,Al Mouj,apartment,1,1,80,rental,520,monthly,unfurnished,listing_asking_price,Example Licensed Listing Feed,LST-10022,https://example.com/listings/10022,2026-07-03,
+Muscat,Bawshar,Bausher,villa,4,4,340,rental,1000,monthly,semi_furnished,listing_asking_price,Example Licensed Listing Feed,LST-10023,https://example.com/listings/10023,2026-06-20,
+Muscat,Muscat,Al Mouj,apartment,2,2,130,sale,120000,,furnished,listing_asking_price,Example Licensed Listing Feed,LST-10024,https://example.com/listings/10024,2026-06-15,"{""floor"": 4}"
+Muscat,Bawshar,Muscat Hills,villa,5,5,470,sale,415000,,unfurnished,partner_feed,Example Partner Data Share,PTR-5501,,2026-05-30,

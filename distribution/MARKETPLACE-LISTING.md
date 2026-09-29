@@ -4,7 +4,7 @@ A reusable listing template for agent marketplaces, directories, and plugin/tool
 
 ## Product name
 
-Rafid Property Intelligence
+Rafid Intelligence Network
 
 ## One-line
 
@@ -16,7 +16,7 @@ AI-agent-native property intelligence with Oman-specific market context, real pa
 
 ## Long description
 
-Rafid Property Intelligence is an API built for autonomous AI agents rather than human dashboards. It exposes four capabilities — property investment metrics, multi-property comparison, a maintenance-reserve heuristic, and Oman/Muscat-specific property analysis — over three interchangeable transports: MCP (stdio or remote Streamable HTTP), a conventional REST API authenticated with an API key, and x402 pay-per-call requiring no account at all.
+Rafid Intelligence Network is an API built for autonomous AI agents rather than human dashboards. It exposes structured intelligence capabilities across property, companies, suppliers, documents, risk, vehicles and logistics over MCP (stdio or remote Streamable HTTP), a conventional REST API authenticated with an API key, and x402 pay-per-call requiring no account at all.
 
 Its most distinctive capability, `analyze_oman_property`, combines local rental and sale comparables, historical sale context, and (where NCSI is configured) official governorate-level statistics into one structured response with `pricePosition`, `historicalSalesContext`, `provenance`, `dataQuality`, `confidence`, and `riskFlags`. On deployments configured with them, its sale comparables and historical context include real partner-supplied Al Mouj Muscat property sale records (`sourceType: "partner_feed"`) — genuine contracted-unit prices from a real estate partner's own sales records — alongside a curated demo/benchmark dataset (`sourceType: "manual_benchmark"`) where partner data isn't configured. Every response states which kind of data actually contributed.
 

@@ -33,6 +33,7 @@ export interface ChainVerificationChecks {
   networkMatches: boolean | null;
   amountMatches: boolean | null;
   recipientMatches: boolean | null;
+  payerMatches: boolean | null;
 }
 
 export interface ChainVerificationResult {
@@ -46,7 +47,7 @@ export interface SettlementChainVerifier {
   verify(settlement: RevenueSettlement): Promise<ChainVerificationResult>;
 }
 
-const NOT_RUN: ChainVerificationChecks = { transactionExists: null, networkMatches: null, amountMatches: null, recipientMatches: null };
+const NOT_RUN: ChainVerificationChecks = { transactionExists: null, networkMatches: null, amountMatches: null, recipientMatches: null, payerMatches: null };
 
 /** The default verifier whenever no RPC endpoint is configured (see createSettlementChainVerifier
  *  below). Never claims a settlement is verified — the revenue ledger and every internal revenue
@@ -156,6 +157,7 @@ export class EvmRpcSettlementChainVerifier implements SettlementChainVerifier {
 
     let amountMatches: boolean | null = null;
     let recipientMatches: boolean | null = null;
+    let payerMatches: boolean | null = settlement.payerAddress ? false : null;
     const expectedRecipientTopic = padAddressTopic(settlement.payToAddress);
     const transferLog = receipt.logs.find(l =>
       l.address.toLowerCase() === usdcContract.toLowerCase() &&
@@ -164,6 +166,9 @@ export class EvmRpcSettlementChainVerifier implements SettlementChainVerifier {
     );
     if (transferLog) {
       recipientMatches = transferLog.topics[2]!.toLowerCase() === expectedRecipientTopic.toLowerCase();
+      if (settlement.payerAddress) {
+        payerMatches = transferLog.topics[1]!.toLowerCase() === padAddressTopic(settlement.payerAddress).toLowerCase();
+      }
       if (settlement.amountAtomic !== null) {
         try {
           const onChainAtomic = BigInt(transferLog.data).toString();
@@ -177,7 +182,7 @@ export class EvmRpcSettlementChainVerifier implements SettlementChainVerifier {
       amountMatches = settlement.amountAtomic !== null ? false : null;
     }
 
-    const checks: ChainVerificationChecks = { transactionExists, networkMatches, amountMatches, recipientMatches };
+    const checks: ChainVerificationChecks = { transactionExists, networkMatches, amountMatches, recipientMatches, payerMatches };
     const allKnownChecksPass = [transactionExists, networkMatches, amountMatches, recipientMatches]
       .filter((c): c is boolean => c !== null)
       .every(Boolean);

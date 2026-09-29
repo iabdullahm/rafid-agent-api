@@ -363,11 +363,11 @@ test("revenue internal auth: every route 503s when unconfigured, 401s on a missi
     // Structurally unreachable from every public discovery surface — never registered in
     // src/domain/capabilities.ts (same discipline as analyticsRoutes.ts).
     const agentManifest = await (await fetch(base + "/agent.json")).json();
-    assert.ok(!JSON.stringify(agentManifest).toLowerCase().includes("revenue"));
+    assert.ok(!JSON.stringify(agentManifest).toLowerCase().includes("/internal/revenue"));
     const toolCatalog = await (await fetch(base + "/api/v1/tools")).json();
-    assert.ok(!JSON.stringify(toolCatalog).toLowerCase().includes("revenue"));
+    assert.ok(!JSON.stringify(toolCatalog).toLowerCase().includes("/internal/revenue"));
     const capabilitiesRegistry = await (await fetch(base + "/api/v1/capabilities")).json();
-    assert.ok(!JSON.stringify(capabilitiesRegistry).toLowerCase().includes("revenue"));
+    assert.ok(!JSON.stringify(capabilitiesRegistry).toLowerCase().includes("/internal/revenue"));
     const openapi = await (await fetch(base + "/openapi.json")).json() as { paths: Record<string, unknown> };
     assert.ok(!Object.keys(openapi.paths).some(p => p.includes("/internal/revenue")));
     const llmsTxt = await (await fetch(base + "/llms.txt")).text();

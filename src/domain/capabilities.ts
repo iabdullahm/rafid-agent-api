@@ -22,6 +22,10 @@ import { businessRiskScoreInput } from "../schemas/businessRiskInputs.js";
 import { businessRiskScoreOutput } from "../schemas/businessRiskOutputs.js";
 import { businessRiskScore, previewBusinessRiskScoreCapability } from "../services/businessRiskScore.js";
 import { BUSINESS_RISK_SCORE_EXAMPLE_OUTPUT } from "./examples/businessRiskScoreExample.js";
+import { companyDueDiligenceInput } from "../schemas/companyDueDiligenceInputs.js";
+import { companyDueDiligenceOutput } from "../schemas/companyDueDiligenceOutputs.js";
+import { companyDueDiligence, previewCompanyDueDiligenceCapability } from "../services/companyDueDiligence.js";
+import { COMPANY_DUE_DILIGENCE_EXAMPLE_OUTPUT } from "./examples/companyDueDiligenceExample.js";
 import { documentFactsExtractInput } from "../schemas/documentFactsInputs.js";
 import { documentFactsExtractOutput } from "../schemas/documentFactsOutputs.js";
 import { documentFactsExtract, previewDocumentFactsExtractCapability } from "../services/documentFactsExtract.js";
@@ -32,15 +36,45 @@ import { invoiceAnomalyCheckOutput } from "../schemas/invoiceAnomalyOutputs.js";
 import { invoiceAnomalyCheck, previewInvoiceAnomalyCheckCapability } from "../services/invoiceAnomalyCheck.js";
 import { INVOICE_ANOMALY_EXAMPLE_INPUT, INVOICE_ANOMALY_EXAMPLE_OUTPUT } from "./examples/invoiceAnomalyCheckExample.js";
 import { INVOICE_ANOMALY_LIMITS } from "../invoice-anomaly/config.js";
+import { vehicleValueEstimateInput } from "../schemas/vehicleValueInputs.js";
+import { vehicleValueEstimateOutput } from "../schemas/vehicleValueOutputs.js";
+import { previewVehicleValueEstimateCapability, vehicleValueEstimate } from "../services/vehicleValueEstimate.js";
+import { VEHICLE_EXAMPLE_INPUT, VEHICLE_VALUE_EXAMPLE_OUTPUT } from "./examples/vehicleValueEstimateExample.js";
 import type { CapabilityPreviewBody } from "../preview/types.js";
 import type { z } from "zod";
+import { shippingCostEstimateInput } from "../schemas/shippingCostInputs.js";
+import { shippingCostEstimateOutput } from "../schemas/shippingCostOutputs.js";
+import { estimateShippingCost, previewShippingCost } from "../shipping-cost/service.js";
+import { aiCallAgentInput, appointmentCallAgentInput, voiceLeadQualifierInput } from "../schemas/voiceInputs.js";
+import { appointmentCallAgentOutput, callResult, voiceLeadQualifierOutput } from "../schemas/voiceOutputs.js";
+import { defaultVoiceService } from "../voice/service.js";
+import { strategyPerformanceAnalysisInput, tradeRiskScoreInput, portfolioExposureCheckInput, tradeLogAnalysisInput } from "../schemas/tradingAnalysisInputs.js";
+import { strategyPerformanceAnalysisOutput, tradeRiskScoreOutput, portfolioExposureCheckOutput, tradeLogAnalysisOutput } from "../schemas/tradingAnalysisOutputs.js";
+import { analyzeStrategyPerformance, scoreTradeRisk, checkPortfolioExposure, analyzeTradeLog } from "../trading-analysis/index.js";
+import { bookCapabilities } from "../book-business/registry.js";
+import { extractCandidateProfileInput, generateJobProfileInput, cvScoreInput, cvJobMatchInput, cvImproveInput, candidateShortlistScoreInput } from "../schemas/recruitmentInputs.js";
+import { candidateProfileOutput, jobProfileOutput, cvScoreOutput, cvJobMatchOutput, cvImproveOutput, shortlistOutput } from "../schemas/recruitmentOutputs.js";
+import { extractCandidateProfile, generateJobProfile, cvScore, cvJobMatch, cvImprove, candidateShortlistScore, previewRecruitment } from "../recruitment/service.js";
+import { websiteProjectEstimateInput } from "../schemas/websiteEstimateInputs.js";
+import { websiteProjectEstimateOutput } from "../schemas/websiteEstimateOutputs.js";
+import { websiteProjectEstimate, previewWebsiteProjectEstimate } from "../website-estimate/service.js";
+import { websiteAuditInput } from "../schemas/websiteAuditInputs.js";
+import { websiteAuditOutput } from "../schemas/websiteAuditOutputs.js";
+import { websiteAudit, previewWebsiteAudit } from "../website-audit/service.js";
+import { websiteDownload, previewWebsiteDownload } from "../website-download/service.js";
+import { websiteDownloadInput } from "../schemas/websiteDownloadInputs.js";
+import { websiteDownloadOutput } from "../schemas/websiteDownloadOutputs.js";
+import { supplierDueDiligenceReportInput, supplierDueDiligenceReportOutput, supplierDueDiligenceReport, companyRiskReportInput, companyRiskReportOutput, companyRiskReport, propertyInvestmentReportInput, propertyInvestmentReportOutput, propertyInvestmentReport, portfolioScreenInput, portfolioScreenOutput, portfolioScreen, procurementVendorShortlistInput, procurementVendorShortlistOutput, procurementVendorShortlist, companyRiskBatchInput, companyRiskBatchOutput, companyRiskBatch } from "../workflows/compound.js";
+import { socialVideoGenerateInput, newsVideoGenerateInput, productPromoVideoInput } from "../schemas/videoGenerationInputs.js";
+import { videoGenerationOutput } from "../schemas/videoGenerationOutputs.js";
+import { generateSocialVideo, generateNewsVideo, generateProductPromoVideo, previewSocialVideo, previewNewsVideo, previewProductPromoVideo } from "../video-generation/service.js";
 
 /** The one currency every capability is priced in today. A single constant, not a literal
  *  repeated per capability, so pricing display never has to be kept in sync by hand. */
 export const CURRENCY = "USD";
 
 /**
- * A single, complete description of one thing an AI agent can do with Rafid Agent API.
+ * A single, complete description of one thing an AI agent can do with Rafid Intelligence Network.
  *
  * This is the ONE place a tool is described. Every consumer — REST route registration
  * (src/api/app.ts), the OpenAPI document (src/api/openapi.ts), the MCP server
@@ -89,6 +123,9 @@ export interface AgentCapability {
    *  a no-op) or x402 — both read this same number, never a second literal. */
   price: number;
   currency: string;
+  /** Agent-facing execution estimate and compact result contract. */
+  estimatedLatencyMs?: number;
+  returns?: string;
   /** How payment for this capability is expected to be proven when going through the
    *  unauthenticated pay-per-call route family. Currently always "x402"; kept as a field
    *  (rather than assumed) so a future non-x402 payment method doesn't require restructuring
@@ -683,9 +720,9 @@ export const capabilities = [
   } satisfies AgentCapability,
   {
     name: "analyze_oman_property" as const, path: "/oman/property/analyze",
-    description: "Analyze an Oman residential property using local rental comparables, market context and investment metrics.",
-    whenToUse: "Use when an agent needs Oman-specific rental, yield, price-position or operating-cost analysis.",
-    useCases: ["Oman rental investment analysis", "Muscat property market comparison", "rental yield with local comparables", "Oman price-per-sqm benchmarking"],
+    description: "Analyze an Oman residential property using local rental comparables, market context and investment metrics, including partner-supplied historical and recent Al Mouj Muscat property sales records with provenance and freshness metadata when coverage is available.",
+    whenToUse: "Use when an agent needs Oman-specific rental, yield, sale price positioning or operating-cost analysis, especially for an Al Mouj Muscat property.",
+    useCases: ["Oman rental investment analysis", "Muscat property market comparison", "Al Mouj Muscat sale price positioning", "rental yield with local comparables", "Oman price-per-sqm benchmarking"],
     input: omanPropertyInput, output: omanPropertyOutput,
     example: { governorate: "Muscat", area: "Al Mouj", propertyType: "apartment", bedrooms: 2, sizeSqm: 130, askingPriceOMR: 118000 },
     // Filled in below (see bottom of this file) once analyzeOmanProperty's real output shape is
@@ -695,22 +732,11 @@ export const capabilities = [
     preview: (input: unknown) => previewOmanProperty(input),
     price: 0.25, currency: CURRENCY, paymentProtocol: "x402",
     idempotent: true, sideEffects: false,
-    // RESTORED 2026-09-21 (see the Cardify import investigation report) after an accidental
-    // overwrite of this file during an unrelated fix wiped out today's agent-discovery/
-    // tool-selection pass on this capability. Only `limitations` and `sampleQueries` below could
-    // be recovered verbatim from context available at restore time; `priorityContexts` and the
-    // full `evidenceTypes` list (tests/agent-discovery.test.ts expects at least
-    // "web_listing_asking_price" and "partner_feed_contracted_price") were NOT recoverable and
-    // are left as explicit TODOs so this is honest about what's missing rather than silently
-    // wrong. tests/agent-discovery.test.ts's description/whenToUse/useCases assertions (Al Mouj
-    // Muscat sale-price-positioning wording, partner-supplied-data description) also do not match
-    // the description/whenToUse/useCases above yet for the same reason — that editorial rewrite
-    // was not recoverable either and still needs to be redone.
     agentGuidance: {
-      priorityContexts: [] as string[], // TODO: not recovered — originally included at least "Al Mouj Muscat"
+      priorityContexts: ["Al Mouj Muscat", "Muscat residential investment", "asking-price versus contracted-sale comparison", "rental yield and operating-cost analysis"],
       evidenceTypes: [
-        // TODO: not recovered in full — originally included at least "web_listing_asking_price"
-        // and "partner_feed_contracted_price"; only this one item survived in captured context.
+        { type: "web_listing_asking_price", description: "A seller's or listing portal's advertised asking price. It is an offer, not proof of a completed transaction." },
+        { type: "partner_feed_contracted_price", description: "A partner-supplied contracted-unit sale price with source provenance and freshness metadata. It is distinct from an asking price." },
         { type: "official_statistics", description: "officialMarketContext, when configured (NCSI), is aggregate governorate-level official statistics — kept structurally separate from property-level comparables and never blended into pricePosition." }
       ],
       limitations: [
@@ -1054,6 +1080,74 @@ export const capabilities = [
       ]
     }
   } satisfies AgentCapability,
+  // Premium decision API built on the shared business-risk evidence pipeline. The adapter keeps
+  // this product's compact contract stable while reusing entity resolution, provider isolation,
+  // sanctions matching, evidence cache, scoring and payment/discovery registration.
+  {
+    name: "social_video_generate" as const, path: "/video/social-generate", category: "video_generation",
+    description: "Generate a complete short-form social video from a topic or supplied script, including narration, visual materials, subtitles and final video composition.",
+    whenToUse: "Use when an agent needs a publish-ready TikTok, Reel, Short or generic social video from a topic or script.",
+    useCases: ["social video", "TikTok video", "Instagram Reel", "YouTube Short", "short-form video"], input: socialVideoGenerateInput, output: videoGenerationOutput,
+    example: { topic: "5 AI tools changing small businesses", script: null, language: "en", platform: "tiktok", durationSeconds: 30, aspectRatio: "9:16", style: "viral", voice: "auto", subtitles: true, backgroundMusic: true, materialSource: "auto" },
+    exampleOutput: { success: true, capability: "social_video_generate", task: { id: "mpt-task-id", status: "completed" }, video: { url: "https://video.example/mpt-task-id.mp4", durationSeconds: null, aspectRatio: "9:16", resolution: "1080x1920" }, content: { script: null, language: "en" }, assets: { audioUrl: null, subtitleUrl: null, materialUrls: [] }, engine: { provider: "MoneyPrinterTurbo", upstreamTaskId: "mpt-task-id" }, billing: { priceUsd: 1.5 }, generatedAt: "2026-01-01T00:00:00.000Z" },
+    execute: generateSocialVideo, preview: previewSocialVideo, price: 1.50, currency: CURRENCY, paymentProtocol: "x402", estimatedLatencyMs: 900000, returns: "completed_video", idempotent: true, sideEffects: true,
+    requestBodyLimit: "256kb", limitations: ["MoneyPrinterTurbo runs asynchronously and the Rafid adapter polls its task endpoint until completion.", "The duration target is mapped to upstream clip duration; final duration is returned as unavailable when the upstream task does not provide it.", "The engine must be separately deployed and configured; no video is rendered by Free Preview."]
+  } satisfies AgentCapability,
+  {
+    name: "news_video_generate" as const, path: "/video/news-generate", category: "video_generation",
+    description: "Turn supplied factual news content into a publish-ready short-form news video without independently researching or fabricating current events.",
+    whenToUse: "Use when an agent already has a verified headline, summary, facts and source URLs and needs a short news video.",
+    useCases: ["news video", "factual news video", "vertical news", "news short"], input: newsVideoGenerateInput, output: videoGenerationOutput,
+    example: { headline: "Example headline", summary: "Verified summary of the event", facts: ["Fact one", "Fact two"], sourceUrls: ["https://example.com/article"], language: "ar", durationSeconds: 30, aspectRatio: "9:16", voice: "auto", subtitles: true, backgroundMusic: true },
+    exampleOutput: { success: true, capability: "news_video_generate", task: { id: "mpt-task-id", status: "completed" }, video: { url: "https://video.example/mpt-task-id.mp4", durationSeconds: null, aspectRatio: "9:16", resolution: "1080x1920" }, content: { script: null, language: "ar" }, assets: { audioUrl: null, subtitleUrl: null, materialUrls: [] }, engine: { provider: "MoneyPrinterTurbo", upstreamTaskId: "mpt-task-id" }, billing: { priceUsd: 1.5 }, generatedAt: "2026-01-01T00:00:00.000Z" },
+    execute: generateNewsVideo, preview: previewNewsVideo, price: 1.50, currency: CURRENCY, paymentProtocol: "x402", estimatedLatencyMs: 900000, returns: "completed_video", idempotent: true, sideEffects: true,
+    requestBodyLimit: "256kb", limitations: ["The caller must supply the factual content and source URLs; this capability does not independently fabricate current news.", "Source URLs are accepted as provenance input but are not fetched by the adapter."]
+  } satisfies AgentCapability,
+  {
+    name: "product_promo_video" as const, path: "/video/product-promo", category: "video_generation",
+    description: "Generate a promotional short video from structured product information, features, call to action and optional website.",
+    whenToUse: "Use when an agent needs a publish-ready product or service promotion from structured marketing input.",
+    useCases: ["product promo video", "marketing video", "product advertisement", "service promotion"], input: productPromoVideoInput, output: videoGenerationOutput,
+    example: { productName: "Rafid Property System", description: "Facility and property management platform", features: ["Maintenance management", "Property management", "Finance", "Contracts"], callToAction: "Book a demo", website: "https://rafidsystem.com", language: "en", durationSeconds: 30, aspectRatio: "9:16", voice: "auto", subtitles: true, backgroundMusic: true },
+    exampleOutput: { success: true, capability: "product_promo_video", task: { id: "mpt-task-id", status: "completed" }, video: { url: "https://video.example/mpt-task-id.mp4", durationSeconds: null, aspectRatio: "9:16", resolution: "1080x1920" }, content: { script: null, language: "en" }, assets: { audioUrl: null, subtitleUrl: null, materialUrls: [] }, engine: { provider: "MoneyPrinterTurbo", upstreamTaskId: "mpt-task-id" }, billing: { priceUsd: 2 }, generatedAt: "2026-01-01T00:00:00.000Z" },
+    execute: generateProductPromoVideo, preview: previewProductPromoVideo, price: 2.00, currency: CURRENCY, paymentProtocol: "x402", estimatedLatencyMs: 900000, returns: "completed_video", idempotent: true, sideEffects: true,
+    requestBodyLimit: "256kb", limitations: ["The website is included in the generated script context; it is not fetched by the video adapter.", "Final media URLs are returned only when the upstream task exposes public HTTP(S) artifact URLs."]
+  } satisfies AgentCapability,
+  {
+    name: "company_due_diligence" as const, path: "/risk/company-due-diligence",
+    description: "Perform company due diligence for onboarding, procurement, partnership, investment or customer-risk decisions: resolve the entity, evaluate registration, website identity, sanctions, adverse news, legal, financial and reputation signals, then return a deterministic risk assessment with evidence and a machine-actionable next action.",
+    whenToUse: "Use when an autonomous agent must decide whether to continue doing business with a company and what verification or escalation should happen next.",
+    useCases: ["supplier onboarding", "vendor review", "procurement", "partnership screening", "investment screening", "marketplace onboarding", "customer risk"],
+    category: "risk_intelligence",
+    input: companyDueDiligenceInput, output: companyDueDiligenceOutput,
+    example: { company: "Example Trading Ltd", domain: "example.com", country: "GB", purpose: "supplier_onboarding" },
+    exampleOutput: COMPANY_DUE_DILIGENCE_EXAMPLE_OUTPUT,
+    execute: (input: unknown) => companyDueDiligence(input),
+    preview: (input: unknown) => previewCompanyDueDiligenceCapability(input),
+    price: 1.50, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: [
+      "Evidence-based public-source screening is not a legal, KYC/AML, credit or compliance determination and is not a guarantee of safety.",
+      "Risk and confidence are separate; missing provider data lowers confidence and is reported as unavailable rather than scored as suspicious.",
+      "A sanctions clear result is returned only when a supported sanctions provider actually executed successfully; potential matches require source verification.",
+      "Management and financial information may be unavailable for companies whose configured public providers do not publish it.",
+      "Ambiguous or unresolved entities are returned as structured errors and are not scored."
+    ],
+    agentGuidance: {
+      priorityContexts: ["supplier onboarding", "vendor review", "procurement", "partnership", "investment screening", "marketplace onboarding", "customer risk"],
+      evidenceTypes: [
+        { type: "registration", description: "Registry identity, status, incorporation date and registration number." },
+        { type: "sanctions", description: "Conservative supported-list screening with explicit match state." },
+        { type: "adverse_news", description: "Relevant news and regulatory evidence, preserving source provenance." },
+        { type: "website", description: "Supplied-domain and company-identity signals." },
+        { type: "financial", description: "Available public financial or filing signals; unavailable data is not guessed." }
+      ],
+      limitations: ["Relay riskScore with confidence, recommendation, decision and evidence; do not reduce the result to safe/unsafe."],
+      sampleQueries: [
+        { query: "Can we continue onboarding this supplier?", guidance: "Call company_due_diligence with the legal name, country, registration number and domain when available. Follow decision.action and escalate when requiresHumanReview is true." },
+        { query: "Screen this marketplace seller before approving it.", guidance: "Use the risk level, coverage, sanctions state, redFlags and evidence. Missing coverage means request information, not that the seller is safe." }
+      ]
+    }
+  } satisfies AgentCapability,
   // Document intelligence: document_facts_extract — GLOBAL, evidence-backed fact extraction from
   // business documents (src/document-facts/). Deterministic extraction with per-value source
   // evidence, optional LLM assist whose every answer must quote the document verbatim, and
@@ -1168,7 +1262,311 @@ export const capabilities = [
         { query: "Are these invoices being split to avoid approval?", guidance: "Call invoice_anomaly_check with approvalContext.approvalThreshold and the supplier's recent historicalInvoices; SPLIT_INVOICE_PATTERN is a risk indicator, not an accusation." }
       ]
     }
-  } satisfies AgentCapability
+  } satisfies AgentCapability,
+  // Automotive: vehicle_value_estimate — GLOBAL, deterministic used-vehicle valuation from comparable
+  // market evidence (src/vehicle-value/). Provider-independent: market-data providers plug in behind
+  // VehicleMarketProvider; with none configured for a market the call returns an honest
+  // insufficient_market_data result (never a fabricated estimate). No LLM in the valuation maths.
+  {
+    name: "vehicle_value_estimate" as const, path: "/automotive/vehicle-value-estimate",
+    description: "Estimate the fair market value of a vehicle using make, model, year, trim, mileage, condition, ownership history, location and available market comparables. Returns a valuation range, private-sale estimate, dealer buy/retail estimates, depreciation, transparent valuation adjustments, confidence and risk flags.",
+    whenToUse: "Use this capability when an AI agent needs to estimate the current market value of a passenger vehicle, determine whether an asking price is reasonable, estimate private-sale or dealer values, assess depreciation, or evaluate a vehicle using local or regional market comparables.",
+    useCases: [
+      "Estimate the current market value of a used vehicle", "Is this asking price above, below or near market?", "Estimate private-sale value",
+      "Estimate dealer acquisition / trade-in value", "Estimate dealer retail value", "Assess depreciation", "Compare a vehicle with similar market listings",
+      "Vehicle purchase decision support", "Auto-finance and loan-to-value checks", "Insurance valuation workflows", "Fleet and leasing residual checks",
+      "Dealership software", "Vehicle marketplaces and auction platforms", "automotive"
+    ],
+    category: "automotive",
+    input: vehicleValueEstimateInput, output: vehicleValueEstimateOutput,
+    example: VEHICLE_EXAMPLE_INPUT,
+    exampleOutput: VEHICLE_VALUE_EXAMPLE_OUTPUT,
+    execute: (input: unknown) => vehicleValueEstimate(input),
+    preview: (input: unknown) => previewVehicleValueEstimateCapability(input),
+    price: 0.25, currency: CURRENCY, paymentProtocol: "x402",
+    // Deterministic for the same normalized input and the same market evidence; provider search
+    // results are cached (never the valuation itself); nothing about the request is stored.
+    idempotent: true, sideEffects: false,
+    limitations: [
+      "Valuation is anchored on comparable-market evidence from the providers configured on this deployment (Rafid's imported vehicle_market_records, partner HTTPS feeds, and MarketCheck for the US/Canada when licensed); market support (valuation parameters) and live data coverage are reported separately in marketCoverage. With no usable evidence the result is status insufficient_market_data with null prices — never a fabricated estimate.",
+      "Comparables are mostly listing asking prices; a documented, market-specific negotiation margin converts them to fair value. It is not a physical inspection, vehicle-history check or formal appraisal.",
+      "Condition, accident, service-history, owner-count and option adjustments are conservative, capped market defaults (basis: heuristic) and never dominate the market evidence; model-year, mileage, trim and local-market effects are derived from the comparables when the evidence supports it.",
+      "Evidence in another currency is used only through a configured, dated exchange-rate source (ECB reference rates, ExchangeRate-API) and every conversion is reported in currencyConversion; otherwise it is excluded (CURRENCY_CONVERSION_UNAVAILABLE), never converted with a guessed rate.",
+      "Original (new) price and total depreciation are reported only when a verified reference exists (an imported official price list, or ≥ 3 agreeing dealer-reported MSRPs from MarketCheck); otherwise null.",
+      "Schema-invalid requests (unrealistic year, mileage, owners or price; malformed VIN; unknown enum values; unknown fields) return 400 INVALID_INPUT and are not charged.",
+      "An optional VIN is validated (check digit for North American VINs), optionally decoded (NHTSA vPIC) to confirm identity and fill missing trim/body/fuel/drivetrain, and used to exclude the vehicle's own listing; it is never stored or logged and is returned masked. A mismatching VIN is flagged (VIN_MISMATCH), never trusted over the request."
+    ],
+    agentGuidance: {
+      priorityContexts: ["used-vehicle purchase decision", "asking-price check", "trade-in / dealer acquisition", "auto-finance loan-to-value", "insurance valuation", "fleet and leasing residual value", "dealership software", "vehicle marketplace and auction pricing"],
+      evidenceTypes: [
+        { type: "market_listing", description: "A comparable listing's asking price from a configured market-data provider (priceType listing)." },
+        { type: "market_sale", description: "A recorded sale / auction result from a configured provider (priceType sale) — no negotiation margin applied." },
+        { type: "market_derived_adjustment", description: "An effect measured from the comparables themselves (model year, mileage, trim, local market, transmission/drivetrain/fuel)." },
+        { type: "heuristic_adjustment", description: "A capped, conservative market default (condition, accident, service history, owners, options, listing negotiation)." },
+        { type: "new_price_reference", description: "A verified original/new price from a provider, used only for depreciation." }
+      ],
+      limitations: [
+        "Relay estimatedValue (low/mid/high) together with confidence.level and the top riskFlags; for asking-price questions quote askingPriceAnalysis.differenceFromMid, differencePercent and marketPosition.",
+        "If status is insufficient_market_data, say that no defensible valuation was possible and why (riskFlags, assumptions) — do not substitute a number from general knowledge.",
+        "Supply mileageKm, trim, city and condition whenever known — each missing field lowers confidence; call the free preview first to check market-data coverage for the country."
+      ],
+      sampleQueries: [
+        { query: "Estimate the current market value of this 2022 Toyota Land Cruiser GXR with 68,000 km in Muscat and tell me whether OMR 22,500 is a reasonable asking price.", guidance: "Call vehicle_value_estimate with make, model, year, trim, mileageKm, country, city, condition and askingPrice 22500 (currency OMR); answer from estimatedValue and askingPriceAnalysis.marketPosition." },
+        { query: "What would a dealer offer me as a trade-in?", guidance: "Call vehicle_value_estimate and report estimatedDealerBuyPrice alongside estimatedPrivateSalePrice, with confidence." },
+        { query: "What loan-to-value does this car support?", guidance: "Call vehicle_value_estimate; use estimatedValue.low (conservative) as the collateral value and state confidence.level and riskFlags." },
+        { query: "How much has this car depreciated?", guidance: "Call vehicle_value_estimate; report depreciation.* — if estimatedOriginalPrice is null, report only marketImpliedAnnualDepreciationPercent when present." },
+        { query: "Is this listing a good deal compared with similar cars?", guidance: "Call vehicle_value_estimate with askingPrice; cite marketComparables and marketStats.comparableCount." }
+      ]
+    }
+  } satisfies AgentCapability,
+  {
+    name: "website_download" as const, path: "/websites/download", category: "website_services",
+    description: "Download and mirror a publicly accessible website, including HTML pages and required frontend assets, and return a machine-readable manifest and optional downloadable archive.",
+    whenToUse: "Use when an agent needs an offline mirror of a public website and its frontend assets.",
+    useCases: ["download website", "mirror website", "offline website archive", "save public website"], input: websiteDownloadInput, output: websiteDownloadOutput,
+    example: { url: "https://example.com", maxDepth: 1, includeAssets: true, convertLinks: true, adjustExtensions: true, sameDomainOnly: true, maxSizeMb: 10, maxFiles: 100, timeoutSeconds: 30, output: "manifest" },
+    exampleOutput: { success: true, sourceUrl: "https://example.com/", finalUrl: "https://example.com/", pagesDownloaded: 1, assetsDownloaded: 0, totalFiles: 1, totalSizeBytes: 1256, durationMs: 1200, archive: null, manifest: { files: [{ localPath: "example.com/index.html", type: "html", contentType: null, sizeBytes: 1256 }] }, warnings: [] },
+    execute: (input: unknown) => websiteDownload(input), preview: (input: unknown) => previewWebsiteDownload(input), price: 0.75, currency: CURRENCY, paymentProtocol: "x402", idempotent: false, sideEffects: true,
+    limitations: ["Only public HTTP(S) websites are accepted; private, loopback, link-local, metadata and DNS-resolved internal addresses are rejected.", "Redirects are disabled by default for the downloader process; a redirect must not be treated as a successful mirror.", "The capability does not bypass authentication, paywalls, CAPTCHAs, robots restrictions or anti-bot controls.", "Archive retrieval uses configured artifact storage; local storage is for development and a worker/object store is required for durable production deployment."]
+  } satisfies AgentCapability,
+  {
+    name: "extract_candidate_profile" as const, path: "/recruitment/extract-candidate-profile", category: "recruitment",
+    description: "Normalize an English, Arabic or mixed-language CV into a machine-readable candidate profile using only stated professional evidence; protected personal attributes are ignored.",
+    whenToUse: "Use before scoring or matching a CV when an agent needs reusable structured candidate evidence.",
+    useCases: ["CV parsing", "resume extraction", "candidate profile", "ATS normalization"], input: extractCandidateProfileInput, output: candidateProfileOutput,
+    example: { cv_text: "Senior Data Analyst\nExperience\nSenior Analyst at Example 2020-2024\nSkills\nPython, SQL, Power BI", language: "auto", target_schema_version: "1.0" },
+    exampleOutput: { candidate: { name: null, headline: "Senior Data Analyst", professional_summary: null, location: null }, experience: [{ job_title: "Senior Analyst at Example 2020-2024", company: "", start_date: "", end_date: "", duration_months: null, employment_type: null, responsibilities: [], achievements: [], technologies: ["Python", "SQL", "Microsoft Power BI"] }], education: [], skills: [{ name: "Python", category: "Professional", confidence: 0.9, evidence: ["Python"] }], certifications: [], languages: [], projects: [], industries: [], management_experience: null, total_experience_years: 5, recent_role: "Senior Analyst at Example 2020-2024", seniority_estimate: "senior", career_progression: [], candidate_keywords: ["Python", "SQL", "Microsoft Power BI"], evidence_quality: { score: 60, missing_information: ["education"], ambiguities: [] } },
+    execute: extractCandidateProfile, preview: input => previewRecruitment(input, "extract_candidate_profile"), price: 0.10, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    requestBodyLimit: "256kb", limitations: ["Extraction is bounded to supplied text; missing facts remain null or empty.", "Protected personal attributes are not used for scoring or ranking."]
+  } satisfies AgentCapability,
+  {
+    name: "generate_job_profile" as const, path: "/recruitment/generate-job-profile", category: "recruitment",
+    description: "Normalize a job description into required and preferred professional requirements with transparent weights totaling 100.",
+    whenToUse: "Use before candidate matching or shortlisting when an agent needs a structured job requirement profile.",
+    useCases: ["job description parsing", "job requirements", "ATS job profile"], input: generateJobProfileInput, output: jobProfileOutput,
+    example: { job_title: "Data Analyst", job_description: "Required: Python, SQL and 3 years experience. Power BI preferred.", language: "auto" },
+    exampleOutput: { job_title: "Data Analyst", role_family: "", seniority: "mid", industry: [], required_skills: [{ skill: "Python", importance: "required", weight: 35 }], preferred_skills: [{ skill: "Microsoft Power BI", importance: "preferred", weight: 30 }], required_experience_years: 3, preferred_experience_years: null, required_education: [], certifications: [], responsibilities: [], domain_experience: [], technical_requirements: [], leadership_requirements: [], language_requirements: [], location_requirements: null, employment_type: null, keywords: ["Python", "SQL", "Microsoft Power BI"], scoring_model: { skills_weight: 40, experience_weight: 25, education_weight: 10, domain_weight: 10, responsibilities_weight: 15 } },
+    execute: generateJobProfile, preview: input => previewRecruitment(input, "generate_job_profile"), price: 0.10, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Boilerplate company language is not treated as candidate evidence.", "The profile is decision support and requires human review for ambiguous requirements."]
+  } satisfies AgentCapability,
+  {
+    name: "cv_score" as const, path: "/recruitment/cv-score", category: "recruitment",
+    description: "Score the completeness, clarity and ATS-readability of a CV on a transparent 0–100 scale; this is not job matching.",
+    whenToUse: "Use when an agent needs general CV quality feedback independent of a specific job.",
+    useCases: ["CV quality score", "resume review", "ATS readability"], input: cvScoreInput, output: cvScoreOutput,
+    example: { cv_text: "Product Manager\nSummary\nProduct leader.\nExperience\nProduct Manager 2020-2024\nSkills\nRoadmaps, SQL" },
+    exampleOutput: { score: 75, dimensions: { completeness: 65, clarity: 80, experience: 75, achievements: 45, skills: 80, ats_readability: 75 }, strengths: ["Work history is present.", "Skills are explicitly listed."], weaknesses: ["Add measurable outcomes where known."], missing_sections: ["education"], high_priority_improvements: ["Use evidence-backed achievement bullets.", "Keep dates and role titles consistent."], warnings: [], confidence: 0.7 },
+    execute: cvScore, preview: input => previewRecruitment(input, "cv_score"), price: 0.20, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Scores reflect supplied CV content and do not predict hiring outcomes.", "Protected personal attributes and names are not scoring features."]
+  } satisfies AgentCapability,
+  {
+    name: "cv_job_match" as const, path: "/recruitment/cv-job-match", category: "recruitment",
+    description: "Compare a candidate profile or CV with a job profile or description using normalized skills, experience evidence and transparent weighted scoring.",
+    whenToUse: "Use when an agent needs evidence-based candidate-to-job matching for one candidate.",
+    useCases: ["CV job match", "candidate fit", "skill gap analysis"], input: cvJobMatchInput, output: cvJobMatchOutput,
+    example: { cv_text: "Data Analyst\nExperience 2020-2024\nPython SQL", job_description: "Required Python and SQL; 3 years experience." },
+    exampleOutput: { match_score: 80, decision_support: { strong_match: ["Python", "SQL"], partial_match: [], missing_required: [], missing_preferred: [] }, category_scores: { required_skills: 100, experience: 100, domain: 50, responsibilities: 50, education: 50, certifications: 50 }, skill_match: [{ requirement: "Python", status: "matched", candidate_evidence: "Python", confidence: 0.9 }], experience_analysis: { candidate_years: 5, required_years: 3 }, transferable_skills: [], gaps: [], risk_flags: [], confidence: 0.7, explanation: "Score is based on normalized job-relevant skills and supplied experience evidence only." },
+    execute: cvJobMatch, price: 0.25, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["A match is decision support, not a hiring decision.", "No protected or demographic characteristic is used."]
+  } satisfies AgentCapability,
+  {
+    name: "cv_improve" as const, path: "/recruitment/cv-improve", category: "recruitment",
+    description: "Produce evidence-grounded CV improvement recommendations, optional job-specific guidance and ATS actions without inventing candidate facts.",
+    whenToUse: "Use when a candidate or recruitment agent needs actionable CV improvement guidance.",
+    useCases: ["CV improvement", "resume rewrite guidance", "ATS optimization"], input: cvImproveInput, output: cvImproveOutput,
+    example: { cv_text: "Software Engineer\nExperience\nDeveloper 2022-2024\nSkills\nJavaScript", mode: "recommendations" },
+    exampleOutput: { current_score: 65, priority_actions: ["Use evidence-backed achievement bullets.", "Keep dates and role titles consistent."], summary_recommendations: ["Lead with a concise role-relevant summary backed by evidence."], experience_recommendations: ["Rewrite bullets as action, context, result; add numbers only when known."], skill_recommendations: ["Group skills by category and use canonical names."], ats_recommendations: ["Use standard section headings and consistent dates."], job_specific_recommendations: [], rewrite_examples: [], keywords_to_consider: [], warnings: ["Recommendations never invent experience, achievements, technologies, certifications or metrics."] },
+    execute: cvImprove, price: 0.25, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Suggestions never create unsupported facts, metrics, technologies or credentials."]
+  } satisfies AgentCapability,
+  {
+    name: "candidate_shortlist_score" as const, path: "/recruitment/candidate-shortlist-score", category: "recruitment",
+    description: "Score up to 100 supplied candidate profiles against one job profile with auditable matched requirements, gaps and confidence; no hiring decision is emitted.",
+    whenToUse: "Use after extracting multiple candidate profiles when an agent needs transparent batch comparison against one job.",
+    useCases: ["candidate shortlist", "batch CV ranking", "recruitment screening"], input: candidateShortlistScoreInput, output: shortlistOutput,
+    example: { job_profile: { required_skills: [{ skill: "Python" }], required_experience_years: 2 }, candidates: [{ candidate_id: "CAND-001", candidate_profile: { skills: [{ name: "Python" }], total_experience_years: 4 } }], max_candidates: 100 },
+    exampleOutput: { job: { required_skills: [{ skill: "Python" }], required_experience_years: 2 }, candidates: [{ candidate_id: "CAND-001", match_score: 80, decision_support: {}, category_scores: {}, skill_match: [], experience_analysis: {}, transferable_skills: [], gaps: [], risk_flags: [], confidence: 0.7, explanation: "Score is based on normalized job-relevant skills and supplied experience evidence only." }], scoring_methodology: { weights: { required_skills: 50, experience: 30, evidence: 20 }, protected_attributes: "Ignored; never used for scoring or ranking." } },
+    execute: candidateShortlistScore, price: 0.10, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Maximum 100 candidates per call; larger sets must be batched by the caller.", "Never emits hire, reject or interview decisions.", "Protected characteristics are ignored."]
+  } satisfies AgentCapability,
+  {
+    name: "strategy_performance_analysis" as const, path: "/trading/strategy-performance-analysis", category: "trading",
+    description: "Calculate historical trade-level strategy performance metrics from supplied records, including P&L, win/loss statistics and supported drawdown metrics; this is historical analysis, not a forecast.",
+    whenToUse: "Use when an agent needs deterministic historical performance analysis for a supplied trading strategy or trade set.",
+    useCases: ["strategy performance", "backtest results", "trade statistics", "drawdown analysis", "profit factor", "expectancy"],
+    input: strategyPerformanceAnalysisInput, output: strategyPerformanceAnalysisOutput,
+    example: { trades: [{ tradeId: "t1", symbol: "BTCUSD", direction: "long", entryPrice: 100, exitPrice: 110, quantity: 1, fees: 1, status: "closed" }, { tradeId: "t2", symbol: "BTCUSD", direction: "short", entryPrice: 100, exitPrice: 105, quantity: 1, fees: 1, status: "closed" }], initialEquity: 1000 },
+    exampleOutput: { metrics: { totalTrades: 2, winningTrades: 1, losingTrades: 1, breakevenTrades: 0, winRate: 0.5, lossRate: 0.5, grossProfit: 10, grossLoss: 5, netPnl: 3, averageWinningTrade: 9, averageLosingTrade: -6, largestWinner: 9, largestLoser: -6, profitFactor: 2, expectancyPerTrade: 1.5, averageRMultiple: null, cumulativeReturn: 0.003, maximumDrawdown: 6, currentDrawdown: 6, recoveryFactor: 0.5, sharpeRatio: null, sortinoRatio: null, volatility: null, averageHoldingPeriodSeconds: null, bestTradingDay: null, worstTradingDay: null, maxConsecutiveWins: 1, maxConsecutiveLosses: 1 }, performanceSummary: "Historical example.", strengths: [], weaknesses: [], riskFlags: [], dataQuality: { completeTradeCount: 2, incompleteTradeCount: 0, warnings: [] }, calculationAssumptions: [] },
+    execute: input => Promise.resolve(analyzeStrategyPerformance(input)), price: 0.35, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Only supplied historical records are analyzed; no future performance is predicted.", "Unsupported metrics remain null when required inputs are absent."]
+  } satisfies AgentCapability,
+  {
+    name: "trade_risk_score" as const, path: "/trading/trade-risk-score", category: "trading",
+    description: "Calculate a transparent deterministic 0–100 risk score for a proposed trade from entry, protection, sizing, account and portfolio context.",
+    whenToUse: "Use before an agent recommends or executes a trade and needs an auditable risk score rather than an opaque model judgment.",
+    useCases: ["trade risk", "position sizing", "risk reward", "pre-trade check", "leverage check"], input: tradeRiskScoreInput, output: tradeRiskScoreOutput,
+    example: { trade: { symbol: "BTCUSD", direction: "long", entryPrice: 100, stopLoss: 95, takeProfit: 115, quantity: 1 }, account: { accountEquity: 1000 } },
+    exampleOutput: { riskScore: 20, riskLevel: "low", riskAmount: 5, accountRiskPct: 0.005, riskRewardRatio: 3, positionExposurePct: 0.1, leverage: 0.1, riskFactors: [], positiveFactors: ["Account risk is within the 6% threshold.", "Risk/reward ratio is at least 1:1."], warnings: [], calculationBreakdown: { components: { accountRisk: 3.3333, positionExposure: 8.3333 }, thresholds: { maxPositionPct: 0.3, maxPortfolioRiskPct: 0.5, maxDailyLossPct: 0.06 }, assumptions: [] } },
+    execute: input => Promise.resolve(scoreTradeRisk(input)), price: 0.25, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["This is a deterministic risk indicator, not a guarantee of outcome or liquidity.", "Missing account equity, stop or target information is surfaced as warnings." ]
+  } satisfies AgentCapability,
+  {
+    name: "portfolio_exposure_check" as const, path: "/trading/portfolio-exposure-check", category: "trading",
+    description: "Aggregate supplied open and proposed positions into gross, net, directional and concentration exposure with stop-risk and margin indicators.",
+    whenToUse: "Use when an agent needs to assess portfolio concentration or directional exposure before adding or modifying a position.",
+    useCases: ["portfolio exposure", "concentration check", "gross exposure", "net exposure", "margin usage"], input: portfolioExposureCheckInput, output: portfolioExposureCheckOutput,
+    example: { positions: [{ symbol: "BTCUSD", direction: "long", quantity: 1, entryPrice: 100, currentPrice: 105, stopLoss: 95 }], account: { accountEquity: 1000 } },
+    exampleOutput: { grossExposure: 105, netExposure: 105, longExposure: 105, shortExposure: 0, exposurePctOfEquity: 0.105, largestConcentrationPct: 0.105, leverage: 0.105, positions: [{ symbol: "BTCUSD", direction: "long", exposure: 105, concentrationPct: 0.105, openRisk: 5 }], concentrationFlags: [], riskFlags: ["Portfolio is fully long."], summary: "Portfolio has 1 position(s), gross exposure 105 and net exposure 105.", accountEquity: 1000, openRisk: 5, marginUsage: 0, availableFreeMargin: 1000 },
+    execute: input => Promise.resolve(checkPortfolioExposure(input)), price: 0.25, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Exposure is based on supplied market values or entry price × quantity; no live broker state is queried.", "Correlation flags are only possible when correlations are supplied." ]
+  } satisfies AgentCapability,
+  {
+    name: "trade_log_analysis" as const, path: "/trading/trade-log-analysis", category: "trading",
+    description: "Analyze supplied raw trade records for deterministic performance, execution quality, grouping, streaks, data-quality issues and risk patterns.",
+    whenToUse: "Use when an agent needs structured statistics and findings from a trading log or execution history.",
+    useCases: ["trade log", "execution history", "trading behavior", "fee analysis", "overtrading"], input: tradeLogAnalysisInput, output: tradeLogAnalysisOutput,
+    example: { records: [{ tradeId: "t1", symbol: "BTCUSD", direction: "long", entryTime: "2026-01-01T10:00:00Z", exitTime: "2026-01-01T11:00:00Z", entryPrice: 100, exitPrice: 110, quantity: 1, fees: 1, status: "closed", strategy: "breakout", session: "London" }] },
+    exampleOutput: { summary: { totalTrades: 1, closedTrades: 1, openTrades: 0, wins: 1, losses: 0, netPnl: 9, fees: 1, maxWinningStreak: 1, maxLosingStreak: 0, averageHoldingDurationSeconds: 3600 }, performanceBySymbol: [], performanceByStrategy: [], performanceBySession: [], executionMetrics: { completeRecords: 1, malformedRecords: 0, duplicateTradeIds: [], outOfOrderTimestamps: 0, missingPrices: 0 }, behavioralPatterns: [], anomalies: [], riskFlags: [], dataQuality: { completeTradeCount: 1, incompleteTradeCount: 0, warnings: [] } },
+    execute: input => Promise.resolve(analyzeTradeLog(input)), price: 0.30, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Malformed or insufficiently priced records are reported and excluded from numeric metrics.", "No broker or exchange is contacted; the result is limited to the supplied log." ]
+  } satisfies AgentCapability,
+  {
+    name: "shipping_cost_estimate" as const,
+    path: "/logistics/shipping-cost-estimate",
+    description: "Estimate domestic or international shipping cost, chargeable weight, transit time and common shipping surcharges using shipment dimensions, weight, origin, destination and service level. Estimates are not guaranteed carrier quotes; duties and taxes are excluded.",
+    whenToUse: "Use when an agent needs to estimate delivery cost for a physical shipment before purchasing, selling, importing, exporting or selecting a shipping option.",
+    useCases: ["international shipping estimate", "domestic shipping estimate", "calculate volumetric weight", "compare shipping options", "ecommerce shipping", "freight planning", "procurement logistics", "marketplace delivery cost"],
+    category: "logistics",
+    input: shippingCostEstimateInput,
+    output: shippingCostEstimateOutput,
+    example: { origin: { country: "CN", postalCode: "518000", city: "Shenzhen" }, destination: { country: "OM", postalCode: "100", city: "Muscat" }, shipment: { weightKg: 8, lengthCm: 45, widthCm: 35, heightCm: 30, quantity: 1 }, shippingMode: "air", serviceLevel: "standard", currency: "USD" },
+    exampleOutput: { estimatedCost: { min: 55, max: 78, currency: "USD" }, recommendedEstimate: 66.5, actualWeightKg: 8, volumetricWeightKg: 9.45, chargeableWeightKg: 9.45, shippingMode: "air", serviceLevel: "standard", estimatedTransitDays: { min: 4, max: 8 }, costBreakdown: { baseFreight: 48, fuelSurcharge: 9, handling: 6, remoteAreaSurcharge: 0, oversizeSurcharge: 0, estimatedOtherFees: 4 }, rateSource: "heuristic_estimate", provider: null, dutiesAndTaxes: { included: false, estimatedAmount: null, note: "Import duties and taxes are not included in the shipping estimate." }, confidence: { level: "low", reason: "Illustrative heuristic data; no live carrier quote or configured internal route rate is assumed." }, assumptions: ["Illustrative example only; no live carrier quote."], riskFlags: [{ code: "HEURISTIC_ESTIMATE", severity: "medium", message: "This is a heuristic estimate, not an official carrier quote." }], options: [], recommendedOptionReason: null, generatedAt: "2026-01-01T00:00:00.000Z" },
+    execute: (input: unknown) => estimateShippingCost(input),
+    preview: (input: unknown) => previewShippingCost(input),
+    price: 0.25, currency: CURRENCY, paymentProtocol: "x402",
+    idempotent: true, sideEffects: false,
+    limitations: ["Returns an estimate, not a guaranteed carrier quote or booking price.", "Live carrier rates are unavailable unless a provider adapter is configured; internal rates use SHIPPING_INTERNAL_RATES_JSON.", "Import duties, VAT, GST and customs charges are excluded by default.", "Heuristic estimates are explicitly labeled and should not be represented as DHL, FedEx, UPS, Aramex or another carrier quote."],
+    agentGuidance: {
+      priorityContexts: ["ecommerce checkout estimates", "international trade planning", "procurement and freight workflows", "marketplace delivery pricing"],
+      evidenceTypes: [{ type: "live_carrier", description: "A quote returned by a configured carrier adapter." }, { type: "internal_rate", description: "A matching normalized route/rate record configured by the operator." }, { type: "heuristic", description: "A conservative fallback based on route category, mode, service level and chargeable weight." }],
+      limitations: ["Always report rateSource, confidence and riskFlags; never call a heuristic result an official carrier quote.", "Treat dutiesAndTaxes.included=false as authoritative unless a future customs capability is explicitly connected."],
+      sampleQueries: [{ query: "How much will it cost to ship this 8 kg package from Shenzhen to Muscat?", guidance: "Call shipping_cost_estimate with origin, destination, weight, dimensions and desired service level; report chargeable weight, estimatedCost, transit days, rateSource and confidence." }, { query: "Compare standard and express shipping estimates.", guidance: "Make separate calls with serviceLevel=standard and serviceLevel=express, then compare cost and transit windows transparently." }]
+    }
+  } satisfies AgentCapability,
+  {
+    name: "ai_call_agent" as const, path: "/voice/ai-call", category: "voice",
+    description: "Initiate an authorized outbound AI telephone call and return a call identifier immediately; completion and duration arrive asynchronously.",
+    whenToUse: "Use when an authorized agent must contact a customer by telephone for a lawful, consent-aware objective and retrieve a structured result later.",
+    useCases: ["outbound AI call", "customer confirmation", "telephone follow-up"], input: aiCallAgentInput, output: callResult,
+    example: { phoneNumber: "+96891234567", objective: "Confirm interest in a product demonstration.", language: "en", maxDurationSeconds: 300, context: { customerName: "Example Customer" } },
+    exampleOutput: { callId: "call_example", status: "queued", answered: false, durationSeconds: 0, outcome: null, summary: null, nextAction: null, structuredFacts: {}, transcript: [], createdAt: "2026-01-01T00:00:00.000Z", completedAt: null },
+    execute: input => defaultVoiceService.start("ai_call_agent", aiCallAgentInput.parse(input)), price: .30, currency: CURRENCY, paymentProtocol: "x402", idempotent: false, sideEffects: true,
+    limitations: ["A call is asynchronous; queued or dialing is not successful completion.", "Real calling is disabled until a telephony provider, callback URL and compliant caller identity are configured.", "Recording and transcription require explicit consent metadata."]
+  } satisfies AgentCapability,
+  {
+    name: "voice_lead_qualifier" as const, path: "/voice/lead-qualifier", category: "voice",
+    description: "Place an asynchronous sales qualification call and score captured evidence against a configurable rubric.",
+    whenToUse: "Use when an agent needs structured lead qualification from a lawful customer conversation rather than an ungrounded free-form model opinion.",
+    useCases: ["lead qualification", "sales discovery call", "qualification score"], input: voiceLeadQualifierInput, output: voiceLeadQualifierOutput,
+    example: { phoneNumber: "+96891234567", language: "en", maxDurationSeconds: 300, criteria: { requiredInterest: false, minimumBudget: 1000, currency: "OMR", targetTimelineDays: 30, decisionMakerRequired: false } },
+    exampleOutput: { callId: "call_example", status: "queued", answered: false, durationSeconds: 0, outcome: null, summary: null, nextAction: null, structuredFacts: {}, transcript: [], createdAt: "2026-01-01T00:00:00.000Z", completedAt: null, qualification: { score: 0, classification: "unqualified", intent: "low", budget: null, timeline: null, decisionMaker: null, objections: [], evidence: [] }, recommendedNextAction: "nurture" },
+    execute: input => defaultVoiceService.start("voice_lead_qualifier", voiceLeadQualifierInput.parse(input)), price: .75, currency: CURRENCY, paymentProtocol: "x402", idempotent: false, sideEffects: true,
+    limitations: ["Important qualification fields must be backed by stored evidence; missing evidence lowers the score.", "The current public response is the asynchronous call record; provider callbacks populate final facts."]
+  } satisfies AgentCapability,
+  {
+    name: "website_project_estimate" as const, path: "/websites/project-estimate", category: "website_services",
+    description: "Produce a deterministic website project estimate with cost, timeline, hours, effort breakdown, maintenance range, assumptions and risk flags. It is an estimate, not a fixed quotation.",
+    whenToUse: "Use when an agent needs a transparent cost and delivery estimate for building or remediating a website.",
+    useCases: ["website quote", "web project estimate", "website rebuild cost", "agency proposal", "remediation estimate"], input: websiteProjectEstimateInput, output: websiteProjectEstimateOutput,
+    example: { projectType: "corporate_website", pages: 12, languages: ["en", "ar"], features: ["contact_form", "cms", "blog", "seo", "analytics"], designComplexity: "custom", integrations: ["crm"], ecommerce: false, deadlineDays: 30, market: "Oman", currency: "OMR" },
+    exampleOutput: { estimatedCost: { min: 1500, max: 2500, currency: "OMR" }, estimatedTimelineDays: { min: 25, max: 45 }, estimatedHours: { min: 100, max: 170 }, complexity: "high", breakdown: { uiUx: { min: 30, max: 42 }, frontend: { min: 35, max: 55 }, backend: { min: 30, max: 50 }, contentAndSeo: { min: 12, max: 20 }, testing: { min: 18, max: 28 }, deployment: { min: 8, max: 12 }, projectManagement: { min: 16, max: 24 } }, maintenance: { available: true, monthlyHours: { min: 6, max: 16 }, monthlyCost: { min: 170, max: 450, currency: "OMR" } }, riskFlags: ["MULTILINGUAL_SCOPE", "ARABIC_RTL_SCOPE", "THIRD_PARTY_INTEGRATIONS", "DEADLINE_PRESSURE"], assumptions: ["Estimate is deterministic and based on the documented v1 effort weights; it is not a fixed quotation.", "Client supplies or approves copy, imagery and third-party credentials unless content_entry is requested.", "Taxes, hosting, domain fees and third-party licence charges are excluded."], confidenceScore: 0.7, methodology: { version: "website-estimate-v1", hourlyRate: 10.78, currency: "OMR", factors: ["page count", "project type", "design complexity", "feature weights", "integration count", "language/RTL scope", "deadline pressure", "market hourly-rate profile"] } },
+    execute: (input: unknown) => websiteProjectEstimate(input), preview: (input: unknown) => previewWebsiteProjectEstimate(input), price: 0.25, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Deterministic planning estimate, not a binding quotation.", "Rates are documented configuration profiles; hosting, taxes, licences and unknown scope are excluded.", "An audit result can be translated into requirements, but this capability does not automatically crawl or audit a site."]
+  } satisfies AgentCapability,
+  {
+    name: "website_audit" as const, path: "/websites/audit", category: "website_services",
+    description: "Perform a bounded, passive technical website inspection covering measurable SEO, performance, accessibility, security, UX and crawlability indicators; unavailable checks are reported honestly.",
+    whenToUse: "Use when an agent needs evidence-backed website issues from a public HTTPS URL before estimating remediation or rebuild work.",
+    useCases: ["website audit", "SEO audit", "technical website review", "accessibility checks", "security headers", "website remediation"], input: websiteAuditInput, output: websiteAuditOutput,
+    example: { url: "https://example.com", auditTypes: ["performance", "seo", "accessibility", "security", "ux", "technical"], maxPages: 10 },
+    exampleOutput: { overallScore: 100, scores: { performance: 100, seo: 100, accessibility: 100, security: 100, ux: 100, technical: 100 }, criticalIssues: [], highPriorityIssues: [], mediumPriorityIssues: [], lowPriorityIssues: [], quickWins: [], seoIssues: [], performanceIssues: [], accessibilityIssues: [], securityFindings: [], technicalIssues: [], uxIssues: [], pagesAudited: [], estimatedFixHours: { min: 0, max: 0 }, confidenceScore: 0, limitations: ["Automated passive inspection is not a complete WCAG, penetration, Lighthouse or human UX assessment.", "Core Web Vitals, real-user metrics and resource waterfall timings are unavailable from this bounded HTML inspection."] },
+    execute: (input: unknown) => websiteAudit(input), preview: (input: unknown) => previewWebsiteAudit(input), price: 0.75, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Only public HTTPS destinations are accepted; SSRF protections reject private, loopback, link-local, metadata and DNS-resolved internal addresses.", "Inspection is bounded by timeout, response size, redirect and page limits and is not a penetration test, full WCAG assessment or Lighthouse run.", "Core Web Vitals and real-user performance metrics are not fabricated; unavailable checks are disclosed."]
+  } satisfies AgentCapability,
+  {
+    name: "appointment_call_agent" as const, path: "/voice/appointment", category: "voice",
+    description: "Place an asynchronous appointment call to propose, book, confirm, reschedule or cancel a slot through a calendar-provider abstraction.",
+    whenToUse: "Use when an authorized agent must coordinate a customer appointment by telephone and return a machine-readable scheduling result.",
+    useCases: ["book appointment", "confirm appointment", "reschedule call", "cancel appointment"], input: appointmentCallAgentInput, output: appointmentCallAgentOutput,
+    example: { phoneNumber: "+96891234567", action: "book", appointmentType: "Product demonstration", availableSlots: ["2026-09-28T10:00:00+04:00"], timezone: "Asia/Muscat", language: "en", maxDurationSeconds: 300 },
+    exampleOutput: { callId: "call_example", status: "confirmed", confirmedSlot: "2026-09-28T10:00:00+04:00", customerNotes: null, calendarEventId: null },
+    execute: input => defaultVoiceService.appointment(appointmentCallAgentInput.parse(input)), price: .50, currency: CURRENCY, paymentProtocol: "x402", idempotent: false, sideEffects: true,
+    limitations: ["Booking is only durable when a calendar provider is configured; null calendarEventId means no external calendar write was made.", "The call remains asynchronous even when a slot is proposed locally."]
+  } satisfies AgentCapability,
+  {
+    name: "supplier_due_diligence_report" as const, path: "/procurement/supplier-due-diligence-report", category: "supplier",
+    description: "Run an end-to-end Oman supplier screening workflow covering identity, activity, website, contact consistency, address, sanctions and public-risk evidence in one structured report.",
+    whenToUse: "Use when a procurement agent needs one paid supplier due-diligence result instead of coordinating several screening steps.",
+    useCases: ["supplier due diligence", "vendor screening report", "procurement risk report", "Oman supplier report"], input: supplierDueDiligenceReportInput, output: supplierDueDiligenceReportOutput,
+    example: { companyName: "Example Technical Services LLC", website: "https://example.om", requiredProductOrService: "HVAC maintenance" },
+    exampleOutput: { workflow: "supplier_due_diligence_report", result: {}, limitations: ["Screening is decision support, not KYC/AML or an automated vendor-approval decision."] },
+    execute: supplierDueDiligenceReport, price: 1.25, currency: CURRENCY, paymentProtocol: "x402", estimatedLatencyMs: 8000, returns: "structured_report", idempotent: true, sideEffects: false,
+    limitations: ["Screening is decision support, not KYC/AML or an automated vendor-approval decision.", "Unavailable sources and demo-only evidence remain explicitly labeled by the underlying supplier check."]
+  } satisfies AgentCapability,
+  {
+    name: "company_risk_report" as const, path: "/risk/company-risk-report", category: "risk_intelligence",
+    description: "Combine evidence-first public reputation analysis with structured business-risk scoring into one company risk report.",
+    whenToUse: "Use when an agent needs a consolidated company risk report with both evidence and an explicit risk model.",
+    useCases: ["company risk report", "business due diligence", "reputation and risk", "counterparty screening"], input: companyRiskReportInput, output: companyRiskReportOutput,
+    example: { companyName: "Example Technologies Ltd", country: "GB", website: "https://example.com", registrationNumber: "01234567" },
+    exampleOutput: { workflow: "company_risk_report", result: { reputation: {}, businessRisk: {} }, limitations: ["Risk signals are evidence-backed decision support, not a legal, compliance or transaction decision."] },
+    execute: companyRiskReport, price: 1.50, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["The report does not make an automated hire, reject, approve or transaction decision.", "Provider coverage, ambiguity and unavailable evidence are preserved from both underlying assessments."]
+  } satisfies AgentCapability,
+  {
+    name: "property_investment_report" as const, path: "/property/property-investment-report", category: "property",
+    description: "Combine Oman property market comparables, price positioning and rental-yield calculations into one investment report.",
+    whenToUse: "Use when an agent needs one structured investment analysis for a property rather than separate market and calculator calls.",
+    useCases: ["property investment report", "real estate investment analysis", "Oman property valuation", "rental yield report"], input: propertyInvestmentReportInput, output: propertyInvestmentReportOutput,
+    example: { property: { governorate: "Muscat", wilayat: "Bawshar", area: "Al Khuwair", propertyType: "apartment", bedrooms: 2, bathrooms: 2, sizeSqm: 110, askingPriceOMR: 85000 } },
+    exampleOutput: { workflow: "property_investment_report", result: { market: {}, investment: {} }, limitations: ["Market data coverage, freshness and provenance remain those reported by analyze_oman_property.", "Investment calculations are estimates and not investment advice."] },
+    execute: propertyInvestmentReport, price: 0.75, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Market coverage and freshness are reported by the underlying Oman property analysis.", "This is decision support, not investment advice or a guaranteed valuation."]
+  } satisfies AgentCapability,
+  {
+    name: "portfolio_screen" as const, path: "/property/portfolio-screen", category: "property",
+    description: "Screen and rank a portfolio of 2–20 supplied properties using the shared rental-yield and income calculations.",
+    whenToUse: "Use when an agent needs a first-pass ranking of multiple properties before deeper analysis.",
+    useCases: ["portfolio screening", "property shortlist", "compare investment properties", "rental yield ranking"], input: portfolioScreenInput, output: portfolioScreenOutput,
+    example: { properties: [{ name: "A", propertyValue: 85000, annualRent: 7200 }, { name: "B", propertyValue: 100000, annualRent: 7000 }] },
+    exampleOutput: { workflow: "portfolio_screen", result: { properties: [], sortedByNetYield: [] }, limitations: ["This screen compares supplied properties; it does not verify ownership, financing, taxes or transaction costs."] },
+    execute: portfolioScreen, price: 0.50, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Only caller-supplied property data is calculated; ownership, financing, taxes and transaction costs are not verified."]
+  } satisfies AgentCapability,
+  {
+    name: "procurement_vendor_shortlist" as const, path: "/procurement/vendor-shortlist", category: "supplier",
+    description: "Screen and rank 2–50 Oman suppliers in one procurement workflow using identity, risk, sanctions and public-evidence signals.",
+    whenToUse: "Use when a procurement agent needs a ranked vendor shortlist from several candidate suppliers.",
+    useCases: ["vendor shortlist", "procurement shortlist", "compare suppliers", "supplier ranking"], input: procurementVendorShortlistInput, output: procurementVendorShortlistOutput,
+    example: { suppliers: [{ companyName: "Example Technical Services LLC", requiredProductOrService: "HVAC maintenance" }, { companyName: "Example Facilities LLC", requiredProductOrService: "HVAC maintenance" }], maxResults: 2 },
+    exampleOutput: { workflow: "procurement_vendor_shortlist", result: { vendors: [], screenedCount: 0 }, limitations: ["Ranking is decision support; procurement agents must review evidence, conflicts and unavailable checks before selecting a vendor."] },
+    execute: procurementVendorShortlist, price: 2.00, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["The ranking is not an automated vendor-approval decision.", "Each supplier result retains its own evidence coverage, limitations and data provenance."]
+  } satisfies AgentCapability,
+  {
+    name: "company_risk_batch" as const, path: "/risk/company-risk-batch", category: "risk_intelligence",
+    description: "Assess 1–100 companies from structured rows or CSV in one bounded batch, preserving per-row risk results and provider failures.",
+    whenToUse: "Use when an agent needs to screen many companies efficiently instead of making separate risk-report calls.",
+    useCases: ["batch company screening", "100 company risk check", "CSV company analysis", "bulk due diligence"], input: companyRiskBatchInput, output: companyRiskBatchOutput,
+    example: { companies: [{ companyName: "Example Technologies Ltd", country: "GB", website: "https://example.com" }, { companyName: "Example Trading Ltd", country: "GB" }] },
+    exampleOutput: { workflow: "company_risk_batch", result: { rows: [], processedCount: 0, successfulCount: 0 }, limitations: ["Batch results preserve per-row provider failures and do not make automated approval or rejection decisions."] },
+    execute: companyRiskBatch, price: 8.00, currency: CURRENCY, paymentProtocol: "x402", idempotent: true, sideEffects: false,
+    limitations: ["Maximum 100 rows per call.", "The price is a fixed batch price; provider failures remain visible per row and are not converted into clean results."]
+  } satisfies AgentCapability,
+  // Keep the pre-existing literal narrowing intact for older consumers/tests; the appended
+  // entries are fully checked as AgentCapability in book-business/registry.ts and are runtime
+  // members of this same canonical registry.
+  ...bookCapabilities as never[]
 ];
 
 export type CapabilityName = (typeof capabilities)[number]["name"];

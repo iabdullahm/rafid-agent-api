@@ -25,7 +25,24 @@
 /** "l402" rows use the same funnel vocabulary as x402 (challenge / payment_failed /
  *  settlement_success) but a separate category, so the x402 funnel and every x402 aggregate stay
  *  exactly as they were. */
-export type AnalyticsCategory = "discovery" | "mcp" | "x402" | "l402" | "tool";
+/** "funding" rows track the external payment-collection layer (src/billing/external/) — Stripe
+ *  Checkout and USDC-on-Base top-ups that FUND unified billing's prepaid credits from outside
+ *  this codebase. Deliberately a separate category from "tool"/"x402": a funding event is never a
+ *  capability invocation or an on-chain settlement, and must never be summed together with either
+ *  when computing revenue (see billing/external/types.ts's accounting-model doc comment). Credit
+ *  CONSUMPTION is intentionally NOT re-emitted here — it is already the existing "tool" category's
+ *  `channel: "api_credits"` invocation events (recordToolInvocation below), and duplicating it
+ *  under "funding" too would risk double-counting the same fact under two different labels; see
+ *  recorder.ts's recordFundingEvent() doc comment. */
+export type AnalyticsCategory = "discovery" | "mcp" | "x402" | "l402" | "tool" | "preview" | "funding";
+
+/** The external payment-collection funnel (spec section 25's literal list, minus
+ *  credits_consumed — see AnalyticsCategory's doc comment on "funding" for why). `amount`/
+ *  `currency` on these rows is always the USD amount actually funded/attempted, never a raw
+ *  on-chain atomic value or a card network amount. */
+export type FundingEventType =
+  | "stripe_checkout_created" | "stripe_payment_confirmed" | "stripe_payment_failed" | "stripe_refund"
+  | "usdc_topup_created" | "usdc_topup_confirmed" | "usdc_topup_failed" | "credits_funded";
 
 /** Discovery: always "hit" — which surface was hit is carried in `path`. */
 export type DiscoveryEventType = "hit";
@@ -45,7 +62,26 @@ export type X402EventType = "challenge" | "payment_verified" | "payment_failed" 
  *  X-API-Key, x402, remote MCP). */
 export type ToolEventType = "invocation";
 
-export type AnalyticsEventType = DiscoveryEventType | McpEventType | X402EventType | ToolEventType;
+/** Free Preview funnel + preview→paid conversion events (see preview/analytics.ts). One row per
+ *  step, across the whole discover -> preview -> evaluate -> pay -> execute flow:
+ *   - preview_requested: a POST /api/v1/preview/:capability request was received.
+ *   - preview_available / preview_limited / preview_unavailable / preview_invalid: the outcome of
+ *     that request — mirrors CapabilityPreviewStatus ("available"/"limited") plus two request-level
+ *     outcomes CapabilityPreviewStatus doesn't cover (capability has no preview implementation at
+ *     all, or the input failed validation).
+ *   - preview_rate_limited: the request was rejected by preview/rateLimit.ts before it ran at all.
+ *   - preview_cache_hit / preview_cache_miss: whether preview/cache.ts served a cached response.
+ *   - paid_capability_started: a paid execution of a capability began (any rail) — the "did they
+ *     come back and pay" half of the funnel.
+ *   - preview_converted: that paid execution's request fingerprint matched a preview seen within
+ *     the conversion window (see preview/analytics.ts's PreviewConversionIndex) — the business
+ *     metric the whole funnel exists to measure. */
+export type PreviewEventType =
+  | "preview_requested" | "preview_available" | "preview_limited" | "preview_unavailable" | "preview_invalid"
+  | "preview_rate_limited" | "preview_cache_hit" | "preview_cache_miss"
+  | "paid_capability_started" | "preview_converted";
+
+export type AnalyticsEventType = DiscoveryEventType | McpEventType | X402EventType | ToolEventType | PreviewEventType | FundingEventType;
 
 /** How much of a tool invocation's result was backed by real (partner-fed/imported) data versus
  *  the honest demo/manual fallback — see src/analytics/dataSource.ts's classifyDataSource(),
@@ -72,8 +108,20 @@ export type DataSource = "partner_feed" | "demo_manual" | "mixed" | "unknown" | 
  *  via ALTER TABLE ... ADD COLUMN IF NOT EXISTS, so existing rows simply read back as null.
  *  "mpp" = an MPP charge call (one settled payment per call, like x402/L402); "mpp-session" = a
  *  metered call inside an MPP session (paid by the session's eventual channel settlement, so it
- *  is NOT one-settlement-per-call — see revenue/aggregate.ts's isPaidToolExecution()). */
-export type AnalyticsChannel = "rest" | "x402" | "l402" | "mpp" | "mpp-session" | "mcp-remote";
+ *  is NOT one-settlement-per-call — see revenue/aggregate.ts's isPaidToolExecution()).
+ *
+ *  "api_credits" / "subscription" / "free" (added for the Revenue Conversion Audit — see
+ *  src/audit/) are the unified-billing account rails and the zero-priced free path. Before this
+ *  addition every one of these was recorded as the generic "rest" (see api/app.ts's res.on
+ *  ("finish") handler) — accurate for a legacy X-API-Key call (which really is just "REST, no
+ *  unified billing"), but not for a unified-billing call, which the audit must evaluate against
+ *  prepaid-credit reservation/capture or subscription-allowance debit, never against x402
+ *  settlement (see the spec's "REST + prepaid should be evaluated against prepaid capture, not
+ *  x402 settlement"). Purely additive to an existing string-typed union/column — nothing that
+ *  already filters on `channel === "rest"` breaks (grep confirms no code does; only this file
+ *  produces the value) and every pre-existing "rest" row keeps meaning exactly what it always
+ *  meant, a plain legacy API-key REST call with no unified billing involved. */
+export type AnalyticsChannel = "rest" | "x402" | "l402" | "mpp" | "mpp-session" | "mcp-remote" | "api_credits" | "subscription" | "free";
 
 export interface AnalyticsEvent {
   category: AnalyticsCategory;
@@ -114,6 +162,57 @@ export interface AnalyticsEvent {
   /** From X-Client-Name, falling back to X-Agent-Name — an unauthenticated, self-reported
    *  caller identity (never verified, never trusted for authorization decisions). */
   clientName: string | null;
+  source?: string | null;
+  utmMedium?: string | null;
+  campaign?: string | null;
+  utmContent?: string | null;
+  referrerHost?: string | null;
+  clientType?: "browser" | "curl" | "sdk" | "mcp-client" | "unknown";
+  trafficClass?: "production_external" | "internal_test" | "unknown";
+  /** Preview category only (see PreviewEventType) — a one-way SHA-256/HMAC digest of capability +
+   *  normalized input (preview/fingerprint.ts). NEVER raw input: this is the one field that joins
+   *  a preview_requested row to a later paid_capability_started/preview_converted row for the same
+   *  logical request, and it must never be reversible to what the caller actually sent. Optional
+   *  (unlike the pre-existing fields above) so every call site that predates this field keeps
+   *  compiling unchanged; absent/undefined means "not applicable to this event", same as null. */
+  requestFingerprint?: string | null;
+  /** paid_capability_started / preview_converted only — the actual payment rail the paid call
+   *  settled on (x402/l402/mpp-charge/mpp-session/api-key), read from the billing flow itself
+   *  (res.locals.channel in api/app.ts), never from a client-supplied header. */
+  paymentRail?: string | null;
+  /** paid_capability_started only — whether this paid call's request fingerprint had a qualifying
+   *  preview within the conversion window at the moment it started. null/absent for every other
+   *  event type. */
+  previewSeen?: boolean | null;
+  /** preview_converted only — milliseconds between the qualifying preview and this paid execution. */
+  conversionLatencyMs?: number | null;
+  /** funding category only — "stripe" | "usdc_base" (kept as a bare string literal union here,
+   *  never importing billing/external/types.ts's ExternalPaymentProvider, so this always-loaded
+   *  analytics module has no dependency on that optional, rarely-loaded billing layer). Optional
+   *  so every pre-existing call site keeps compiling unchanged, same as requestFingerprint above. */
+  provider?: "stripe" | "usdc_base" | null;
+  /** The SAME per-HTTP-request id every other already-shipped system in this codebase already
+   *  generates and uses for its own accounting — res.locals.requestId (api/app.ts), also written
+   *  onto every RevenueSettlement (revenue/types.ts) and every unified-billing LedgerEntry
+   *  (billing/unified/types.ts). Added for the Revenue Conversion Audit (src/audit/), whose one
+   *  hard requirement is correlating "what happened to THIS call" across every system that
+   *  observed it — and requestId is the only identifier strong enough for that: two funnel steps
+   *  of the SAME physical request (e.g. a "tool" category execution row and an "x402" category
+   *  settlement row) always share it, while two different physical requests (e.g. an unpaid 402
+   *  challenge and a later paid retry) never do, which is honest — they really are different
+   *  requests, not one logical attempt this layer should pretend to stitch together. NEVER used
+   *  to correlate across categories/systems any other way (timestamp proximity, tool name, price
+   *  and client alone are explicitly insufficient — see src/audit/'s correlation-strategy doc
+   *  comment). Optional/nullable so every pre-existing call site and every already-stored row
+   *  keeps compiling/reading back unchanged (null = "recorded before this field existed", or a
+   *  category where no per-request id is meaningful, e.g. a Stripe-webhook-originated "funding"
+   *  row — see recordFundingEvent()'s own doc comment for why that one has no RequestClientContext
+   *  either). */
+  requestId?: string | null;
+  /** x402 challenge quality metadata — never contains payment credentials. */
+  paymentGuidanceVersion?: string | null;
+  paymentDocsUrl?: string | null;
+  challengeParseable?: boolean | null;
   createdAt: string;
 }
 

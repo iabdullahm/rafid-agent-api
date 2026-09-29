@@ -1,10 +1,29 @@
-# Rafid Property Intelligence — agent-native property and facility intelligence
+# Rafid Intelligence Network — structured intelligence and paid tools for AI agents
 
-Rafid provides deterministic property intelligence for autonomous AI agents, starting with OMR calculations for the Oman market. **AI agents are the primary consumer of this product, not human SaaS users.** MCP and x402 are the primary interfaces; the `X-API-Key` REST routes are the underlying transport and a compatibility layer for callers that can't do MCP or x402 yet. This MVP does not fetch market data, provide investment recommendations, or (outside x402) collect payments.
+Rafid Intelligence Network provides structured intelligence and paid APIs for AI agents across property, companies, suppliers, documents, risk, vehicles and logistics. **AI agents are the primary consumer of this platform.** MCP, OpenAPI, REST, x402 and API Credits are supported access channels.
+
+## Platform architecture
+
+```text
+Rafid Intelligence Network
+├── Property Intelligence
+├── Company Intelligence
+├── Supplier Intelligence
+├── Document Intelligence
+├── Risk Intelligence
+├── Vehicle Intelligence
+└── Logistics Intelligence
+```
+
+Existing property-specific capability contracts, routes and MCP tool names remain unchanged.
 
 The intended flow for an agent is: **discover** a capability → **select** the right tool → **pay per call** over x402 (or authenticate with an API key) → **execute** → get a **structured, machine-readable** result. No account, dashboard or subscription is required for either access model, and none is planned — see "Design constraints" below.
 
 ## Agent discovery
+
+Website planning and inspection are available as the paid `website_project_estimate` ($0.25)
+and `website_audit` ($0.75) capabilities. See [website capabilities](docs/website-capabilities.md)
+for contracts, limitations, preview calls and an audit-to-estimate chaining example.
 
 An agent (or an agent marketplace/directory crawler) can start from any of the following; all are public, unauthenticated, always present, and contain no secrets (no wallet private keys, no API keys, no usage data for other customers):
 
@@ -121,6 +140,20 @@ npm.cmd start
 | NCSI_FIELD_MAP_JSON | Empty; a JSON object mapping this capability's field names to the configured dataset's actual field names — see "Official market context (NCSI)" below |
 | MARKET_DATA_INTERNAL_API_KEY | Empty; no default. Shared secret gating `GET /api/v1/internal/market-data/status` and `.../partners` — see "Partner Data Feed" below. Unset means those two routes always return 503, never a silently-open endpoint |
 | PARTNER_FEED_STALE_DAYS | 7; a partner whose latest accepted record is older than this is reported `stale: true` by `GET /api/v1/internal/market-data/partners` — a per-partner monitoring signal only, never affecting ingestion, `analyze_oman_property`, or any other partner's staleness |
+| VEHICLE_MARKET_DATA_MODE | none (default: no vehicle market-data provider — `vehicle_value_estimate` returns `insufficient_market_data`); database enables the `vehicle_market_records` provider |
+| VEHICLE_MARKET_DATABASE_URL | Empty; falls back to `DATABASE_URL` |
+| VEHICLE_MARKET_COUNTRIES | Empty (the database provider claims no market); comma-separated ISO alpha-2 codes the imported evidence covers, e.g. `OM,AE`, or `*` |
+| VEHICLE_MARKET_PROVIDER_TIMEOUT_MS | 4000; per-provider timeout — a slow provider is reported as `timeout`, never blocks the request |
+| VEHICLE_MARKET_CACHE_TTL_MS | 21600000 (6 hours); provider search-result cache (valuations themselves are never cached) |
+| VEHICLE_MARKET_MAX_LISTING_AGE_DAYS | 365; older evidence is never used |
+| MARKETCHECK_API_KEY | Empty; setting it enables the MarketCheck provider (US/Canada used-car dealer listings, licensed/paid). Never logged or returned |
+| MARKETCHECK_PAGES | 2; result pages of 50 listings per market per uncached search (1–10) |
+| VEHICLE_MARKET_FEEDS_JSON | Empty; JSON array of partner HTTPS feeds `[{"id","url","countries","format","authHeaderEnv"}]` — see "vehicle_value_estimate → Market-data providers" |
+| VEHICLE_FX_SOURCES | Empty (no currency conversion); comma list tried in order per pair: `ecb`, `exchangerate_api` |
+| EXCHANGERATE_API_KEY | Empty; uses ExchangeRate-API's keyed endpoint instead of the rate-limited open-access one |
+| VEHICLE_FX_CACHE_TTL_MS | 21600000 (6 hours) |
+| VEHICLE_VIN_DECODER | none (offline VIN checks only); `nhtsa` decodes VINs with NHTSA vPIC (sends the VIN to NHTSA) |
+| VEHICLE_VIN_DECODER_TIMEOUT_MS | 3000 |
 
 The app accepts pre-existing environment variables over `.env`. No live credentials are included. `.env`, dependencies, build output and npm cache are ignored by Git. Never commit or log `CDP_API_KEY_SECRET`, `X402_WALLET_ADDRESS`'s private key (never requested or stored by this app), or `DATABASE_URL`.
 
@@ -217,6 +250,7 @@ REST base: `http://localhost:8787`.
 | POST | /api/v1/risk/business-risk-score | X-API-Key (x402: /api/v1/x402/risk/business-risk-score; L402: /api/v1/l402/risk/business-risk-score; MPP: /api/v1/mpp/charge/business_risk_score) |
 | POST | /api/v1/documents/facts-extract | X-API-Key (x402: /api/v1/x402/documents/facts-extract; L402: /api/v1/l402/documents/facts-extract; MPP: /api/v1/mpp/charge/document_facts_extract) — 1 MB JSON body limit |
 | POST | /api/v1/finance/invoice-anomaly-check | X-API-Key (x402: /api/v1/x402/finance/invoice-anomaly-check; L402: /api/v1/l402/finance/invoice-anomaly-check; MPP: /api/v1/mpp/charge/invoice_anomaly_check) — 1 MB JSON body limit |
+| POST | /api/v1/automotive/vehicle-value-estimate | X-API-Key (x402: /api/v1/x402/automotive/vehicle-value-estimate; L402: /api/v1/l402/automotive/vehicle-value-estimate; MPP: /api/v1/mpp/charge/vehicle_value_estimate) |
 | POST | /api/v1/intelligence/research-company | X-API-Key |
 | POST | /api/v1/intelligence/find-companies | X-API-Key |
 | POST | /api/v1/intelligence/analyze-company-risk | X-API-Key |
@@ -275,7 +309,7 @@ curl -s https://api.rafidsystem.com/api/v1/agent
 {
   "success": true,
   "data": {
-    "name": "Rafid Property Intelligence",
+    "name": "Rafid Intelligence Network",
     "description": "Property and facility intelligence tools for AI agents",
     "version": "0.1.0",
     "mcp": true,
@@ -453,7 +487,21 @@ Any provider can be switched off with `COMPANY_REPUTATION_DISABLED_PROVIDERS` (i
 
 **Unit economics:** worst case uncached ~3 web searches (≈ $0.024 at Tavily-class pricing); everything else is free public data. Estimated gross margin at $0.40 ≈ $0.37/call before hosting and facilitator fees. OpenSanctions, if enabled, adds its own per-call licence cost. Per-provider calls, cache hits, stale serves, outages and latency are recorded in-process (`src/company-reputation/telemetry.ts`) and returned by the internal `GET /api/v1/internal/revenue/unit-economics` route (`companyReputationTelemetry`).
 
-**Future product ladder:** `oman_supplier_check` ($0.50, Oman procurement) and `company_reputation_check` ($0.40, global reputation) are independent capabilities. They share only generic sanctions-list code (`src/shared/sanctions/`). A future `company_due_diligence` (~$1.50+: ownership/UBO, financials, litigation, PEP, corporate structure) can reuse the normalized evidence model, the evidence cache table and the provider interface without changing either.
+### Premium decision API: `company_due_diligence` ($1.50/call)
+
+`POST /api/v1/risk/company-due-diligence` · MCP tool `company_due_diligence`. This is the normalized decision layer over the existing `business_risk_score` evidence pipeline: it resolves the company, evaluates registration, website identity, sanctions, adverse news, legal, financial and reputation signals, then returns a deterministic `riskScore`/`riskLevel`, confidence, provenance, a recommendation and a machine-actionable `decision.action`.
+
+Request fields are `company` (required), plus optional `domain`, `country`, `registrationNumber`, `lei`, `purpose`, `depth` (`quick`, `standard`, `enhanced`, default `standard`) and a strict `checks` object (`registry`, `sanctions`, `adverseMedia`, `reputation`, `businessRisk`, all defaulting to `true`). The capability costs `$1.50 USD` and uses the shared registry/payment rails; it is automatically present in REST, MCP, x402/L402/MPP/account billing where enabled, OpenAPI and discovery manifests.
+
+Example:
+
+```bash
+curl -X POST https://<host>/api/v1/risk/company-due-diligence \
+  -H "Content-Type: application/json" -H "X-API-Key: <key>" \
+  -d '{"company":"Example Ltd","domain":"example.com","country":"GB","purpose":"supplier_onboarding"}'
+```
+
+The free preview only reports recognized input, source coverage and available result sections. It never returns the paid score, sanctions result, red flags, recommendation or decision. If the entity is ambiguous or cannot be reliably resolved, the paid request returns `AMBIGUOUS_ENTITY` or `ENTITY_NOT_FOUND` rather than guessing; unavailable providers lower coverage/confidence and remain explicit in the result.
 
 ### Risk intelligence: global business risk score (`business_risk_score`, $0.50/call)
 
@@ -629,6 +677,93 @@ Response (abridged):
 **Errors (not charged on x402 / L402 / MPP):** `INVALID_INPUT` (schema / unknown fields) and `INVALID_JSON` 400, `INVALID_MONETARY_VALUE` 400, `INVALID_DATE` 400, `UNSUPPORTED_CURRENCY_FORMAT` 400 (each with `details.path`, never the value), `ANALYSIS_FAILED` 500 (sanitized). **Unit economics:** no upstream provider or LLM cost.
 
 **Limitations.** The capability identifies invoice anomalies and risk indicators. It does not independently establish fraud or replace accounting, audit, compliance, or payment-authorization controls. `decision` is advisory, not a payment approval or rejection. Findings are limited to the data supplied (no ERP, bank, registry or third-party fraud source is consulted; connectors are a future phase). Supplier baselines need ≥ 3 prior invoices from the supplier; amounts in different currencies are never converted or compared; `checkedAt` is day-granular (the as-of date) so identical inputs give identical output.
+
+### Automotive: vehicle value estimate (`vehicle_value_estimate`, $0.25/call)
+
+```text
+vehicle_value_estimate
+$0.25 / successful call
+Fair-market valuation of a passenger vehicle from comparable-market evidence (global, multi-provider)
+```
+
+`POST /api/v1/automotive/vehicle-value-estimate` (API key) · `POST /api/v1/x402/automotive/vehicle-value-estimate` (x402, $0.25 = 250000 USDC atomic units) · `POST /api/v1/l402/automotive/vehicle-value-estimate` (L402, when enabled) · `POST /api/v1/mpp/charge/vehicle_value_estimate` and MPP sessions (when enabled) · MCP tool `vehicle_value_estimate` · Free Preview `POST /api/v1/preview/vehicle_value_estimate`. Category `automotive`, OpenAPI tag "Automotive", idempotent, no side effects. All of this comes from the one registry entry in `src/domain/capabilities.ts`. **Use this capability when an AI agent needs to estimate the current market value of a passenger vehicle, determine whether an asking price is reasonable, estimate private-sale or dealer values, assess depreciation, or evaluate a vehicle using local or regional market comparables.**
+
+It returns a low/mid/high fair-value range, private-sale, dealer-buy (trade-in) and dealer-retail estimates, the asking price's exact difference from the midpoint and its market position, depreciation, every valuation adjustment with its amount and reason, the comparables used (with similarity scores), market statistics, a deterministic confidence score, machine-readable risk flags, assumptions and data freshness. The valuation maths is deterministic application code: **no LLM** is involved, and the same normalized input over the same market evidence always gives the same output.
+
+**Input.** Required: `make`, `model`, `year` (1950 – next calendar year), `country` (ISO alpha-2/alpha-3 or name, any country). Strongly recommended (each missing one lowers confidence and raises a flag): `mileageKm` (0–2,000,000), `trim`, `city`, `condition` (`excellent`, `very_good`, `good`, `fair`, `poor`, `unknown`). Optional: `askingPrice` (> 0), `currency` (ISO 4217; default = the market's currency), `fuelType`, `transmission`, `bodyType`, `engine`, `drivetrain`, `accidentHistory` (`false`/`"none"`, `"minor_cosmetic"`, `"repaired"`, `"structural"`, `true`/`"reported"` = severity not stated, `"unknown"`), `serviceHistory` (`full`, `partial`, `none`, `unknown`), `owners` (1–20), `color`, `options` (≤ 40), `valuationDate` (YYYY-MM-DD, not in the future; evidence observed later is ignored — for insurance/historical valuations). `vin` (optional, 17 characters — see "VIN" below). Common synonyms are normalized ("gasoline" → petrol, "Auto" → automatic, "4x4" → 4wd, "VW" → Volkswagen, "UAE" → AE); unknown values and unknown fields are rejected.
+
+```bash
+curl -X POST https://api.rafidsystem.com/api/v1/automotive/vehicle-value-estimate \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"make":"Toyota","model":"Land Cruiser","year":2022,"trim":"GXR","mileageKm":68000,"condition":"good",
+       "country":"Oman","city":"Muscat","currency":"OMR","fuelType":"petrol","transmission":"automatic","bodyType":"suv",
+       "drivetrain":"4WD","accidentHistory":false,"serviceHistory":"full","owners":1,
+       "options":["sunroof","leather seats","360 camera"],"askingPrice":22500}'
+```
+
+Response (abridged; generated from the **synthetic** fixture listings — see below — by the real engine):
+
+```json
+{
+  "status": "estimated",
+  "estimatedValue": { "low": 22100, "mid": 23000, "high": 23900, "currency": "OMR" },
+  "estimatedPrivateSalePrice": 23400, "estimatedDealerBuyPrice": 20600, "estimatedDealerRetailPrice": 25700,
+  "askingPriceAnalysis": { "askingPrice": 22500, "differenceFromMid": -500, "differencePercent": -2.17, "marketPosition": "near_market", "withinEstimatedRange": true, "thresholdsPercent": { "wellBelow": -15, "below": -5, "above": 5, "wellAbove": 15 } },
+  "depreciation": { "estimatedOriginalPrice": null, "totalDepreciationAmount": null, "marketImpliedAnnualDepreciationPercent": null, "…": "…" },
+  "adjustments": [
+    { "factor": "mileage", "impactAmount": -20, "impactPercent": -0.1, "basis": "market_derived", "reason": "Mileage (68,000 km) is above the comparable-market median (66,000 km); …" },
+    { "factor": "listing_to_transaction", "impactAmount": -680, "impactPercent": -3, "basis": "heuristic", "reason": "Comparable prices are listing asking prices; a 3.0% typical negotiation margin for Oman …" },
+    { "factor": "full_service_history", "impactAmount": 330, "impactPercent": 1.5, "basis": "heuristic", "reason": "Documented full service history supports stronger resale value." }
+  ],
+  "marketComparables": [{ "year": 2022, "trim": "GXR", "mileageKm": 71000, "askingPrice": 23300, "currency": "OMR", "city": "Muscat", "sourceName": "synthetic-dealer-feed", "observedAt": "2026-09-14T12:00:00.000Z", "similarityScore": 0.99, "…": "…" }],
+  "marketStats": { "comparableCount": 10, "comparablesConsidered": 23, "outliersExcluded": 2, "medianPrice": 22875, "medianMileageKm": 64000, "priceDispersionPercent": 1.6, "…": "…" },
+  "methodology": { "fallbackLevel": "same_trim_same_year", "mileageEffect": { "basis": "market_derived", "percentPer10000Km": -0.53 }, "rangeHalfWidthPercent": 4, "…": "…" },
+  "confidence": { "score": 0.94, "level": "high", "reasons": ["10 comparable listing(s) used …", "…"], "factors": { "comparableVolume": 0.83, "…": "…" } },
+  "riskFlags": ["HEURISTIC_ADJUSTMENTS_USED", "OUTLIERS_REMOVED"],
+  "assumptions": ["Vehicle has clear legal ownership/title status …", "No undisclosed accident or structural damage; …", "…"],
+  "dataFreshness": { "latestComparableAt": "2026-09-20T12:00:00.000Z", "oldestComparableAt": "2026-08-19T12:00:00.000Z", "medianComparableAgeDays": 17, "recentListingCount": 8, "recentWindowDays": 30 },
+  "marketCoverage": { "countryCode": "OM", "valuationParametersConfigured": true, "marketDataProviders": [{ "id": "…", "status": "ok", "comparablesReturned": 23 }], "liveMarketDataAvailable": true, "…": "…" }
+}
+```
+
+(The full example is in OpenAPI and `/api/v1/capabilities`; regenerate it with `node --import tsx scripts/generateVehicleValueExample.ts` — a test fails if it drifts. It is explicitly labelled synthetic in its first assumption.)
+
+**Example agent use case.** *"Estimate the current market value of this 2022 Toyota Land Cruiser GXR with 68,000 km in Muscat and tell me whether OMR 22,500 is a reasonable asking price."* → the agent calls `vehicle_value_estimate` with the fields above and `askingPrice: 22500`, then answers from `estimatedValue` and `askingPriceAnalysis` ("OMR 22,500 is 2.2 % below the OMR 23,000 midpoint — near market; fair range OMR 22,100–23,900; confidence high"). If `status` is `insufficient_market_data` it says so instead of guessing.
+
+**Architecture (`src/vehicle-value/`).** input validation (`schemas/vehicleValueInputs.ts`) → normalization (`normalization.ts`, `subject.ts`) → market detection (`markets.ts`) → market-data router (`providers/router.ts`: selects every provider that `supports()` the country or its regional-fallback countries, runs them concurrently, each under `VEHICLE_MARKET_PROVIDER_TIMEOUT_MS`, sanitizes and de-duplicates their results, caches provider searches) → comparable normalization + currency conversion + eligibility (`comparables.ts`) → progressive fallback selection → weighted similarity (`similarity.ts`) → outlier removal → base estimate and adjustments (`valuation.ts`) → confidence (`confidence.ts`) → structured result (`service.ts`). The core never knows which marketplace a comparable came from.
+
+**Market-data providers.** Any source implements `VehicleMarketProvider` (`types.ts`: `id`, `supports(market)`, `searchComparables(query, signal)`, optional `getNewVehiclePrice` / `newPriceRank`) and is added in `buildVehicleRuntime()` (`service.ts`) — the valuation core does not change. Every provider is **off until configured**; on a default deployment every call honestly returns `insufficient_market_data` with `NO_MARKET_DATA_PROVIDER`, and no market is ever claimed to have live data unless a configured provider covers it. Shipped providers:
+
+| Provider (id) | Markets | Enable with | What it is |
+|---|---|---|---|
+| `vehicle_market_records` | declared in `VEHICLE_MARKET_COUNTRIES` (e.g. `OM,AE` or `*`) | `VEHICLE_MARKET_DATA_MODE=database` | Rafid's own table of imported, licensed evidence (dealer/partner exports, auction results) — see "Data layer". Also serves verified new-vehicle prices. |
+| `marketcheck` | US, CA | `MARKETCHECK_API_KEY` (+ optional `MARKETCHECK_PAGES`, default 2) | [MarketCheck Inventory Search](https://docs.marketcheck.com/docs/api/cars/inventory/inventory-search), a licensed, paid listings API: `GET https://api.marketcheck.com/v2/search/car/active?api_key=…&make&model&year_range&car_type=used&country=us\|ca&rows=50&start=…`. Miles → km, USD/CAD, body/fuel/transmission/drivetrain mapped to enums, dealer contact details and VINs dropped (VIN → hash for self-exclusion). Its listings' dealer-reported `msrp` gives a new-price reference when ≥ 3 listings of the exact year (and trim) agree. The key stays server-side and never appears in responses, logs or errors. |
+| `feed:<id>` | declared per feed | `VEHICLE_MARKET_FEEDS_JSON` | Partner / licensed HTTPS feeds for markets with no public listings API (e.g. an Oman or UAE dealer group, a classifieds or auction partner): `[{"id":"om-dealer","url":"https://…/rafid.json","countries":["OM"],"format":"json","authHeaderEnv":"OM_DEALER_FEED_AUTH"}]`. The partner publishes JSON (`[...]` or `{"records":[...]}`) or CSV in the `vehicle_market_records` row format; Rafid fetches it through the Production Feed Runner's SSRF-protected fetcher (https only, private/loopback addresses and unvalidated redirects refused, 8 s / 10 MB caps), validates each row, drops personal-data columns and caches the feed for an hour. `authHeaderEnv` names an env var holding the Authorization header value (the secret never goes in the JSON). No scraping — only feeds a partner publishes for Rafid. |
+
+UK/European listings APIs (e.g. MarketCheck UK) and GCC classifieds have no verified public contract integrated yet; those markets are served through partner feeds or imported records. Valuation parameters (default currency, expected annual km, dealer/private spreads, negotiation margin, conservative fallbacks) are configured for Oman, UAE, Saudi Arabia, Qatar, Bahrain, Kuwait, the United States, Canada, the United Kingdom, Australia and 14 European markets; any other country is valued with generic defaults when a provider covers it (and must pass `currency`). `marketCoverage` reports valuation-parameter support and provider/data support separately in every response.
+
+**Data layer.** `vehicle_market_records` (`store/postgres.ts`, created with `CREATE TABLE IF NOT EXISTS`): make/model/trim with normalized keys, year, mileage, condition, body/fuel/transmission/drivetrain, country/city/region, price + currency + `price_type` (listing/sale), source type/name/record id/url, `observed_at`, `ingested_at`, metadata. Indexes on normalized make+model+year, trim, country+city, mileage and `observed_at`; a unique index on `(source_name, source_record_id)` de-duplicates re-imports. **Vehicle and market evidence only** — there is no column for a seller's name, phone, e-mail, VIN or plate. Import with `npm run vehicle:import -- listings.csv [--dry-run] [--source-type=licensed_feed]` (CSV or JSON, ≤ 20 MB): every row is validated/normalized, invalid rows are reported, and personal-data-looking columns are dropped and listed, never stored (a `vin` column is reduced to a hash kept only in memory for feed rows; it is not written to the table). **New-vehicle prices:** `vehicle_new_prices` (make/model/year/trim/country, price + currency, source name/URL, effective date; unique per make/model/year/trim/country/source) holds verified original prices — a distributor's official model-year price list, a manufacturer's published MSRP. Import with `npm run vehicle:import -- new-prices.csv --new-prices [--dry-run]` (columns `make,model,year,trim,country,price,currency,sourceName,sourceUrl,effectiveDate`). A price is used only for an exact trim match (or, with no trim given, when the model year has one unambiguous price), and it outranks MarketCheck's dealer-reported MSRP. Only import data you are licensed or authorized to use.
+
+**Comparable selection.** Mandatory make + model match; evidence must be observed on/before the valuation day and within `VEHICLE_MARKET_MAX_LISTING_AGE_DAYS` (365). Progressive widening, recorded in `methodology.fallbackLevel`: `same_trim_same_year` → `same_trim_year_plus_minus_1` → `same_model_year_plus_minus_1` → `same_model_year_plus_minus_2` → `regional_same_model_year_plus_minus_2` (GCC ↔ GCC, US ↔ CA, AU ↔ NZ, eurozone ↔ eurozone; flagged `REGIONAL_FALLBACK_USED`). The narrowest level with ≥ 5 comparables wins; otherwise the level with the most comparables, provided ≥ 3 remain after outlier removal — below that, `insufficient_market_data`. **Similarity** (0–1): trim 25 %, model year 20 %, mileage 20 %, location 15 % (same city 1 · same country 0.8 · regional 0.35), condition 5 %, fuel + transmission 5 %, body + drivetrain 5 %, recency 5 %. Similarity weights the median; it never averages listings blindly.
+
+**Valuation methodology.** (1) Model-year and mileage effects are fitted from the comparables (weighted least squares on log price, similarity-weighted) when there are ≥ 6 comparables with ≥ 2 model years / a mileage spread ≥ 10,000 km, bounded to plausible ranges and shrunk toward the market default by n/(n + 8); otherwise the market's conservative default is used (`basis: "heuristic"`, confidence reduced) — there is no single global depreciation-per-km number. (2) In model-level pools, other trims are aligned to the subject's trim using the price gap measured in the pool (needs ≥ 2 listings of the subject's trim; otherwise no trim premium is invented and the estimate is labelled model-level). (3) Outliers: Tukey 1.5×IQR fences on log normalized price for n ≥ 5, modified z-score > 3.5 on MAD for n = 4 — never a hard-coded price threshold (`marketStats.outliersExcluded`). (4) Anchor = similarity-weighted median of the year/trim-aligned prices, moved by the mileage effect from the comparables' weighted median mileage to the subject's. (5) Market-derived local-market (regional pools) and transmission/drivetrain/fuel adjustments only when both groups have ≥ 2 comparables. (6) Listing asking prices → fair value by the market's negotiation margin (none for recorded sales). (7) Vehicle-specific adjustments — condition (relative to the comparables' typical condition), accident history (minor −3 %, repaired/reported −10 %, structural −25 %), service history (full +1.5 %, none −4 %), owners, premium options (+0.5 % each, ≤ 2 %) — are conservative, labelled `heuristic`, and capped at −35 % / +6 % in total so they can never dominate the market evidence. **Range:** ± (½ × robust dispersion + 15 % × (1 − confidence) + 2 %), clamped to 4–40 %: weak evidence widens it. **Dealer / private:** each market has `dealerBuyDiscountRange`, `privateSaleAdjustmentRange`, `dealerRetailMarkupRange`; the engine picks a deterministic point from the confidence (weaker evidence ⇒ larger dealer discount) and guarantees dealer buy ≤ private sale ≤ dealer retail. **Rounding** to 10/50/100/500/1,000 by magnitude (doubled at low confidence) so weak evidence is never presented with false precision. **Asking price:** `differenceFromMid` and `differencePercent` (2 dp) against the rounded midpoint; ≤ −15 % `well_below_market`, ≤ −5 % `below_market`, < +5 % `near_market`, < +15 % `above_market`, else `well_above_market`. **Depreciation:** original price (`estimatedOriginalPrice`, with `originalPriceSource`), total and annualized depreciation (`1 − (mid / original)^(1/age)`) only when a verified new-price reference exists — an imported official price list, else ≥ 3 agreeing MarketCheck dealer-reported MSRPs (`null` otherwise — never assumed); `marketImpliedAnnualDepreciationPercent` when the year effect is market-derived.
+
+**Confidence methodology** (`confidence.ts`, deterministic): weighted sum of comparable volume (22 %, full at 12), mean similarity (18 %), exact-trim share (10 %), mileage evidence (10 %), locality (10 %), freshness (12 %, median age ≤ 30 days → 1, ≥ 180 → 0), provider diversity (6 %) and price consistency (12 %, robust dispersion vs 35 %); then ×0.85 stale evidence (median age > 90 days), ×0.95 condition unknown, ×0.93 heuristic mileage effect, ×0.95 heuristic year effect, ×0.9 regional fallback; capped at 0.59 below 5 comparables and 0.39 when insufficient. Levels: ≥ 0.80 `high`, ≥ 0.60 `medium`, ≥ 0.40 `low`, else `very_low`. `confidence.factors` and `confidence.reasons` expose every input.
+
+**Currency.** Result currency = `currency` or the market default. Rates are never hard-coded or guessed: evidence (or a new-price reference) in another currency is converted only through a configured, dated source and each conversion used is reported in `currencyConversion.conversions` (`from`, `to`, `rate`, `source`, `rateDate`); without one it is excluded and flagged `CURRENCY_CONVERSION_UNAVAILABLE`. `VEHICLE_FX_SOURCES` lists sources tried in order per currency pair:
+- `ecb` — [European Central Bank euro reference rates](https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html) (`eurofxref-daily.xml`): free, keyless, ~30 currencies (USD, GBP, CAD, AUD, CHF, SEK, DKK, PLN, …) — **not** the GCC currencies. Published for information purposes, which fits comparable normalization.
+- `exchangerate_api` — [ExchangeRate-API](https://www.exchangerate-api.com/docs/free): covers OMR, AED, SAR, QAR, BHD, KWD and ~160 more, updated daily. Uses the keyed endpoint (`v6.exchangerate-api.com/v6/{EXCHANGERATE_API_KEY}/latest/USD`) when `EXCHANGERATE_API_KEY` is set, otherwise the rate-limited open-access endpoint (which asks for attribution). Its terms forbid redistributing its rates and disclaim accuracy; Rafid only applies them to comparables, but review the terms before relying on them commercially.
+Rates are cached per source (`VEHICLE_FX_CACHE_TTL_MS`, 6 h), loaded concurrently under a 3 s timeout, and a failing source is skipped (a previously loaded table is reused for up to 3 days). Recommended: `VEHICLE_FX_SOURCES=ecb,exchangerate_api`. A country without a configured default currency requires `currency` (`CURRENCY_REQUIRED`, 400).
+
+**VIN.** `vin` is optional. It is normalized and validated (17 characters, no I/O/Q); North American VINs must also pass the ISO 3779 check digit (`VIN_CHECK_DIGIT_INVALID` otherwise). Offline, the manufacturer prefix (a partial WMI table) and the model-year code are compared with the request. With `VEHICLE_VIN_DECODER=nhtsa` it is also decoded with [NHTSA vPIC](https://vpic.nhtsa.dot.gov/api/) (`DecodeVinValues/{VIN}?format=json`, free, keyless — opt-in because it sends the VIN to a third party; `VEHICLE_VIN_DECODER_TIMEOUT_MS`, 3 s) concurrently with the market search. A decode that agrees with the stated make and year fills only fields the caller left out (trim, body, fuel, drivetrain, transmission, engine — listed in `vinCheck.enrichedFields`); a VIN that disagrees is flagged `VIN_MISMATCH` and the vehicle is valued as described in the request. A decoder failure is `VIN_DECODE_UNAVAILABLE`, never fatal. Listings of the same vehicle (matched by a SHA-256 hash of the VIN from MarketCheck, feeds or imports) are removed from its own comparables (`SUBJECT_LISTING_EXCLUDED`). The VIN is never stored, logged, cached, put in telemetry/analytics or preview fingerprints, and responses carry only `vinCheck.vinMasked` (the 6-character serial hidden).
+
+**Risk flags.** `INSUFFICIENT_COMPARABLES`, `NO_MARKET_DATA_PROVIDER`, `STALE_MARKET_DATA`, `HIGH_PRICE_DISPERSION`, `MILEAGE_UNKNOWN`, `TRIM_UNKNOWN`, `CONDITION_UNKNOWN`, `ACCIDENT_HISTORY_UNKNOWN`, `ACCIDENT_SEVERITY_UNVERIFIED`, `STRUCTURAL_DAMAGE_REPORTED`, `HIGH_MILEAGE_FOR_AGE`, `ASKING_PRICE_SIGNIFICANTLY_ABOVE_MARKET`, `ASKING_PRICE_SIGNIFICANTLY_BELOW_MARKET`, `CURRENCY_CONVERSION_UNAVAILABLE`, `REGIONAL_FALLBACK_USED`, `BROADENED_COMPARABLE_SEARCH`, `HEURISTIC_ADJUSTMENTS_USED`, `PROVIDER_PARTIAL_FAILURE`, `OUTLIERS_REMOVED`, `VIN_MISMATCH`, `VIN_CHECK_DIGIT_INVALID`, `VIN_DECODE_UNAVAILABLE`, `SUBJECT_LISTING_EXCLUDED`.
+
+**Performance, caching, observability.** Providers run concurrently with per-provider timeouts; a timeout or error is reported in `marketCoverage.marketDataProviders` (`PROVIDER_PARTIAL_FAILURE`) and never fails the request. Provider searches (never valuations) are cached in-process for `VEHICLE_MARKET_CACHE_TTL_MS` (6 h) keyed by provider, market countries, make, model, model-year window and evidence cut-off day. Every call is recorded by the analytics layer (capability, channel, success, latency, `dataSource` `live_provider` / `not_configured`), and valuation telemetry (country, make, model, model year, comparable count, provider count/failures, confidence level, fallback level, latency — no VIN, no prices, no personal data) is on the internal unit-economics route.
+
+**Billing and preview.** $0.25 per successful call through the shared payment infrastructure (API credits/subscriptions, x402, L402, MPP) — no capability-specific payment code. Schema-invalid requests (400) and `VALUATION_FAILED` (500) are never charged. A structured `insufficient_market_data` result is a successful 200 response and is charged like every other capability's honest "no data" result; agents should call the **free preview** first, which reports (without querying any provider or pricing anything) whether a configured provider covers the market (`status: "available"` vs `"limited"`), under the shared preview rate limits.
+
+**Limitations.** Market evidence, not a physical inspection, vehicle-history check or formal appraisal; not financial, lending or insurance advice. Coverage depends entirely on the providers configured on the deployment. Comparables are mostly asking prices (converted with a documented negotiation margin). Options, colour and engine are not priced from market evidence (options get only a small capped heuristic). Title, liens and undisclosed damage are assumed clean (stated in `assumptions`); a VIN decode confirms identity/specification, not history. Cross-currency evidence needs a configured rate source. MarketCheck coverage is US/Canada dealer inventory only; other markets need imported records or partner feeds.
 
 ### Production Oman market data (database mode, import, caching)
 
@@ -822,6 +957,26 @@ Until both are set, `officialMarketContext.available` is always `false` with `re
 **Testing:** `tests/ncsi.test.ts` covers catalog/record parsing against a mocked HTTP layer (an injectable `fetchImpl`, never the network), field-map-driven parsing (missing metrics, stale records), every failure mode (timeout/5xx/4xx/malformed response), cache hit/expiry/no-cache-on-failure, and full-pipeline integration (NCSI down vs. healthy, zero-record dataset, the early-return unsupported-area path) — none of it depends on live NCSI availability. A separate, opt-in `npm run test:ncsi-live` (gated behind `NCSI_LIVE_TEST=1` in `.env`, exactly like `test:db` is gated behind a live database) smoke-tests the real API when you want to re-verify it.
 
 **Known limitation:** because the live catalog could not be queried successfully during development, this integration has not yet been exercised against a single real NCSI record — everything above is verified against the *documented contract* and mocked responses, not a live payload. Re-running `npm run ncsi:discover` and `npm run test:ncsi-live` once NCSI's backend is healthy (or once you have a dataset id/field list from NCSI directly) is the remaining step before this integration is proven end-to-end against real data.
+
+### Unified billing: API credits, subscriptions and every payment rail
+
+Paid capabilities can be bought through any enabled rail, and the capability never knows which
+one paid: **x402** (USDC, no account), **prepaid API credits** and **subscription allowances** on a
+Rafid API key (`Authorization: Bearer raf_live_…` — no wallet needed), **L402** and **MPP** when
+enabled. Every rail charges the same canonical `capability.price`. The canonical route
+`POST /api/v1/<tool-path>` picks the rail deterministically (`X-Rafid-Payment-Method: auto |
+credits | subscription | x402 | l402 | mpp`), re-dispatching x402/L402/MPP credentials to their
+unchanged, protocol-correct gates. `GET /api/v1/payment-methods` lists the enabled rails; a caller
+without a usable credential gets `402 payment_required` with that discovery instead of an
+x402-only answer. API-credit calls are atomic and concurrency-safe (PostgreSQL row locks +
+conditional updates, BIGINT micro-USD), idempotent (`Idempotency-Key`), fully ledgered, and
+refunded when the capability fails. Accounts, keys, credits and plans are managed with
+`npm run billing -- …` or the `BILLING_ADMIN_SECRET`-protected internal API; customers read
+`GET /api/v1/account/{balance,usage,transactions}`. MCP clients can pay with API credits via
+`POST /mcp/credits`, or run local stdio with `RAFID_API_KEY` set. Everything is inert until
+`API_CREDITS_ENABLED` / `SUBSCRIPTIONS_ENABLED` is set.
+
+Full reference: [docs/billing.md](docs/billing.md). Example client: [examples/api-credits-client](examples/api-credits-client).
 
 ### Pay-per-call via x402 (no API key)
 
@@ -1099,6 +1254,8 @@ curl -s https://api.rafidsystem.com/mcp \
 Tools on both transports: `analyze_property`, `compare_properties`, `estimate_maintenance`, `analyze_oman_property`. Tool results include JSON text and `structuredContent`, with strict input/output schemas, validation errors and read-only annotations; each tool's MCP `description` is its registry `description` plus its `whenToUse` recommendation sentence, verbatim — never a second copy of that prose. Custom cross-field constraints (alias exclusivity, unique names) are enforced at runtime, and every error on either transport goes through the same `publicError()` sanitizer as REST, so an internal failure never leaks internals remotely any more than it does locally.
 
 MCP and REST are not two implementations that happen to agree: all three (stdio, remote MCP, REST) call the exact same `capabilities` catalog (`src/domain/capabilities.ts`) and the exact same `services/property.ts` functions, so a formula or price change made in one place is correct everywhere, and there is nothing to keep in sync by hand.
+
+**Paying with API credits over MCP** (unified billing, see [docs/billing.md](docs/billing.md#mcp)): point a remote MCP client at `POST /mcp/credits` with `Authorization: Bearer raf_live_…` — `initialize`/`tools/list` behave exactly like `/mcp`, and each paid `tools/call` is billed to the key's account (subscription allowance, then prepaid credits; `result._meta["com.rafidsystem/billing"]` carries the charge). Or run local stdio in hosted mode — `RAFID_API_KEY=raf_live_… node dist/mcp.js` forwards every tool call to the hosted API (`RAFID_API_URL`) where it is billed. MPP over MCP stays at `/mcp/mpp`; x402 and L402 are HTTP-only rails. `/mcp` itself is unchanged.
 
 Stdio is local to the launching OS user; REST API keys are not an authentication mechanism for stdio, and stdio calls remain deliberately unmetered — an MCP client's own OS user launched that process directly, with no shared server resource to protect. Remote MCP is different: it is a shared, public server resource, so every remote tool call is recorded through the same `UsageRepository` as REST/x402 calls (`accessMode: "mcp-remote"`, `billableAmount: 0` — remote MCP is not a paid channel in this phase) and is protected by the same rate limiting as the other public agent endpoints (see "Security, observability and billing boundary" below). Logs go to stderr on both transports; stdout is reserved for MCP stdio framing. Remote auth (beyond rate limiting) is not implemented yet — see "Next five production priorities" below.
 

@@ -2,7 +2,7 @@
 
 ## Name
 
-Rafid Property Intelligence
+Rafid Intelligence Network
 
 ## Tagline
 

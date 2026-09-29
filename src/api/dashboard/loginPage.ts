@@ -1,7 +1,7 @@
 import { esc } from "../admin/layout.js";
 
 /**
- * Sign-in page for the internal Rafid Property Intelligence dashboard (/internal/dashboard).
+ * Sign-in page for the internal Rafid Intelligence Network dashboard (/internal/dashboard).
  *
  * Deliberately its own page rather than a reuse of admin/loginPage.ts: that page's form posts to
  * the hard-coded "/admin/login" path and carries "Oman Business Admin" branding, and — more
@@ -21,7 +21,7 @@ export function dashboardLoginPageHtml(opts: { error?: string; returnTo?: string
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Sign in · Rafid Property Intelligence</title>
+<title>Sign in · Rafid Intelligence Network</title>
 <meta name="robots" content="noindex, nofollow">
 <style>
 :root { color-scheme: dark; }
@@ -37,7 +37,7 @@ button { margin-top:20px; width:100%; background:#2563eb; color:#fff; border:non
 </head>
 <body>
 <form method="post" action="/internal/dashboard/login">
-  <h1>Rafid Property Intelligence</h1>
+  <h1>Rafid Intelligence Network</h1>
   <p class="sub">Internal revenue &amp; operations dashboard — authorized operators only.</p>
   ${opts.error ? `<div class="error">${esc(opts.error)}</div>` : ""}
   <input type="hidden" name="returnTo" value="${esc(opts.returnTo ?? "")}">

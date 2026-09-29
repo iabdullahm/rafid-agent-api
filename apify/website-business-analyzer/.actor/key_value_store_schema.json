@@ -1,0 +1,1 @@
+{ "actorKeyValueStoreSchemaVersion": 1, "title": "Website Business Analyzer output", "collections": { "output": { "title": "Latest analysis", "description": "Latest structured website business analysis.", "key": "OUTPUT" } } }

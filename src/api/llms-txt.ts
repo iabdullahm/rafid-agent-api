@@ -1,12 +1,16 @@
 import { capabilities } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
 import { prices } from "../billing/catalog.js";
-import { x402BasePath } from "../billing/x402.js";
+import { x402BasePath, x402DocsPath } from "../billing/x402.js";
 import { l402BasePath } from "../billing/l402/gate.js";
 import { mppBasePath } from "../billing/mpp/routes.js";
 import { previewBasePath } from "./previewRoutes.js";
 import { MUSCAT_GOVERNORATE, SUPPORTED_MUSCAT_AREAS } from "../domain/oman/locations.js";
 import type { Config } from "../config/env.js";
+import { paymentMethodsPath, railAvailability } from "../billing/unified/discovery.js";
+import { accountBasePath } from "../billing/unified/http.js";
+import { mcpCreditsPath } from "../billing/unified/mcp.js";
+import { PLATFORM_DESCRIPTION, PLATFORM_NAME } from "../brand.js";
 
 /**
  * GET /llms.txt — a plain-text briefing for an LLM-based agent that lands here without ever
@@ -16,7 +20,9 @@ import type { Config } from "../config/env.js";
  * registry every other endpoint uses — this file adds no tool metadata of its own, only prose
  * around it.
  */
-export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp">>): string {
+export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp" | "billing" | "mcpRemoteEnabled">>, baseUrl?: string): string {
+  const billing = railAvailability(config);
+  const x402DocsUrl = baseUrl ? new URL(x402DocsPath, baseUrl).toString() : x402DocsPath;
   const mppCharge = Boolean(config.mpp?.enabled && config.mpp.modes.includes("charge"));
   const mppSession = Boolean(config.mpp?.enabled && config.mpp.modes.includes("session"));
   const toolLines = capabilities.map(c => {
@@ -27,6 +33,7 @@ export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network">
       `When to use: ${c.whenToUse}`,
       `Price: $${price} ${c.currency} per call.`,
       `API key route: POST /api/v1${c.path}  (header: X-API-Key)`,
+      ...(billing.billing ? [`Credits route: POST /api/v1${c.path}  (header: Authorization: Bearer raf_live_… — paid from ${[billing.subscription ? "subscription allowance" : "", billing.apiCredits ? "prepaid API credits" : ""].filter(Boolean).join(" / ")})`] : []),
       `x402 route:    POST ${x402BasePath}${c.path}  (no account — pay per call on-chain)`,
       ...(config.l402Enabled ? [`L402 route:    POST ${l402BasePath}${c.path}  (no account — pay per call over Lightning)`] : []),
       ...(mppCharge ? [`MPP charge:    POST ${mppBasePath}/charge/${c.name}  (no account — one-time Machine Payments Protocol payment)`] : []),
@@ -55,9 +62,9 @@ export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network">
 
   const roadmapLines = plannedCapabilities.map(p => `- ${p.name}: ${p.description} (not yet implemented)`).join("\n");
 
-  return `# Rafid Property Intelligence
+  return `# ${PLATFORM_NAME}
 
-> Property and facility intelligence tools built for autonomous AI agents. Discover a
+> ${PLATFORM_DESCRIPTION} Discover a
 > capability, pay per call over x402 (or authenticate with an API key), execute, get a
 > structured JSON result. This is a calculator over the numbers you send it, not a source of
 > live market data, and not investment advice. All monetary property inputs/outputs are OMR;
@@ -79,8 +86,12 @@ ${toolLines}
 ## Payment (x402)
 
 ${config.x402Enabled
-  ? `x402 pay-per-call is enabled on this deployment (network: ${config.x402Network}). Call any ${x402BasePath}/... route without payment first to receive an HTTP 402 with machine-readable payment requirements (price, network, asset, receiving address), then retry with a valid X-PAYMENT header. See GET ${x402BasePath} for terms and GET ${x402BasePath}/status for live, factual enforcement status.`
+  ? `x402 pay-per-call is enabled on this deployment (network: ${config.x402Network}). Call any ${x402BasePath}/... route without payment first to receive an HTTP 402. Parse the standards-compatible PAYMENT-REQUIRED header for the exact requirement; the JSON body exposes guidanceVersion/paymentGuidanceVersion and nextAction.type=pay_and_retry with retrySameBody=true, and links to ${x402DocsUrl}. Then pay and retry the same method, URL and JSON body with X-PAYMENT. See GET ${x402BasePath} for terms and GET ${x402BasePath}/status for live, factual enforcement status.`
   : `x402 pay-per-call is not enabled on this deployment. Use the X-API-Key routes under /api/v1 instead. See GET ${x402BasePath} for current status.`}
+
+## Paid execution routing
+
+For paid tool usage, call the tool's x402Endpoint (POST /api/v1/x402/<tool-path>) and complete the HTTP 402 payment challenge. Do not use the free remote MCP /mcp transport as a paid execution path: MCP is for discovery/compatibility and its calls do not produce x402 revenue.
 
 ## Payment (L402 / Lightning)
 
@@ -94,7 +105,20 @@ ${config.mpp?.enabled
   ? `MPP is enabled on this deployment (modes: ${config.mpp.modes.join(", ")}; Tempo network: ${config.mpp.tempo.network}). It uses the HTTP "Payment" authentication scheme: an unpaid request returns HTTP 402 with WWW-Authenticate: Payment challenges; pay one with an MPP client (e.g. the mppx SDK) and retry with Authorization: Payment <credential>. Successful responses carry a Payment-Receipt header.${mppCharge ? ` Charge mode — POST ${mppBasePath}/charge/{tool}: one payment buys one successful call (methods: ${config.mpp.chargeMethods.map(m => m + "/charge").join(", ")}); invalid input is rejected before any payment, and a payment is only settled after the call succeeds.` : ""}${mppSession ? ` Session mode — POST ${mppBasePath}/sessions with {"maxBudget": <USD>, "currency": "USD", "allowedTools": [...]} returns a 402 to open a Tempo payment channel whose deposit is the budget; then POST ${mppBasePath}/sessions/{sessionId}/tools/{tool} with an Idempotency-Key header and a voucher credential per call. Each successful call is metered at the tool's catalog price; the server refuses (before executing) any call that would exceed the remaining budget; GET ${mppBasePath}/sessions/{sessionId} returns spend and per-tool usage; POST ${mppBasePath}/sessions/{sessionId}/close stops the session and settles exactly the metered spend on-chain (the rest of the deposit returns to the payer).` : ""} See GET ${mppBasePath} for terms and GET ${mppBasePath}/status for live status.`
   : `MPP (Machine Payments Protocol) is not enabled on this deployment. See GET ${mppBasePath}/status for current status.`}
 
-No account, signup or dashboard is required for any access model.
+${billing.billing
+  ? `## Payment (Rafid API key: ${[billing.apiCredits ? "prepaid API credits" : "", billing.subscription ? "subscription allowance" : ""].filter(Boolean).join(" + ")})
+
+For agents without a crypto wallet. Send Authorization: Bearer raf_live_<key> to POST /api/v1/<tool-path>;
+the tool's listed USD price is deducted automatically${billing.subscription ? " — first from the account's monthly subscription allowance" : ""}${billing.apiCredits ? (billing.subscription ? ", then from its prepaid credit balance" : " from the account's prepaid credit balance") : ""}.
+Send an Idempotency-Key header so a retried call is never charged twice. X-Rafid-Payment-Method
+(auto | credits | subscription | x402 | l402 | mpp) forces one rail; naming any other rail never
+charges the API key. Insufficient balance returns HTTP 402 insufficient_credits with the price, the
+balance and the other enabled payment options. Balance: GET ${accountBasePath}/balance, usage: GET ${accountBasePath}/usage,
+transactions: GET ${accountBasePath}/transactions (same Bearer key).${config.mcpRemoteEnabled ? ` MCP clients: connect to ${mcpCreditsPath} with the same
+Authorization header — paid tools/call requests are billed to the account; direct priced tools/call requests on /mcp return HTTP 402 with /mcp/credits as the payment path.` : ""}
+
+No account or signup is required for x402 / L402 / MPP; API-key billing needs an account.`
+  : "No account, signup or dashboard is required for any access model."}
 
 ## Free Preview
 
@@ -112,6 +136,7 @@ above for which capabilities support it, or GET /api/v1/capabilities' \`preview\
 - GET /.well-known/ai-plugin.json — OpenAI-plugin-style manifest
 - GET /.well-known/agent.json — A2A-style Agent Card
 - GET /api/v1/capabilities — machine-first capability registry (schemas, pricing, when to use)
+- GET ${paymentMethodsPath} — every enabled payment method and how to select it
 - GET /openapi.json — full OpenAPI 3.1 document
 
 ## Planned tools (not yet implemented — do not call these)

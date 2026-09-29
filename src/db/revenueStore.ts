@@ -42,7 +42,10 @@ export class PostgresRevenueLedger implements RevenueLedger {
         error_reason text,
         payment_verified_at timestamptz NOT NULL,
         settled_at timestamptz,
-        dedupe_key text NOT NULL,
+      dedupe_key text NOT NULL,
+        reconciliation_source text,
+        reconciled_at timestamptz,
+        audit_metadata jsonb,
         created_at timestamptz NOT NULL DEFAULT now()
       )`
     ).then(() => this.pool.query(
@@ -66,6 +69,11 @@ export class PostgresRevenueLedger implements RevenueLedger {
            ALTER TABLE rafid_x402_settlements ALTER COLUMN amount_decimal TYPE numeric(24,10);
          END IF;
        END $$`
+    )).then(() => this.pool.query(
+      `ALTER TABLE rafid_x402_settlements
+         ADD COLUMN IF NOT EXISTS reconciliation_source text,
+         ADD COLUMN IF NOT EXISTS reconciled_at timestamptz,
+         ADD COLUMN IF NOT EXISTS audit_metadata jsonb`
     )).then(() => undefined);
   }
 
@@ -75,14 +83,16 @@ export class PostgresRevenueLedger implements RevenueLedger {
       `INSERT INTO rafid_x402_settlements(
         request_id, tool_name, capability_name, amount_atomic, amount_decimal, amount_source,
         currency, network, asset, payer_address, pay_to_address, transaction_hash, status,
-        facilitator, error_reason, payment_verified_at, settled_at, dedupe_key, created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+        facilitator, error_reason, payment_verified_at, settled_at, dedupe_key,
+        reconciliation_source, reconciled_at, audit_metadata, created_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
       ON CONFLICT (dedupe_key) DO NOTHING`,
       [
         input.requestId, input.toolName, input.capabilityName, input.amountAtomic, input.amountDecimal,
         input.amountSource, input.currency, input.network, input.asset, input.payerAddress,
         input.payToAddress, input.transactionHash, input.status, input.facilitator, input.errorReason,
-        input.paymentVerifiedAt, input.settledAt, input.dedupeKey, input.createdAt ?? new Date().toISOString()
+        input.paymentVerifiedAt, input.settledAt, input.dedupeKey, input.reconciliationSource ?? null,
+        input.reconciledAt ?? null, input.auditMetadata ?? null, input.createdAt ?? new Date().toISOString()
       ]
     );
   }
@@ -129,5 +139,8 @@ function rowToSettlement(r: Record<string, unknown>): RevenueSettlement {
     paymentVerifiedAt: (r.payment_verified_at as Date).toISOString(),
     settledAt: r.settled_at === null ? null : (r.settled_at as Date).toISOString(),
     dedupeKey: r.dedupe_key as string, createdAt: (r.created_at as Date).toISOString()
+    , reconciliationSource: r.reconciliation_source === "onchain" ? "onchain" : undefined,
+    reconciledAt: r.reconciled_at === null ? undefined : (r.reconciled_at as Date).toISOString(),
+    auditMetadata: (r.audit_metadata as Record<string, string> | null) ?? undefined
   };
 }

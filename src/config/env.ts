@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { privateKeyToAccount } from "viem/accounts";
 import { loadMppConfig, MppConfigError } from "../billing/mpp/config.js";
+import { loadBillingConfig } from "../billing/unified/config.js";
+import { loadExternalPaymentsConfig } from "../billing/external/config.js";
 const evmAddress = /^0x[0-9a-fA-F]{40}$/;
 const caip2Network = /^[-a-z0-9]{3,8}:[-a-zA-Z0-9]{1,32}$/;
 const envSchema = z.object({
@@ -37,7 +39,7 @@ const envSchema = z.object({
   L402_BTC_USD_FALLBACK: z.string().default(""),
   // Remote MCP: a Streamable HTTP transport at /mcp, mounted only when this is true, sharing
   // the exact same capability registry/service layer/tool schemas as local stdio (src/mcp.ts).
-  MCP_REMOTE_ENABLED: z.enum(["true", "false"]).default("true"),
+  MCP_REMOTE_ENABLED: z.enum(["true", "false"]).default("false"),
   // Discovery metadata (ai-plugin.json): left blank by default rather than fabricated. See
   // src/api/manifest.ts.
   RAFID_LOGO_URL: z.string().default(""), RAFID_CONTACT_EMAIL: z.string().default(""), RAFID_LEGAL_INFO_URL: z.string().default(""),
@@ -61,7 +63,32 @@ const envSchema = z.object({
   ADMIN_SESSION_SECRET: z.string().default(""),
   ADMIN_SESSION_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
   ADMIN_LOGIN_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1000).default(10),
-  ADMIN_LOGIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).max(3600000).default(15 * 60 * 1000)
+  ADMIN_LOGIN_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).max(3600000).default(15 * 60 * 1000),
+  // Free Preview hardening (src/preview/): a dedicated, isolated rate-limit budget so preview
+  // traffic can never starve paid-quota headroom; see src/preview/rateLimit.ts.
+  PREVIEW_RATE_LIMIT_PER_MINUTE: z.coerce.number().int().min(1).max(100000).default(60),
+  PREVIEW_RATE_LIMIT_PER_HOUR: z.coerce.number().int().min(1).max(1000000).default(300),
+  // Centralized cache TTL override (seconds) — unset uses the per-capability defaults in
+  // src/preview/cache.ts (TTL_SECONDS_BY_CAPABILITY). Caching itself is not mandatory: preview
+  // routes work with no cache configured at all.
+  PREVIEW_CACHE_TTL_SECONDS: z.coerce.number().int().min(1).max(86400).optional(),
+  // Preview -> paid conversion attribution window (hours); see src/preview/analytics.ts.
+  PREVIEW_CONVERSION_WINDOW_HOURS: z.coerce.number().int().min(1).max(720).default(24),
+  // HMAC secret for preview cache-key/fingerprint hashing (src/preview/fingerprint.ts). Optional:
+  // falls back to a plain SHA-256 digest (still never raw input) when unset.
+  PREVIEW_FINGERPRINT_SECRET: z.string().optional(),
+  WEBSITE_DOWNLOAD_MAX_MB: z.coerce.number().int().min(1).max(1024).default(100),
+  WEBSITE_DOWNLOAD_MAX_FILES: z.coerce.number().int().min(1).max(10000).default(2000),
+  WEBSITE_DOWNLOAD_TIMEOUT_MS: z.coerce.number().int().min(5000).max(900000).default(120000),
+  WEBSITE_DOWNLOAD_MAX_DEPTH: z.coerce.number().int().min(0).max(10).default(3),
+  WEBSITE_DOWNLOAD_MAX_REDIRECTS: z.coerce.number().int().min(0).max(10).default(0),
+  WEBSITE_DOWNLOAD_STORAGE_DIR: z.string().default(".data/website-downloads")
+  ,MONITORING_CRON_SECRET: z.string().default(""),
+  MPT_BASE_URL: z.string().default(""),
+  MPT_API_KEY: z.string().default(""),
+  MPT_TIMEOUT_MS: z.coerce.number().int().min(5000).max(3600000).default(900000),
+  MPT_POLL_INTERVAL_MS: z.coerce.number().int().min(250).max(30000).default(2000),
+  MPT_ENABLED: z.enum(["true", "false"]).default("false")
 });
 /** Networks the free public x402.org facilitator actually settles for the EVM "exact" scheme.
  *  Anything else (Base mainnet included) requires an authenticated Coinbase Developer
@@ -159,7 +186,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options = { req
     if (error instanceof MppConfigError) throw new Error(error.message);
     throw error;
   }
-  return { port: e.PORT, nodeEnv: e.NODE_ENV, apiKeys, authMode: e.AUTH_MODE, databaseUrl: e.DATABASE_URL, logLevel: e.LOG_LEVEL,
+  // Unified billing (API keys, prepaid API credits, subscriptions) — inert by default; parsed and
+  // validated in billing/unified/config.ts, failing closed like every rail above.
+  const billing = loadBillingConfig(env, { nodeEnv: e.NODE_ENV, databaseUrl: e.DATABASE_URL });
+  // External collection rails (Stripe Checkout / USDC on Base) that fund unified billing's
+  // prepaid credits from outside this codebase — inert by default, like every rail above; parsed
+  // and validated in billing/external/config.ts. Independent of `billing.enabled` at the config
+  // level (a deployment could theoretically configure Stripe/USDC before turning on
+  // API_CREDITS_ENABLED), but there is nothing to fund unless unified billing prepaid credits are
+  // also enabled — see app.ts's wiring, which only mounts these routes when both are true.
+  const externalPayments = loadExternalPaymentsConfig(env, { nodeEnv: e.NODE_ENV, databaseUrl: e.DATABASE_URL });
+  return { port: e.PORT, nodeEnv: e.NODE_ENV, apiKeys, authMode: e.AUTH_MODE, databaseUrl: e.DATABASE_URL, logLevel: e.LOG_LEVEL, monitoringCronSecret: e.MONITORING_CRON_SECRET,
     x402Enabled, x402Network: e.X402_NETWORK, x402WalletAddress: e.X402_WALLET_ADDRESS, x402FacilitatorUrl: e.X402_FACILITATOR_URL,
     cdpApiKeyId: e.CDP_API_KEY_ID, cdpApiKeySecret: e.CDP_API_KEY_SECRET, cdpConfigured,
     l402Enabled, l402Network: e.L402_NETWORK, l402Backend: e.L402_BACKEND,
@@ -174,6 +211,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env, options = { req
     adminEnabled, adminUsername: e.ADMIN_USERNAME, adminPasswordHash: e.ADMIN_PASSWORD_HASH, adminSessionSecret: e.ADMIN_SESSION_SECRET,
     adminSessionTtlMinutes: e.ADMIN_SESSION_TTL_MINUTES,
     adminLoginRateLimitMax: e.ADMIN_LOGIN_RATE_LIMIT_MAX, adminLoginRateLimitWindowMs: e.ADMIN_LOGIN_RATE_LIMIT_WINDOW_MS,
-    mpp };
+    previewRateLimitPerMinute: e.PREVIEW_RATE_LIMIT_PER_MINUTE, previewRateLimitPerHour: e.PREVIEW_RATE_LIMIT_PER_HOUR,
+    previewCacheTtlSeconds: e.PREVIEW_CACHE_TTL_SECONDS ?? null, previewConversionWindowHours: e.PREVIEW_CONVERSION_WINDOW_HOURS,
+    previewFingerprintSecret: e.PREVIEW_FINGERPRINT_SECRET ?? null,
+    websiteDownload: { maxMb: e.WEBSITE_DOWNLOAD_MAX_MB, maxFiles: e.WEBSITE_DOWNLOAD_MAX_FILES, timeoutMs: e.WEBSITE_DOWNLOAD_TIMEOUT_MS, maxDepth: e.WEBSITE_DOWNLOAD_MAX_DEPTH, maxRedirects: e.WEBSITE_DOWNLOAD_MAX_REDIRECTS, storageDir: e.WEBSITE_DOWNLOAD_STORAGE_DIR },
+    moneyPrinterTurbo: { baseUrl: e.MPT_BASE_URL, apiKey: e.MPT_API_KEY, timeoutMs: e.MPT_TIMEOUT_MS, pollIntervalMs: e.MPT_POLL_INTERVAL_MS, enabled: e.MPT_ENABLED === "true" },
+    mpp, billing, externalPayments };
 }
 export type Config = ReturnType<typeof loadConfig>;

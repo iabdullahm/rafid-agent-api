@@ -1,0 +1,6 @@
+{
+  "websiteUrl": "https://stripe.com",
+  "maxPages": 10,
+  "maxDepth": 1,
+  "sameDomainOnly": true
+}
