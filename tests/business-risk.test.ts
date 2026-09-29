@@ -709,7 +709,9 @@ test("27. MCP registration: business_risk_score is an MCP tool with the registry
     assert.equal(called.status, 402);
     assert.equal((await called.json() as any).error.code, -32002);
     const invalid = await rpc(3, "tools/call", { name: "business_risk_score", arguments: { country: "GB" } });
-    assert.equal(invalid.error.code, -32002);
+    assert.equal(invalid.error, undefined);
+    assert.equal(invalid.result?.isError, true);
+    assert.match(invalid.result?.content?.[0]?.text ?? "", /INVALID_INPUT/);
   });
 });
 
