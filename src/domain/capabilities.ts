@@ -64,7 +64,7 @@ import { websiteAudit, previewWebsiteAudit } from "../website-audit/service.js";
 import { websiteDownload, previewWebsiteDownload } from "../website-download/service.js";
 import { websiteDownloadInput } from "../schemas/websiteDownloadInputs.js";
 import { websiteDownloadOutput } from "../schemas/websiteDownloadOutputs.js";
-import { supplierDueDiligenceReportInput, supplierDueDiligenceReportOutput, supplierDueDiligenceReport, companyRiskReportInput, companyRiskReportOutput, companyRiskReport, propertyInvestmentReportInput, propertyInvestmentReportOutput, propertyInvestmentReport, portfolioScreenInput, portfolioScreenOutput, portfolioScreen, procurementVendorShortlistInput, procurementVendorShortlistOutput, procurementVendorShortlist, companyRiskBatchInput, companyRiskBatchOutput, companyRiskBatch } from "../workflows/compound.js";
+import { supplierDueDiligenceReportInput, supplierDueDiligenceReportOutput, supplierDueDiligenceReport, companyRiskReportInput, companyRiskReportOutput, companyRiskReport, companyDueDiligencePackInput, companyDueDiligencePackOutput, companyDueDiligencePack, previewCompanyDueDiligencePack, propertyInvestmentReportInput, propertyInvestmentReportOutput, propertyInvestmentReport, portfolioScreenInput, portfolioScreenOutput, portfolioScreen, procurementVendorShortlistInput, procurementVendorShortlistOutput, procurementVendorShortlist, companyRiskBatchInput, companyRiskBatchOutput, companyRiskBatch } from "../workflows/compound.js";
 import { socialVideoGenerateInput, newsVideoGenerateInput, productPromoVideoInput } from "../schemas/videoGenerationInputs.js";
 import { videoGenerationOutput } from "../schemas/videoGenerationOutputs.js";
 import { generateSocialVideo, generateNewsVideo, generateProductPromoVideo, previewSocialVideo, previewNewsVideo, previewProductPromoVideo } from "../video-generation/service.js";
@@ -1512,6 +1512,19 @@ export const capabilities = [
     exampleOutput: { workflow: "supplier_due_diligence_report", result: {}, limitations: ["Screening is decision support, not KYC/AML or an automated vendor-approval decision."] },
     execute: supplierDueDiligenceReport, price: 1.25, currency: CURRENCY, paymentProtocol: "x402", estimatedLatencyMs: 8000, returns: "structured_report", idempotent: true, sideEffects: false,
     limitations: ["Screening is decision support, not KYC/AML or an automated vendor-approval decision.", "Unavailable sources and demo-only evidence remain explicitly labeled by the underlying supplier check."]
+  } satisfies AgentCapability,
+  {
+    name: "company_due_diligence_pack" as const, path: "/risk/company-due-diligence-pack", category: "risk_intelligence",
+    description: "Run one bundled company due-diligence purchase that returns the full due-diligence report plus the underlying business-risk and reputation outputs with a compact decision summary.",
+    whenToUse: "Use when an agent needs a single paid counterparty decision package instead of orchestrating company due diligence, business risk scoring and reputation checks separately.",
+    useCases: ["company due diligence bundle", "supplier onboarding pack", "vendor risk package", "counterparty screening", "procurement decision support"],
+    input: companyDueDiligencePackInput, output: companyDueDiligencePackOutput,
+    example: { company: "Example Trading Ltd", domain: "example.com", country: "GB", purpose: "supplier_onboarding", depth: "standard" },
+    exampleOutput: { workflow: "company_due_diligence_pack", includedCapabilities: ["company_due_diligence", "business_risk_score", "company_reputation_check"], company: { name: "Example Trading Ltd", domain: "example.com", country: "GB", registrationNumber: null }, decisionSummary: { riskScore: 18, riskLevel: "low", confidence: 0.88, recommendation: "proceed_with_standard_checks", action: "continue_onboarding", requiresHumanReview: false }, dueDiligence: {}, businessRisk: {}, reputation: {}, limitations: ["This bundle is decision support, not a legal, KYC/AML, credit or compliance determination.", "A clear or low-risk result is not a guarantee; provider coverage, confidence and unavailable checks must be reviewed.", "Potential sanctions or identity matches require source verification and human review."] },
+    execute: companyDueDiligencePack, preview: previewCompanyDueDiligencePack,
+    price: 2.50, currency: CURRENCY, paymentProtocol: "x402", estimatedLatencyMs: 15000, returns: "bundled_due_diligence_report",
+    idempotent: true, sideEffects: false,
+    limitations: ["The bundle reuses one underlying due-diligence execution; it does not duplicate provider calls merely to inflate the report.", "Provider coverage and confidence remain those reported by the underlying due-diligence checks.", "Potential sanctions or identity matches require source verification and human review."]
   } satisfies AgentCapability,
   {
     name: "company_risk_report" as const, path: "/risk/company-risk-report", category: "risk_intelligence",
