@@ -130,6 +130,30 @@ export function createRemoteMcpHandler(
       const toolName = typeof params?.name === "string" ? params.name : null;
       const capability = toolName ? capabilities.find(c => c.name === toolName) : undefined;
       if (capability) {
+        const parsed = capability.input.safeParse(params?.arguments ?? {});
+        if (!parsed.success) {
+          recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: capability.name, success: false, durationMs: 0, client });
+          recordToolInvocation(analyticsRepository, { toolName: capability.name, channel: "mcp-remote", success: false, durationMs: 0, dataSource: null, client });
+          const id = (req.body as { id?: string | number | null } | undefined)?.id ?? null;
+          res.status(200).json({
+            jsonrpc: "2.0",
+            id,
+            result: {
+              isError: true,
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  success: false,
+                  error: {
+                    code: "INVALID_INPUT",
+                    message: "Tool arguments do not match the capability input schema."
+                  }
+                })
+              }]
+            }
+          });
+          return;
+        }
         const priceUsd = billingService.getToolPrice(capability.name as CapabilityName);
         if (priceUsd > 0 && !options.paidConversionEnabled) {
           const id = (req.body as { id?: string | number | null } | undefined)?.id ?? null;
@@ -148,11 +172,6 @@ export function createRemoteMcpHandler(
             }
           });
           return;
-        }
-        const parsed = capability.input.safeParse(params?.arguments ?? {});
-        if (!parsed.success) {
-          recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: capability.name, success: false, durationMs: 0, client });
-          recordToolInvocation(analyticsRepository, { toolName: capability.name, channel: "mcp-remote", success: false, durationMs: 0, dataSource: null, client });
         }
       }
     }
