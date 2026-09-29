@@ -652,7 +652,8 @@ test("registry + discovery: every surface lists invoice_anomaly_check with price
     assert.equal(called.result?.structuredContent?.payment?.retrySameBody, true);
     assert.equal(called.result?.structuredContent?.nextAction?.type, "pay_and_retry");
     const bad = await rpc(3, "tools/call", { name: "invoice_anomaly_check", arguments: { invoice: { total: 1, invoiceDate: "nope" } } });
-    assert.ok(bad.result?.isError || bad.error);
+    assert.equal(bad.error?.code, -32602);
+    assert.equal(bad.error?.data?.code, "INVALID_INPUT");
     assert.ok(!JSON.stringify(bad).includes("at runInvoiceAnomalyCheck"), "no stack traces");
   });
 });
