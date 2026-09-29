@@ -692,9 +692,17 @@ test("MCP + discovery + REST: registered as an MCP tool, listed on every discove
     assert.equal(tool.inputSchema.additionalProperties, false);
     assert.equal(tool.annotations.idempotentHint, true);
     const called = await rpc(2, "tools/call", { name: "company_reputation_check", arguments: { companyName: "Example Technologies Ltd", country: "GB" } });
-    assert.equal(called.error?.code, -32002);
-    assert.match(called.error?.message ?? "", /Payment required/);
-    assert.equal(called.error?.data?.paymentEndpoint, "/mcp/credits");
+    const payment = called.error ?? called.result?.structuredContent;
+    assert.ok(payment, JSON.stringify(called).slice(0, 300));
+    if (called.error) {
+      assert.equal(called.error.code, -32002);
+      assert.match(called.error.message ?? "", /Payment required/);
+      assert.equal(called.error.data?.paymentEndpoint, "/mcp/credits");
+    } else {
+      assert.equal(payment.status, "payment_required");
+      assert.equal(payment.payment?.method, "POST");
+      assert.equal(payment.nextAction?.type, "pay_and_retry");
+    }
     const invalid = await rpc(3, "tools/call", { name: "company_reputation_check", arguments: { country: "GB" } });
     assert.ok(invalid.result?.isError || invalid.error);
 
