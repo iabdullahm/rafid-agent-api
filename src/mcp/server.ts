@@ -35,12 +35,15 @@ export function createMcpServer(logger: Logger = () => {}, options: McpServerOpt
       let status = 200;
       let dataSource: string | null = null;
       try {
+        // Validate before any paid handoff. Invalid calls must never be charged or instructed
+        // to pay, and every transport should preserve the same capability input contract.
+        const validatedInput = c.input.parse(input);
         if (options.paidConversionEnabled && isMcpPaidConversionTool(c.name)) {
           status = 402;
           const paymentRequired = buildMcpPaymentRequired(c, requestId, options.publicBaseUrl);
           return { content: [{ type: "text" as const, text: JSON.stringify(paymentRequired) }], structuredContent: paymentRequired };
         }
-        const executed = options.execute ? await options.execute(c, input) : { data: await c.execute(input), meta: undefined };
+        const executed = options.execute ? await options.execute(c, validatedInput) : { data: await c.execute(validatedInput), meta: undefined };
         const data = executed.data;
         // Analytics only (never changes the response): the same real-vs-demo classification
         // every REST/x402 call site also computes — see analytics/dataSource.ts's doc comment.
