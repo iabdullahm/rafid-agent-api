@@ -186,3 +186,41 @@ test("USAGE_REPOSITORY=postgres requires DATABASE_URL", () => {
   assert.throws(() => loadConfig({ RAFID_API_KEYS: key, USAGE_REPOSITORY: "postgres" }), /DATABASE_URL is required/);
   assert.doesNotThrow(() => loadConfig({ RAFID_API_KEYS: key, USAGE_REPOSITORY: "postgres", DATABASE_URL: "postgresql://localhost/rafid" }));
 });
+
+
+test("remote MCP converts premium tool calls into an x402 paid handoff when x402 is enabled, while free tools still execute", async () => {
+  const config = loadConfig({
+    RAFID_API_KEYS: key,
+    X402_ENABLED: "true",
+    X402_NETWORK: "eip155:84532",
+    X402_WALLET_ADDRESS: "0x1234567890123456789012345678901234567890"
+  });
+  await withServer(config, async base => {
+    const premium = capabilities.find(c => c.name === "business_risk_score");
+    assert.ok(premium, "business_risk_score capability must exist");
+    const paid = await rpc(base, "tools/call", { name: premium.name, arguments: premium.example });
+    assert.equal(paid.status, 200);
+    assert.equal(paid.body.error, undefined);
+    assert.ok(!paid.body.result.isError);
+    assert.equal(paid.body.result.structuredContent.status, "payment_required");
+    assert.equal(paid.body.result.structuredContent.tool, premium.name);
+    assert.equal(paid.body.result.structuredContent.price.amount, premium.price);
+    assert.equal(paid.body.result.structuredContent.price.currency, premium.currency);
+    assert.equal(paid.body.result.structuredContent.price.protocol, "x402");
+    assert.equal(paid.body.result.structuredContent.payment.method, "POST");
+    assert.equal(paid.body.result.structuredContent.payment.retrySameBody, true);
+    assert.equal(paid.body.result.structuredContent.nextAction.type, "pay_and_retry");
+    assert.equal(
+      paid.body.result.structuredContent.payment.endpoint,
+      `https://api.rafidsystem.com/api/v1/x402${premium.path}`
+    );
+
+    const free = capabilities.find(c => c.name === "analyze_property");
+    assert.ok(free, "analyze_property capability must exist");
+    const freeCall = await rpc(base, "tools/call", { name: free.name, arguments: free.example });
+    assert.equal(freeCall.body.error, undefined);
+    assert.ok(!freeCall.body.result.isError);
+    assert.notEqual(freeCall.body.result.structuredContent.status, "payment_required");
+    assert.deepEqual(freeCall.body.result.structuredContent, await free.execute(free.example));
+  });
+});
