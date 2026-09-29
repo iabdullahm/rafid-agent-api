@@ -1,9 +1,9 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.iabdullahm/rafid-agent-api",
-  "title": "Rafid Property Intelligence",
-  "description": "Oman property intelligence for AI agents: yield, comparables, Al Mouj sales data, x402 pay-per-call.",
-  "version": "0.1.0",
+  "title": "Rafid Agent Intelligence",
+  "description": "Decision intelligence for AI agents: due diligence, risk, property, documents, finance and more.",
+  "version": "0.1.2",
   "websiteUrl": "https://api.rafidsystem.com",
   "repository": {
     "url": "https://github.com/iabdullahm/rafid-agent-api",

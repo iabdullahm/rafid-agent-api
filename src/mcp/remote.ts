@@ -67,7 +67,12 @@ export function buildMcpStatus(config: Pick<Config, "mcpRemoteEnabled">) {
  * client attribution threaded through via mcpClientContext — see analytics/context.ts's doc
  * comment for why that indirection is necessary for a shared, stateless server instance.
  */
-export function createRemoteMcpHandler(billingService: BillingService, baseLogger: Logger, analyticsRepository: AnalyticsRepository): RequestHandler {
+export function createRemoteMcpHandler(
+  billingService: BillingService,
+  baseLogger: Logger,
+  analyticsRepository: AnalyticsRepository,
+  options: { paidConversionEnabled?: boolean; publicBaseUrl?: string } = {}
+): RequestHandler {
   const logger: Logger = event => {
     baseLogger({ ...event, endpoint: mcpRemotePath });
     if (event.toolName) {
@@ -87,7 +92,7 @@ export function createRemoteMcpHandler(billingService: BillingService, baseLogge
       recordToolInvocation(analyticsRepository, { toolName: event.toolName, channel: "mcp-remote", success, durationMs: event.durationMs, dataSource: (event.dataSource ?? null) as DataSource | null, client });
     }
   };
-  const server = createMcpServer(logger);
+  const server = createMcpServer(logger, options);
   const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
   // start()/connect() do no real I/O for this transport (requests are handled per-call below,
   // not over a long-lived connection) — see WebStandardStreamableHTTPServerTransport's own doc
