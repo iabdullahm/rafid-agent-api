@@ -10,7 +10,7 @@ import { PLATFORM_NAME } from "../src/brand.js";
 import type { LogEvent } from "../src/utils/logging.js";
 const key = "test-only-not-a-real-credential-12345";
 const config = loadConfig({ RAFID_API_KEYS: key + ",test-only-second-key-123456789", LOG_LEVEL: "silent" });
-const providerUnavailable = new Set(["website_download", "ai_call_agent", "voice_lead_qualifier", "appointment_call_agent", "social_video_generate", "news_video_generate", "product_promo_video"]);
+const providerUnavailable = new Set(["ai_call_agent", "voice_lead_qualifier", "appointment_call_agent", "social_video_generate", "news_video_generate", "product_promo_video"]);
 test("configuration fails closed and validates flags", () => {
   for (const env of [{}, { RAFID_API_KEYS: "short" }, { RAFID_API_KEYS: key, PORT: "bad" }, { RAFID_API_KEYS: key, X402_ENABLED: "true" }, { RAFID_API_KEYS: key, X402_ENABLED: "yes" }]) assert.throws(() => loadConfig(env));
   assert.equal(loadConfig({}, { requireApiKeys: false }).apiKeys.length, 0);
@@ -48,7 +48,13 @@ test("REST: auth, all services, discovery, errors, and log redaction", async t =
         assert.equal(response.status, 503);
         const unavailable = await response.json();
         assert.equal(unavailable.success, false);
-        assert.equal(unavailable.error.code === "WGET_NOT_AVAILABLE" || unavailable.error.code === "VOICE_PROVIDER_NOT_CONFIGURED" || unavailable.error.code === "VIDEO_ENGINE_UNAVAILABLE", true);
+        assert.equal(unavailable.error.code === "VOICE_PROVIDER_NOT_CONFIGURED" || unavailable.error.code === "VIDEO_ENGINE_UNAVAILABLE", true);
+        continue;
+      }
+      if (c.name === "website_download" && response.status === 503) {
+        const unavailable = await response.json();
+        assert.equal(unavailable.success, false);
+        assert.equal(unavailable.error.code, "WGET_NOT_AVAILABLE");
         continue;
       }
       assert.equal(response.status, 200);
