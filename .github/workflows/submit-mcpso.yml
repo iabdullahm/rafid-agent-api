@@ -1,0 +1,25 @@
+name: Submit Rafid to mcp.so
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/submit-mcpso.yml
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Submit Rafid repository to mcp.so
+        shell: bash
+        run: |
+          set -euo pipefail
+          body='{"url":"https://github.com/iabdullahm/rafid-agent-api","avatar_url":"https://avatars.githubusercontent.com/u/26213387?v=4"}'
+          status=$(curl -sS -o response.json -w "%{http_code}"             -X POST "https://mcp.so/api/submit-project"             -H "Content-Type: application/json"             --data "$body")
+          echo "HTTP status: $status"
+          cat response.json || true
+          test "$status" -ge 200 -a "$status" -lt 300
