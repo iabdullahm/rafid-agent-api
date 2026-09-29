@@ -5,6 +5,8 @@ import { companyReputationCheckInput } from "../schemas/companyReputationInputs.
 import { businessRiskScoreInput } from "../schemas/businessRiskInputs.js";
 import { companyReputationCheck } from "../services/companyReputationCheck.js";
 import { businessRiskScore } from "../services/businessRiskScore.js";
+import { companyDueDiligenceInput } from "../schemas/companyDueDiligenceInputs.js";
+import { companyDueDiligence, previewCompanyDueDiligenceCapability } from "../services/companyDueDiligence.js";
 import { omanPropertyInput } from "../schemas/omanInputs.js";
 import { propertySchema, compareSchema } from "../schemas/inputs.js";
 import { analyzeOmanProperty } from "../services/omanProperty.js";
@@ -28,6 +30,80 @@ export async function companyRiskReport(input: unknown) {
   const riskInput = businessRiskScoreInput.parse({ companyName: parsed.companyName, country: parsed.country, website: parsed.website, registrationNumber: parsed.registrationNumber, lei: parsed.lei, city: parsed.city, industry: parsed.industry, includeNews: parsed.includeNews, includeDigitalSignals: parsed.includeDigitalSignals });
   const [reputation, risk] = await Promise.all([companyReputationCheck(reputationInput), businessRiskScore(riskInput)]);
   return { workflow: "company_risk_report", result: { reputation, businessRisk: risk }, limitations: ["Risk signals are evidence-backed decision support, not a legal, compliance or transaction decision."] };
+}
+
+
+export const companyDueDiligencePackInput = companyDueDiligenceInput;
+export const companyDueDiligencePackOutput = z.strictObject({
+  workflow: z.literal("company_due_diligence_pack"),
+  includedCapabilities: z.tuple([
+    z.literal("company_due_diligence"),
+    z.literal("business_risk_score"),
+    z.literal("company_reputation_check")
+  ]),
+  company: z.object({
+    name: z.string(),
+    domain: z.string().nullable(),
+    country: z.string().nullable(),
+    registrationNumber: z.string().nullable()
+  }).strict(),
+  decisionSummary: z.object({
+    riskScore: z.number().int().min(0).max(100).nullable(),
+    riskLevel: z.enum(["low", "moderate", "high", "critical"]).nullable(),
+    confidence: z.number().min(0).max(1),
+    recommendation: z.string(),
+    action: z.string(),
+    requiresHumanReview: z.boolean()
+  }).strict(),
+  dueDiligence: z.unknown(),
+  businessRisk: z.unknown().nullable(),
+  reputation: z.unknown().nullable(),
+  limitations: z.array(z.string())
+}).strict();
+
+export async function companyDueDiligencePack(input: unknown) {
+  const parsed = companyDueDiligencePackInput.parse(input);
+  // company_due_diligence already runs business_risk_score and company_reputation_check
+  // internally against the shared provider/evidence pipeline. Reuse that single execution
+  // rather than paying provider latency/cost three times.
+  const dueDiligence = await companyDueDiligence(parsed) as any;
+  return {
+    workflow: "company_due_diligence_pack" as const,
+    includedCapabilities: ["company_due_diligence", "business_risk_score", "company_reputation_check"] as const,
+    company: dueDiligence.company,
+    decisionSummary: {
+      riskScore: dueDiligence.riskScore ?? null,
+      riskLevel: dueDiligence.riskLevel ?? null,
+      confidence: dueDiligence.confidence ?? 0,
+      recommendation: dueDiligence.recommendation,
+      action: dueDiligence.decision?.action ?? "insufficient_data",
+      requiresHumanReview: Boolean(dueDiligence.decision?.requiresHumanReview)
+    },
+    dueDiligence,
+    businessRisk: dueDiligence.businessRiskCheck?.success ? dueDiligence.businessRiskCheck.data ?? null : null,
+    reputation: dueDiligence.reputationCheck?.success ? dueDiligence.reputationCheck.data ?? null : null,
+    limitations: [
+      "This bundle is decision support, not a legal, KYC/AML, credit or compliance determination.",
+      "A clear or low-risk result is not a guarantee; provider coverage, confidence and unavailable checks must be reviewed.",
+      "Potential sanctions or identity matches require source verification and human review."
+    ]
+  };
+}
+
+export async function previewCompanyDueDiligencePack(input: unknown) {
+  const preview = await previewCompanyDueDiligenceCapability(input);
+  return {
+    ...preview,
+    capability: "company_due_diligence_pack",
+    preview: {
+      ...preview.preview,
+      signals: {
+        ...(preview.preview?.signals ?? {}),
+        includedCapabilities: ["company_due_diligence", "business_risk_score", "company_reputation_check"],
+        fullBundleIncludes: ["decisionSummary", "dueDiligence", "businessRisk", "reputation"]
+      }
+    }
+  };
 }
 
 const optionalFinancials = z.strictObject({
