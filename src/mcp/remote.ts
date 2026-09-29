@@ -50,9 +50,11 @@ export function buildMcpStatus(config: Pick<Config, "mcpRemoteEnabled">) {
  *
  * Errors: every registered tool already returns `publicError(error)` (see mcp/server.ts) rather
  * than a raw exception, so a validation failure or internal error never leaks internals to a
- * remote caller — identical to stdio. Usage: every tool call is additionally recorded through
- * the same UsageRepository as REST/x402 calls (`accessMode: "mcp-remote"`, `billableAmount: 0`
- * — remote MCP is not a paid channel in this phase), on top of the normal structured log line.
+ * remote caller — identical to stdio. Paid remote tools are payment-gated before the MCP server
+ * executes them: `/mcp` returns HTTP 402 with the price and `/mcp/credits` as the payment path.
+ * `preview_capability` and zero-priced tools remain available without payment. Successful tool
+ * calls are additionally recorded through the same UsageRepository as REST/x402 calls
+ * (`accessMode: "mcp-remote"`), on top of the normal structured log line.
  * Local stdio intentionally stays unmetered, as it always has: an MCP client's own OS user
  * launched that process directly, with no shared server resource to protect.
  *
@@ -121,9 +123,31 @@ export function createRemoteMcpHandler(billingService: BillingService, baseLogge
       const params = (req.body as { params?: { name?: unknown; arguments?: unknown } } | undefined)?.params;
       const toolName = typeof params?.name === "string" ? params.name : null;
       const capability = toolName ? capabilities.find(c => c.name === toolName) : undefined;
-      if (capability && !capability.input.safeParse(params?.arguments ?? {}).success) {
-        recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: capability.name, success: false, durationMs: 0, client });
-        recordToolInvocation(analyticsRepository, { toolName: capability.name, channel: "mcp-remote", success: false, durationMs: 0, dataSource: null, client });
+      if (capability) {
+        const priceUsd = billingService.getToolPrice(capability.name as CapabilityName);
+        if (priceUsd > 0) {
+          const id = (req.body as { id?: string | number | null } | undefined)?.id ?? null;
+          res.status(402).json({
+            jsonrpc: "2.0",
+            id,
+            error: {
+              code: -32002,
+              message: `Payment required to call ${capability.name}.`,
+              data: {
+                tool: capability.name,
+                price: priceUsd.toFixed(2),
+                currency: "USD",
+                paymentEndpoint: "/mcp/credits"
+              }
+            }
+          });
+          return;
+        }
+        const parsed = capability.input.safeParse(params?.arguments ?? {});
+        if (!parsed.success) {
+          recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: capability.name, success: false, durationMs: 0, client });
+          recordToolInvocation(analyticsRepository, { toolName: capability.name, channel: "mcp-remote", success: false, durationMs: 0, dataSource: null, client });
+        }
       }
     }
     void mcpClientContext.run(client, () =>

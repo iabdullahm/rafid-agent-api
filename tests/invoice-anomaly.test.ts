@@ -639,8 +639,9 @@ test("registry + discovery: every surface lists invoice_anomaly_check with price
     assert.deepEqual(mcpTool.inputSchema.required, ["invoice"]);
     assert.ok(mcpTool.outputSchema.properties.riskScore && mcpTool.outputSchema.properties.anomalies);
     const called = await rpc(2, "tools/call", { name: "invoice_anomaly_check", arguments: SCENARIOS.duplicate });
-    assert.ok(!called.result.isError, JSON.stringify(called).slice(0, 300));
-    assert.deepEqual(called.result.structuredContent, await run(SCENARIOS.duplicate), "MCP and the engine produce the same result");
+    assert.equal(called.error?.code, -32002, JSON.stringify(called).slice(0, 300));
+    assert.match(called.error?.message ?? "", /Payment required/i);
+    assert.equal(called.error?.data?.paymentEndpoint, "/mcp/credits");
     const bad = await rpc(3, "tools/call", { name: "invoice_anomaly_check", arguments: { invoice: { total: 1, invoiceDate: "nope" } } });
     assert.ok(bad.result?.isError || bad.error);
     assert.ok(!JSON.stringify(bad).includes("at runInvoiceAnomalyCheck"), "no stack traces");

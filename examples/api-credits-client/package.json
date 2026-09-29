@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Zero-dependency example: call a paid Rafid Agent API tool with a Rafid API key (prepaid credits / subscription allowance) and inspect the balance and ledger. Not part of the server.",
+  "description": "Zero-dependency example: call a paid Rafid Intelligence Network tool with a Rafid API key (prepaid credits / subscription allowance) and inspect the balance and ledger. Not part of the server.",
   "engines": { "node": ">=24" },
   "scripts": {
     "call": "node --env-file-if-exists=.env call-paid-tool.ts",

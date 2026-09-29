@@ -361,7 +361,7 @@ test("analyze_oman_property: OpenAPI documents it under both route families with
 });
 
 test("analyze_oman_property: reachable over REST with an API key and returns the exact service-layer result", async () => {
-  const config = loadConfig({ RAFID_API_KEYS: key });
+  const config = loadConfig({ RAFID_API_KEYS: key, MCP_REMOTE_ENABLED: "true" });
   await withServer(config, async base => {
     const response = await fetch(base + "/api/v1/oman/property/analyze", {
       method: "POST", headers: { "X-API-Key": key, "Content-Type": "application/json" }, body: JSON.stringify(capability.example)
@@ -375,7 +375,7 @@ test("analyze_oman_property: reachable over REST with an API key and returns the
 });
 
 test("analyze_oman_property: MCP tool registration matches the shared registry exactly (name, description, schemas) and executes identically to the REST route", async () => {
-  const config = loadConfig({ RAFID_API_KEYS: key });
+  const config = loadConfig({ RAFID_API_KEYS: key, MCP_REMOTE_ENABLED: "true" });
   await withServer(config, async base => {
     let id = 1;
     const rpc = async (method: string, params: unknown = {}) => {
@@ -394,12 +394,12 @@ test("analyze_oman_property: MCP tool registration matches the shared registry e
     assert.ok(tool.outputSchema);
 
     const called = await rpc("tools/call", { name: "analyze_oman_property", arguments: capability.example });
-    assert.equal(called.error, undefined);
-    assert.ok(!called.result.isError);
-    assert.deepEqual(called.result.structuredContent, await capability.execute(capability.example));
+    assert.equal(called.error?.code, -32002, JSON.stringify(called).slice(0, 300));
+    assert.match(called.error?.message ?? "", /Payment required/i);
+    assert.equal(called.error?.data?.paymentEndpoint, "/mcp/credits");
 
     const invalid = await rpc("tools/call", { name: "analyze_oman_property", arguments: { governorate: "Muscat" } });
-    assert.ok(invalid.result?.isError);
+    assert.equal(invalid.error?.code, -32002);
   });
 });
 

@@ -1,8 +1,8 @@
-# Rafid Agent API — x402 client example
+# Rafid Intelligence Network — x402 client example
 
-A small, standalone example client that demonstrates paying Rafid Agent API per call over the
+A small, standalone example client that demonstrates paying Rafid Intelligence Network per call over the
 [x402 protocol](https://www.x402.org/) — no account, no API key, just an on-chain USDC payment.
-It is not part of the Rafid Agent API server; it's a separate Node.js project you run locally
+It is not part of the Rafid Intelligence Network server; it's a separate Node.js project you run locally
 against the deployed API.
 
 It calls:
@@ -68,7 +68,7 @@ This runs the same unpaid check first (step 1 above), then:
 
 1. Refuses to continue if `X402_PAYER_PRIVATE_KEY` isn't set — nothing is sent.
 2. Shows a safety banner:
-   > You are about to make a real USDC payment on Base Mainnet to Rafid Agent API.
+   > You are about to make a real USDC payment on Base Mainnet to Rafid Intelligence Network.
 
    and asks you to type `PAY` (all caps) to continue. Anything else aborts with nothing sent.
    Set `X402_CONFIRM_MAINNET=true` in `.env` only if you want to skip this prompt (for a
@@ -85,7 +85,7 @@ from the server's own `PAYMENT-REQUIRED` response, read fresh on every run.
 
 ## How this maps to the two access models
 
-Rafid Agent API keeps two independent ways in: a traditional `X-API-Key` route
+Rafid Intelligence Network keeps two independent ways in: a traditional `X-API-Key` route
 (`/api/v1/property/analyze`) and this pay-per-call x402 route
 (`/api/v1/x402/property/analyze`). This example only exercises the x402 route — see the main
 project's README for the API-key route.
@@ -117,4 +117,4 @@ project's README for the API-key route.
 7. Watch the output: it prints the final API response (the calculated property metrics) and,
    if present, the settlement's transaction hash — look that transaction hash up on
    [BaseScan](https://basescan.org) to see the real on-chain USDC transfer.
-8. That's it — the first real Rafid Agent API x402 payment is complete.
+8. That's it — the first real Rafid Intelligence Network x402 payment is complete.

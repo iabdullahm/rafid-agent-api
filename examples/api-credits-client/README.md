@@ -1,6 +1,6 @@
 # API credits client example
 
-Pay for Rafid Agent API tools **without a crypto wallet**: a Rafid API key (`raf_live_…`) is
+Pay for Rafid Intelligence Network tools **without a crypto wallet**: a Rafid API key (`raf_live_…`) is
 charged each tool's listed USD price from its account's subscription allowance and/or prepaid
 credit balance. No dependencies — Node 24 runs the `.ts` files directly.
 

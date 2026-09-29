@@ -2,7 +2,7 @@ import { runResearchCompany } from "../intelligence/companyResearch/provider.js"
 import { runFindCompanies } from "../intelligence/companyDiscovery/provider.js";
 import { runAnalyzeCompanyRisk } from "../intelligence/risk/provider.js";
 import { researchCompanyInput } from "../schemas/intelligenceInputs.js";
-import { getIntelligenceLlmMode, getWebSearchProviderMode } from "../intelligence/config.js";
+import { getAnthropicApiKey, getIntelligenceLlmMode, getIntelligenceLlmModel, getTavilyApiKey, getWebSearchProviderMode } from "../intelligence/config.js";
 import type { CapabilityPreviewBody } from "../preview/types.js";
 
 /**
@@ -29,8 +29,8 @@ export async function analyzeCompanyRisk(input: unknown) { return runAnalyzeComp
  *  this deployment is even positioned to look them up. */
 export async function previewResearchCompany(rawInput: unknown): Promise<CapabilityPreviewBody> {
   const input = researchCompanyInput.parse(rawInput);
-  const webSearchConfigured = getWebSearchProviderMode() !== "none";
-  const llmConfigured = getIntelligenceLlmMode() !== "none";
+  const webSearchConfigured = getWebSearchProviderMode() !== "none" && Boolean(getTavilyApiKey());
+  const llmConfigured = getIntelligenceLlmMode() !== "none" && Boolean(getAnthropicApiKey()) && Boolean(getIntelligenceLlmModel());
   const configuredCount = (webSearchConfigured ? 1 : 0) + (llmConfigured ? 1 : 0);
   // Real output-schema top-level fields (schemas/intelligenceOutputs.ts's researchCompanyOutput)
   // the paid result populates — a static list, independent of this call's input.

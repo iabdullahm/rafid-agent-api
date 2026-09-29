@@ -6,9 +6,11 @@ import { loadConfig } from "../src/config/env.js";
 import { ApiError } from "../src/utils/errors.js";
 import { capabilities } from "../src/domain/capabilities.js";
 import { buildOpenapi } from "../src/api/openapi.js";
+import { PLATFORM_NAME } from "../src/brand.js";
 import type { LogEvent } from "../src/utils/logging.js";
 const key = "test-only-not-a-real-credential-12345";
 const config = loadConfig({ RAFID_API_KEYS: key + ",test-only-second-key-123456789", LOG_LEVEL: "silent" });
+const providerUnavailable = new Set(["website_download", "ai_call_agent", "voice_lead_qualifier", "appointment_call_agent", "social_video_generate", "news_video_generate", "product_promo_video"]);
 test("configuration fails closed and validates flags", () => {
   for (const env of [{}, { RAFID_API_KEYS: "short" }, { RAFID_API_KEYS: key, PORT: "bad" }, { RAFID_API_KEYS: key, X402_ENABLED: "true" }, { RAFID_API_KEYS: key, X402_ENABLED: "yes" }]) assert.throws(() => loadConfig(env));
   assert.equal(loadConfig({}, { requireApiKeys: false }).apiKeys.length, 0);
@@ -28,6 +30,7 @@ test("REST: auth, all services, discovery, errors, and log redaction", async t =
   });
   for (const path of ["/", "/health", "/api/v1/health", "/openapi.json", "/docs"]) assert.equal((await fetch(base + path)).status, 200);
   const discovery = await (await fetch(base + "/", { headers: { Accept: "application/json" } })).json();
+  assert.equal(discovery.data.name, PLATFORM_NAME);
   assert.deepEqual({ docs: discovery.data.docs, openapi: discovery.data.openapi, health: discovery.data.health }, {
     docs: "/docs", openapi: "/openapi.json", health: "/api/v1/health"
   });
@@ -35,11 +38,19 @@ test("REST: auth, all services, discovery, errors, and log redaction", async t =
   assert.match(docs.headers.get("content-type") ?? "", /text\/html/);
   assert.match(docs.headers.get("content-security-policy") ?? "", /connect-src 'self'/);
   const docsHtml = await docs.text();
+  assert.match(docsHtml, /Rafid Intelligence Network API Docs/);
   assert.match(docsHtml, /SwaggerUIBundle/);
   assert.match(docsHtml, /url: "\/openapi\.json"/);
   for (const c of capabilities) {
     for (const prefix of ["/api/v1", "/v1"]) {
       const response = await post(prefix + c.path, c.example);
+      if (providerUnavailable.has(c.name)) {
+        assert.equal(response.status, 503);
+        const unavailable = await response.json();
+        assert.equal(unavailable.success, false);
+        assert.equal(unavailable.error.code === "WGET_NOT_AVAILABLE" || unavailable.error.code === "VOICE_PROVIDER_NOT_CONFIGURED" || unavailable.error.code === "VIDEO_ENGINE_UNAVAILABLE", true);
+        continue;
+      }
       assert.equal(response.status, 200);
       const body = await response.json();
       assert.equal(body.success, true); assert.deepEqual(body.data, await c.execute(c.example));

@@ -159,6 +159,8 @@ export function createPaymentDispatcher(deps: {
           return fail(res, 409, "idempotency_conflict", "This Idempotency-Key was already used for this tool with a different request body.");
         case "idempotency_in_progress":
           return fail(res, 409, "idempotency_in_progress", "A request with this Idempotency-Key is still being processed; retry shortly.", {}, { "Retry-After": "1" });
+        case "spend_limit":
+          return fail(res, 429, "spend_limit_exceeded", `The ${result.scope.replaceAll("_", " ")} has been reached.`, { tool: c.name, limit: money(result.limitMicros), spent: money(result.spentMicros), paymentOptions: enabledPaymentMethodIds(deps.config), paymentMethods: paymentMethodsPath }, { "Retry-After": "60" });
         case "insufficient":
           if (decision.externalFallback) { rewrite(req, res, decision.externalFallback, c); return next(); }
           return fail(res, 402, result.reason, result.reason === "insufficient_credits"
@@ -253,9 +255,11 @@ export function createBillingAdminRoutes(deps: { engine: BillingEngine | null; a
     await e().store.setAccountStatus(account.id, status);
     send(res, await e().balanceView(account.id));
   }));
+  router.put(b + "/accounts/:accountId/spend-limits", handle(async (req, res) => send(res, await e().setAccountSpendLimits(p(req, "accountId"), { monthlyUsd: body(req).monthlyUsd === undefined ? null : body(req).monthlyUsd }))));
   router.post(b + "/accounts/:accountId/api-keys", handle(async (req, res) => send(res, await e().createApiKey({ accountId: p(req, "accountId"), name: body(req).name, environment: body(req).environment, expiresAt: body(req).expiresAt }), 201)));
   router.get(b + "/accounts/:accountId/api-keys", handle(async (req, res) => send(res, await e().listApiKeys(p(req, "accountId")))));
   router.post(b + "/accounts/:accountId/api-keys/:keyId/revoke", handle(async (req, res) => send(res, await e().revokeApiKey(p(req, "accountId"), p(req, "keyId")))));
+  router.put(b + "/accounts/:accountId/api-keys/:keyId/spend-limits", handle(async (req, res) => send(res, await e().setApiKeySpendLimits(p(req, "accountId"), p(req, "keyId"), { dailyUsd: body(req).dailyUsd === undefined ? null : body(req).dailyUsd, monthlyUsd: body(req).monthlyUsd === undefined ? null : body(req).monthlyUsd }))));
   router.post(b + "/accounts/:accountId/credits", handle(async (req, res) => send(res, await e().addCredit({ accountId: p(req, "accountId"), amount: String(body(req).amount ?? ""), reason: body(req).reason, externalTransactionId: body(req).externalTransactionId }), 201)));
   router.post(b + "/accounts/:accountId/adjustments", handle(async (req, res) => send(res, await e().adjustCredit({ accountId: p(req, "accountId"), amount: String(body(req).amount ?? ""), reason: String(body(req).reason ?? ""), externalTransactionId: body(req).externalTransactionId }), 201)));
   router.get(b + "/accounts/:accountId/ledger", handle(async (req, res) => send(res, await e().ledgerView(p(req, "accountId"), { limit: Number(req.query.limit) || 50, before: typeof req.query.before === "string" ? req.query.before : undefined }))));

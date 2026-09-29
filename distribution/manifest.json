@@ -1,5 +1,5 @@
 {
-  "name": "Rafid Property Intelligence",
+  "name": "Rafid Intelligence Network",
   "tagline": "Property intelligence built for AI agents.",
   "description": "Property and facility intelligence tools built for autonomous AI agents: discover a capability, pay per call over x402 (or authenticate with an API key), execute, get a structured result. Not designed primarily as a human dashboard product.",
   "baseUrl": "https://api.rafidsystem.com",
@@ -631,6 +631,72 @@
       ]
     },
     {
+      "name": "company_due_diligence",
+      "description": "Perform company due diligence for onboarding, procurement, partnership, investment or customer-risk decisions: resolve the entity, evaluate registration, website identity, sanctions, adverse news, legal, financial and reputation signals, then return a deterministic risk assessment with evidence and a machine-actionable next action.",
+      "whenToUse": "Use when an autonomous agent must decide whether to continue doing business with a company and what verification or escalation should happen next.",
+      "useCases": [
+        "supplier onboarding",
+        "vendor review",
+        "procurement",
+        "partnership screening",
+        "investment screening",
+        "marketplace onboarding",
+        "customer risk"
+      ],
+      "price": 1.5,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/risk/company-due-diligence",
+      "x402Endpoint": "/api/v1/x402/risk/company-due-diligence",
+      "mcpToolName": "company_due_diligence",
+      "priorityContexts": [
+        "supplier onboarding",
+        "vendor review",
+        "procurement",
+        "partnership",
+        "investment screening",
+        "marketplace onboarding",
+        "customer risk"
+      ],
+      "evidenceTypes": [
+        {
+          "type": "registration",
+          "description": "Registry identity, status, incorporation date and registration number."
+        },
+        {
+          "type": "sanctions",
+          "description": "Conservative supported-list screening with explicit match state."
+        },
+        {
+          "type": "adverse_news",
+          "description": "Relevant news and regulatory evidence, preserving source provenance."
+        },
+        {
+          "type": "website",
+          "description": "Supplied-domain and company-identity signals."
+        },
+        {
+          "type": "financial",
+          "description": "Available public financial or filing signals; unavailable data is not guessed."
+        }
+      ],
+      "limitations": [
+        "Relay riskScore with confidence, recommendation, decision and evidence; do not reduce the result to safe/unsafe."
+      ],
+      "sampleQueries": [
+        {
+          "query": "Can we continue onboarding this supplier?",
+          "guidance": "Call company_due_diligence with the legal name, country, registration number and domain when available. Follow decision.action and escalate when requiresHumanReview is true."
+        },
+        {
+          "query": "Screen this marketplace seller before approving it.",
+          "guidance": "Use the risk level, coverage, sanctions state, redFlags and evidence. Missing coverage means request information, not that the seller is safe."
+        }
+      ]
+    },
+    {
       "name": "document_facts_extract",
       "description": "Extract structured, evidence-backed facts, entities, dates, amounts, obligations, deadlines and risk indicators from business documents (contracts, invoices, purchase orders, quotations, tenders/RFPs, leases, policies, financial reports, legal documents, CVs, company profiles) from any country. Every fact carries a 0–1 extraction confidence and source evidence (verbatim excerpt, character offsets, section, and the page when the document has real pages); dates, amounts, currencies, percentages and durations are normalized only when unambiguous. Accepts an https documentUrl (PDF with a text layer, DOCX, HTML, text) or extracted text, up to 25 pages.",
       "whenToUse": "Use when an agent needs reliable machine-readable facts from a contract, invoice, tender, lease, purchase order, policy, financial report or other business document instead of a general summary.",
@@ -896,6 +962,1120 @@
           "guidance": "Call vehicle_value_estimate with askingPrice; cite marketComparables and marketStats.comparableCount."
         }
       ]
+    },
+    {
+      "name": "website_download",
+      "description": "Download and mirror a publicly accessible website, including HTML pages and required frontend assets, and return a machine-readable manifest and optional downloadable archive.",
+      "whenToUse": "Use when an agent needs an offline mirror of a public website and its frontend assets.",
+      "useCases": [
+        "download website",
+        "mirror website",
+        "offline website archive",
+        "save public website"
+      ],
+      "price": 0.75,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": false,
+      "sideEffects": true,
+      "endpoint": "/api/v1/websites/download",
+      "x402Endpoint": "/api/v1/x402/websites/download",
+      "mcpToolName": "website_download",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "extract_candidate_profile",
+      "description": "Normalize an English, Arabic or mixed-language CV into a machine-readable candidate profile using only stated professional evidence; protected personal attributes are ignored.",
+      "whenToUse": "Use before scoring or matching a CV when an agent needs reusable structured candidate evidence.",
+      "useCases": [
+        "CV parsing",
+        "resume extraction",
+        "candidate profile",
+        "ATS normalization"
+      ],
+      "price": 0.1,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/recruitment/extract-candidate-profile",
+      "x402Endpoint": "/api/v1/x402/recruitment/extract-candidate-profile",
+      "mcpToolName": "extract_candidate_profile",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "generate_job_profile",
+      "description": "Normalize a job description into required and preferred professional requirements with transparent weights totaling 100.",
+      "whenToUse": "Use before candidate matching or shortlisting when an agent needs a structured job requirement profile.",
+      "useCases": [
+        "job description parsing",
+        "job requirements",
+        "ATS job profile"
+      ],
+      "price": 0.1,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/recruitment/generate-job-profile",
+      "x402Endpoint": "/api/v1/x402/recruitment/generate-job-profile",
+      "mcpToolName": "generate_job_profile",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "cv_score",
+      "description": "Score the completeness, clarity and ATS-readability of a CV on a transparent 0–100 scale; this is not job matching.",
+      "whenToUse": "Use when an agent needs general CV quality feedback independent of a specific job.",
+      "useCases": [
+        "CV quality score",
+        "resume review",
+        "ATS readability"
+      ],
+      "price": 0.2,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/recruitment/cv-score",
+      "x402Endpoint": "/api/v1/x402/recruitment/cv-score",
+      "mcpToolName": "cv_score",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "cv_job_match",
+      "description": "Compare a candidate profile or CV with a job profile or description using normalized skills, experience evidence and transparent weighted scoring.",
+      "whenToUse": "Use when an agent needs evidence-based candidate-to-job matching for one candidate.",
+      "useCases": [
+        "CV job match",
+        "candidate fit",
+        "skill gap analysis"
+      ],
+      "price": 0.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/recruitment/cv-job-match",
+      "x402Endpoint": "/api/v1/x402/recruitment/cv-job-match",
+      "mcpToolName": "cv_job_match",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "cv_improve",
+      "description": "Produce evidence-grounded CV improvement recommendations, optional job-specific guidance and ATS actions without inventing candidate facts.",
+      "whenToUse": "Use when a candidate or recruitment agent needs actionable CV improvement guidance.",
+      "useCases": [
+        "CV improvement",
+        "resume rewrite guidance",
+        "ATS optimization"
+      ],
+      "price": 0.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/recruitment/cv-improve",
+      "x402Endpoint": "/api/v1/x402/recruitment/cv-improve",
+      "mcpToolName": "cv_improve",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "candidate_shortlist_score",
+      "description": "Score up to 100 supplied candidate profiles against one job profile with auditable matched requirements, gaps and confidence; no hiring decision is emitted.",
+      "whenToUse": "Use after extracting multiple candidate profiles when an agent needs transparent batch comparison against one job.",
+      "useCases": [
+        "candidate shortlist",
+        "batch CV ranking",
+        "recruitment screening"
+      ],
+      "price": 0.1,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/recruitment/candidate-shortlist-score",
+      "x402Endpoint": "/api/v1/x402/recruitment/candidate-shortlist-score",
+      "mcpToolName": "candidate_shortlist_score",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "strategy_performance_analysis",
+      "description": "Calculate historical trade-level strategy performance metrics from supplied records, including P&L, win/loss statistics and supported drawdown metrics; this is historical analysis, not a forecast.",
+      "whenToUse": "Use when an agent needs deterministic historical performance analysis for a supplied trading strategy or trade set.",
+      "useCases": [
+        "strategy performance",
+        "backtest results",
+        "trade statistics",
+        "drawdown analysis",
+        "profit factor",
+        "expectancy"
+      ],
+      "price": 0.35,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/trading/strategy-performance-analysis",
+      "x402Endpoint": "/api/v1/x402/trading/strategy-performance-analysis",
+      "mcpToolName": "strategy_performance_analysis",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "trade_risk_score",
+      "description": "Calculate a transparent deterministic 0–100 risk score for a proposed trade from entry, protection, sizing, account and portfolio context.",
+      "whenToUse": "Use before an agent recommends or executes a trade and needs an auditable risk score rather than an opaque model judgment.",
+      "useCases": [
+        "trade risk",
+        "position sizing",
+        "risk reward",
+        "pre-trade check",
+        "leverage check"
+      ],
+      "price": 0.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/trading/trade-risk-score",
+      "x402Endpoint": "/api/v1/x402/trading/trade-risk-score",
+      "mcpToolName": "trade_risk_score",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "portfolio_exposure_check",
+      "description": "Aggregate supplied open and proposed positions into gross, net, directional and concentration exposure with stop-risk and margin indicators.",
+      "whenToUse": "Use when an agent needs to assess portfolio concentration or directional exposure before adding or modifying a position.",
+      "useCases": [
+        "portfolio exposure",
+        "concentration check",
+        "gross exposure",
+        "net exposure",
+        "margin usage"
+      ],
+      "price": 0.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/trading/portfolio-exposure-check",
+      "x402Endpoint": "/api/v1/x402/trading/portfolio-exposure-check",
+      "mcpToolName": "portfolio_exposure_check",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "trade_log_analysis",
+      "description": "Analyze supplied raw trade records for deterministic performance, execution quality, grouping, streaks, data-quality issues and risk patterns.",
+      "whenToUse": "Use when an agent needs structured statistics and findings from a trading log or execution history.",
+      "useCases": [
+        "trade log",
+        "execution history",
+        "trading behavior",
+        "fee analysis",
+        "overtrading"
+      ],
+      "price": 0.3,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/trading/trade-log-analysis",
+      "x402Endpoint": "/api/v1/x402/trading/trade-log-analysis",
+      "mcpToolName": "trade_log_analysis",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "shipping_cost_estimate",
+      "description": "Estimate domestic or international shipping cost, chargeable weight, transit time and common shipping surcharges using shipment dimensions, weight, origin, destination and service level. Estimates are not guaranteed carrier quotes; duties and taxes are excluded.",
+      "whenToUse": "Use when an agent needs to estimate delivery cost for a physical shipment before purchasing, selling, importing, exporting or selecting a shipping option.",
+      "useCases": [
+        "international shipping estimate",
+        "domestic shipping estimate",
+        "calculate volumetric weight",
+        "compare shipping options",
+        "ecommerce shipping",
+        "freight planning",
+        "procurement logistics",
+        "marketplace delivery cost"
+      ],
+      "price": 0.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/logistics/shipping-cost-estimate",
+      "x402Endpoint": "/api/v1/x402/logistics/shipping-cost-estimate",
+      "mcpToolName": "shipping_cost_estimate",
+      "priorityContexts": [
+        "ecommerce checkout estimates",
+        "international trade planning",
+        "procurement and freight workflows",
+        "marketplace delivery pricing"
+      ],
+      "evidenceTypes": [
+        {
+          "type": "live_carrier",
+          "description": "A quote returned by a configured carrier adapter."
+        },
+        {
+          "type": "internal_rate",
+          "description": "A matching normalized route/rate record configured by the operator."
+        },
+        {
+          "type": "heuristic",
+          "description": "A conservative fallback based on route category, mode, service level and chargeable weight."
+        }
+      ],
+      "limitations": [
+        "Always report rateSource, confidence and riskFlags; never call a heuristic result an official carrier quote.",
+        "Treat dutiesAndTaxes.included=false as authoritative unless a future customs capability is explicitly connected."
+      ],
+      "sampleQueries": [
+        {
+          "query": "How much will it cost to ship this 8 kg package from Shenzhen to Muscat?",
+          "guidance": "Call shipping_cost_estimate with origin, destination, weight, dimensions and desired service level; report chargeable weight, estimatedCost, transit days, rateSource and confidence."
+        },
+        {
+          "query": "Compare standard and express shipping estimates.",
+          "guidance": "Make separate calls with serviceLevel=standard and serviceLevel=express, then compare cost and transit windows transparently."
+        }
+      ]
+    },
+    {
+      "name": "ai_call_agent",
+      "description": "Initiate an authorized outbound AI telephone call and return a call identifier immediately; completion and duration arrive asynchronously.",
+      "whenToUse": "Use when an authorized agent must contact a customer by telephone for a lawful, consent-aware objective and retrieve a structured result later.",
+      "useCases": [
+        "outbound AI call",
+        "customer confirmation",
+        "telephone follow-up"
+      ],
+      "price": 0.3,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": false,
+      "sideEffects": true,
+      "endpoint": "/api/v1/voice/ai-call",
+      "x402Endpoint": "/api/v1/x402/voice/ai-call",
+      "mcpToolName": "ai_call_agent",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "voice_lead_qualifier",
+      "description": "Place an asynchronous sales qualification call and score captured evidence against a configurable rubric.",
+      "whenToUse": "Use when an agent needs structured lead qualification from a lawful customer conversation rather than an ungrounded free-form model opinion.",
+      "useCases": [
+        "lead qualification",
+        "sales discovery call",
+        "qualification score"
+      ],
+      "price": 0.75,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": false,
+      "sideEffects": true,
+      "endpoint": "/api/v1/voice/lead-qualifier",
+      "x402Endpoint": "/api/v1/x402/voice/lead-qualifier",
+      "mcpToolName": "voice_lead_qualifier",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "website_project_estimate",
+      "description": "Produce a deterministic website project estimate with cost, timeline, hours, effort breakdown, maintenance range, assumptions and risk flags. It is an estimate, not a fixed quotation.",
+      "whenToUse": "Use when an agent needs a transparent cost and delivery estimate for building or remediating a website.",
+      "useCases": [
+        "website quote",
+        "web project estimate",
+        "website rebuild cost",
+        "agency proposal",
+        "remediation estimate"
+      ],
+      "price": 0.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/websites/project-estimate",
+      "x402Endpoint": "/api/v1/x402/websites/project-estimate",
+      "mcpToolName": "website_project_estimate",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "website_audit",
+      "description": "Perform a bounded, passive technical website inspection covering measurable SEO, performance, accessibility, security, UX and crawlability indicators; unavailable checks are reported honestly.",
+      "whenToUse": "Use when an agent needs evidence-backed website issues from a public HTTPS URL before estimating remediation or rebuild work.",
+      "useCases": [
+        "website audit",
+        "SEO audit",
+        "technical website review",
+        "accessibility checks",
+        "security headers",
+        "website remediation"
+      ],
+      "price": 0.75,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/websites/audit",
+      "x402Endpoint": "/api/v1/x402/websites/audit",
+      "mcpToolName": "website_audit",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "appointment_call_agent",
+      "description": "Place an asynchronous appointment call to propose, book, confirm, reschedule or cancel a slot through a calendar-provider abstraction.",
+      "whenToUse": "Use when an authorized agent must coordinate a customer appointment by telephone and return a machine-readable scheduling result.",
+      "useCases": [
+        "book appointment",
+        "confirm appointment",
+        "reschedule call",
+        "cancel appointment"
+      ],
+      "price": 0.5,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": false,
+      "sideEffects": true,
+      "endpoint": "/api/v1/voice/appointment",
+      "x402Endpoint": "/api/v1/x402/voice/appointment",
+      "mcpToolName": "appointment_call_agent",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "supplier_due_diligence_report",
+      "description": "Run an end-to-end Oman supplier screening workflow covering identity, activity, website, contact consistency, address, sanctions and public-risk evidence in one structured report.",
+      "whenToUse": "Use when a procurement agent needs one paid supplier due-diligence result instead of coordinating several screening steps.",
+      "useCases": [
+        "supplier due diligence",
+        "vendor screening report",
+        "procurement risk report",
+        "Oman supplier report"
+      ],
+      "price": 1.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/procurement/supplier-due-diligence-report",
+      "x402Endpoint": "/api/v1/x402/procurement/supplier-due-diligence-report",
+      "mcpToolName": "supplier_due_diligence_report",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "company_risk_report",
+      "description": "Combine evidence-first public reputation analysis with structured business-risk scoring into one company risk report.",
+      "whenToUse": "Use when an agent needs a consolidated company risk report with both evidence and an explicit risk model.",
+      "useCases": [
+        "company risk report",
+        "business due diligence",
+        "reputation and risk",
+        "counterparty screening"
+      ],
+      "price": 1.5,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/risk/company-risk-report",
+      "x402Endpoint": "/api/v1/x402/risk/company-risk-report",
+      "mcpToolName": "company_risk_report",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "property_investment_report",
+      "description": "Combine Oman property market comparables, price positioning and rental-yield calculations into one investment report.",
+      "whenToUse": "Use when an agent needs one structured investment analysis for a property rather than separate market and calculator calls.",
+      "useCases": [
+        "property investment report",
+        "real estate investment analysis",
+        "Oman property valuation",
+        "rental yield report"
+      ],
+      "price": 0.75,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/property/property-investment-report",
+      "x402Endpoint": "/api/v1/x402/property/property-investment-report",
+      "mcpToolName": "property_investment_report",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "portfolio_screen",
+      "description": "Screen and rank a portfolio of 2–20 supplied properties using the shared rental-yield and income calculations.",
+      "whenToUse": "Use when an agent needs a first-pass ranking of multiple properties before deeper analysis.",
+      "useCases": [
+        "portfolio screening",
+        "property shortlist",
+        "compare investment properties",
+        "rental yield ranking"
+      ],
+      "price": 0.5,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/property/portfolio-screen",
+      "x402Endpoint": "/api/v1/x402/property/portfolio-screen",
+      "mcpToolName": "portfolio_screen",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "procurement_vendor_shortlist",
+      "description": "Screen and rank 2–50 Oman suppliers in one procurement workflow using identity, risk, sanctions and public-evidence signals.",
+      "whenToUse": "Use when a procurement agent needs a ranked vendor shortlist from several candidate suppliers.",
+      "useCases": [
+        "vendor shortlist",
+        "procurement shortlist",
+        "compare suppliers",
+        "supplier ranking"
+      ],
+      "price": 2,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/procurement/vendor-shortlist",
+      "x402Endpoint": "/api/v1/x402/procurement/vendor-shortlist",
+      "mcpToolName": "procurement_vendor_shortlist",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "company_risk_batch",
+      "description": "Assess 1–100 companies from structured rows or CSV in one bounded batch, preserving per-row risk results and provider failures.",
+      "whenToUse": "Use when an agent needs to screen many companies efficiently instead of making separate risk-report calls.",
+      "useCases": [
+        "batch company screening",
+        "100 company risk check",
+        "CSV company analysis",
+        "bulk due diligence"
+      ],
+      "price": 8,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/risk/company-risk-batch",
+      "x402Endpoint": "/api/v1/x402/risk/company-risk-batch",
+      "mcpToolName": "company_risk_batch",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "startup_readiness_score",
+      "description": "Score the book's 15-question readiness assessment deterministically; does not predict business success.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for startup readiness score.",
+      "useCases": [
+        "startup readiness score",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.05,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/startup-readiness-score",
+      "x402Endpoint": "/api/v1/x402/book/startup-readiness-score",
+      "mcpToolName": "startup_readiness_score",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "business_idea_validate",
+      "description": "Evaluate problem, customer, solution and willingness-to-pay evidence; does not independently verify live demand.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for business idea validate.",
+      "useCases": [
+        "business idea validate",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/business-idea-validate",
+      "x402Endpoint": "/api/v1/x402/book/business-idea-validate",
+      "mcpToolName": "business_idea_validate",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "business_idea_generator",
+      "description": "Generate candidate ideas from user-observed problems and constraints; does not claim market demand.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for business idea generator.",
+      "useCases": [
+        "business idea generator",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.2,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/business-idea-generator",
+      "x402Endpoint": "/api/v1/x402/book/business-idea-generator",
+      "mcpToolName": "business_idea_generator",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "business_validation_plan",
+      "description": "Create the book's structured seven-day validation workflow; execution and evidence collection remain with the caller.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for business validation plan.",
+      "useCases": [
+        "business validation plan",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/business-validation-plan",
+      "x402Endpoint": "/api/v1/x402/book/business-validation-plan",
+      "mcpToolName": "business_validation_plan",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "ideal_customer_profile",
+      "description": "Structure an ideal-customer profile from supplied observations; does not infer verified demographics.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for ideal customer profile.",
+      "useCases": [
+        "ideal customer profile",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.2,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/ideal-customer-profile",
+      "x402Endpoint": "/api/v1/x402/book/ideal-customer-profile",
+      "mcpToolName": "ideal_customer_profile",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "competitor_analysis",
+      "description": "Compare 3-20 user-supplied competitors; does not discover or verify competitors without live evidence.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for competitor analysis.",
+      "useCases": [
+        "competitor analysis",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.3,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/competitor-analysis",
+      "x402Endpoint": "/api/v1/x402/book/competitor-analysis",
+      "mcpToolName": "competitor_analysis",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "business_model_builder",
+      "description": "Build the book's ten-element one-page business map from supplied inputs.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for business model builder.",
+      "useCases": [
+        "business model builder",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/business-model-builder",
+      "x402Endpoint": "/api/v1/x402/book/business-model-builder",
+      "mcpToolName": "business_model_builder",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "startup_cost_estimate",
+      "description": "Calculate startup capital, runway and reserve in OMR using integer baisa internally.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for startup cost estimate.",
+      "useCases": [
+        "startup cost estimate",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.1,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/startup-cost-estimate",
+      "x402Endpoint": "/api/v1/x402/book/startup-cost-estimate",
+      "mcpToolName": "startup_cost_estimate",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "product_pricing_calculator",
+      "description": "Calculate unit cost, price, margin and markup in OMR; does not validate market willingness to pay.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for product pricing calculator.",
+      "useCases": [
+        "product pricing calculator",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.1,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/product-pricing-calculator",
+      "x402Endpoint": "/api/v1/x402/book/product-pricing-calculator",
+      "mcpToolName": "product_pricing_calculator",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "break_even_calculator",
+      "description": "Calculate break-even and target-profit units from supplied fixed and variable costs.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for break even calculator.",
+      "useCases": [
+        "break even calculator",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.1,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/break-even-calculator",
+      "x402Endpoint": "/api/v1/x402/book/break-even-calculator",
+      "mcpToolName": "break_even_calculator",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "business_profitability_analysis",
+      "description": "Calculate revenue, gross profit, net profit and margins from monthly supplied data.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for business profitability analysis.",
+      "useCases": [
+        "business profitability analysis",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.15,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/business-profitability-analysis",
+      "x402Endpoint": "/api/v1/x402/book/business-profitability-analysis",
+      "mcpToolName": "business_profitability_analysis",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "offer_builder",
+      "description": "Construct a commercial offer from supplied outcome, bundle and delivery terms; never invents scarcity.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for offer builder.",
+      "useCases": [
+        "offer builder",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.2,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/offer-builder",
+      "x402Endpoint": "/api/v1/x402/book/offer-builder",
+      "mcpToolName": "offer_builder",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "oman_go_to_market_plan",
+      "description": "Select supplied Oman-relevant channels for an ICP and create a 14-day action plan; live popularity is not checked.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for oman go to market plan.",
+      "useCases": [
+        "oman go to market plan",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.4,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/oman-go-to-market-plan",
+      "x402Endpoint": "/api/v1/x402/book/oman-go-to-market-plan",
+      "mcpToolName": "oman_go_to_market_plan",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "content_plan_generator",
+      "description": "Generate a 14- or 30-day structured content calendar from an offer and selected channels.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for content plan generator.",
+      "useCases": [
+        "content plan generator",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.2,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/content-plan-generator",
+      "x402Endpoint": "/api/v1/x402/book/content-plan-generator",
+      "mcpToolName": "content_plan_generator",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "first_10_customers_plan",
+      "description": "Create a non-spammy plan for 20 prospects and the first 10 paying customers.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for first 10 customers plan.",
+      "useCases": [
+        "first 10 customers plan",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.25,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/first-10-customers-plan",
+      "x402Endpoint": "/api/v1/x402/book/first-10-customers-plan",
+      "mcpToolName": "first_10_customers_plan",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "sales_response_builder",
+      "description": "Draft a customer-facing response for a supplied sales situation; does not send messages.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for sales response builder.",
+      "useCases": [
+        "sales response builder",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.1,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/sales-response-builder",
+      "x402Endpoint": "/api/v1/x402/book/sales-response-builder",
+      "mcpToolName": "sales_response_builder",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "whatsapp_business_setup",
+      "description": "Create Arabic/English WhatsApp Business profile, reply and order-message templates.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for whatsapp business setup.",
+      "useCases": [
+        "whatsapp business setup",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.2,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/whatsapp-business-setup",
+      "x402Endpoint": "/api/v1/x402/book/whatsapp-business-setup",
+      "mcpToolName": "whatsapp_business_setup",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "monthly_business_financial_report",
+      "description": "Generate a monthly business financial report from supplied OMR figures; not accounting advice.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for monthly business financial report.",
+      "useCases": [
+        "monthly business financial report",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.15,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/monthly-business-financial-report",
+      "x402Endpoint": "/api/v1/x402/book/monthly-business-financial-report",
+      "mcpToolName": "monthly_business_financial_report",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "oman_business_launch_plan",
+      "description": "Generate the book's 30-day launch workflow with dependencies and status placeholders.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for oman business launch plan.",
+      "useCases": [
+        "oman business launch plan",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.4,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/oman-business-launch-plan",
+      "x402Endpoint": "/api/v1/x402/book/oman-business-launch-plan",
+      "mcpToolName": "oman_business_launch_plan",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "business_90_day_growth_plan",
+      "description": "Generate the book's three-month post-launch goals, milestones, KPIs and review gates.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for business 90 day growth plan.",
+      "useCases": [
+        "business 90 day growth plan",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.4,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/business-90-day-growth-plan",
+      "x402Endpoint": "/api/v1/x402/book/business-90-day-growth-plan",
+      "mcpToolName": "business_90_day_growth_plan",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "business_risk_check",
+      "description": "Diagnose the book's common mistakes from supplied signals; no unsupported probabilities are assigned.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for business risk check.",
+      "useCases": [
+        "business risk check",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.2,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/business-risk-check",
+      "x402Endpoint": "/api/v1/x402/book/business-risk-check",
+      "mcpToolName": "business_risk_check",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "final_business_plan_builder",
+      "description": "Assemble the book's final project plan from supplied business and financial inputs.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for final business plan builder.",
+      "useCases": [
+        "final business plan builder",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.5,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/final-business-plan-builder",
+      "x402Endpoint": "/api/v1/x402/book/final-business-plan-builder",
+      "mcpToolName": "final_business_plan_builder",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "oman_business_launch_advisor",
+      "description": "Combine readiness, idea validation, finance and launch logic for an Oman-oriented founder workflow.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for oman business launch advisor.",
+      "useCases": [
+        "oman business launch advisor",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.5,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/oman-business-launch-advisor",
+      "x402Endpoint": "/api/v1/x402/book/oman-business-launch-advisor",
+      "mcpToolName": "oman_business_launch_advisor",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "oman_business_plan_generator",
+      "description": "Generate a premium structured business plan from supplied assumptions; not legal, tax, accounting or investment advice.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for oman business plan generator.",
+      "useCases": [
+        "oman business plan generator",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 1,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/oman-business-plan-generator",
+      "x402Endpoint": "/api/v1/x402/book/oman-business-plan-generator",
+      "mcpToolName": "oman_business_plan_generator",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "oman_small_business_guide",
+      "description": "Answer a question using book-grounded frameworks; current legal, tax and regulatory details require official verification.",
+      "whenToUse": "Use when an agent needs the Creative Techno book framework for oman small business guide.",
+      "useCases": [
+        "oman small business guide",
+        "small business planning",
+        "Oman entrepreneurship"
+      ],
+      "price": 0.15,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": false,
+      "endpoint": "/api/v1/book/oman-small-business-guide",
+      "x402Endpoint": "/api/v1/x402/book/oman-small-business-guide",
+      "mcpToolName": "oman_small_business_guide",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
     }
   ],
   "pricing": {
@@ -916,9 +2096,58 @@
       "oman_supplier_check": 0.5,
       "company_reputation_check": 0.4,
       "business_risk_score": 0.5,
+      "company_due_diligence": 1.5,
       "document_facts_extract": 0.25,
       "invoice_anomaly_check": 0.25,
-      "vehicle_value_estimate": 0.25
+      "vehicle_value_estimate": 0.25,
+      "website_download": 0.75,
+      "extract_candidate_profile": 0.1,
+      "generate_job_profile": 0.1,
+      "cv_score": 0.2,
+      "cv_job_match": 0.25,
+      "cv_improve": 0.25,
+      "candidate_shortlist_score": 0.1,
+      "strategy_performance_analysis": 0.35,
+      "trade_risk_score": 0.25,
+      "portfolio_exposure_check": 0.25,
+      "trade_log_analysis": 0.3,
+      "shipping_cost_estimate": 0.25,
+      "ai_call_agent": 0.3,
+      "voice_lead_qualifier": 0.75,
+      "website_project_estimate": 0.25,
+      "website_audit": 0.75,
+      "appointment_call_agent": 0.5,
+      "supplier_due_diligence_report": 1.25,
+      "company_risk_report": 1.5,
+      "property_investment_report": 0.75,
+      "portfolio_screen": 0.5,
+      "procurement_vendor_shortlist": 2,
+      "company_risk_batch": 8,
+      "startup_readiness_score": 0.05,
+      "business_idea_validate": 0.25,
+      "business_idea_generator": 0.2,
+      "business_validation_plan": 0.25,
+      "ideal_customer_profile": 0.2,
+      "competitor_analysis": 0.3,
+      "business_model_builder": 0.25,
+      "startup_cost_estimate": 0.1,
+      "product_pricing_calculator": 0.1,
+      "break_even_calculator": 0.1,
+      "business_profitability_analysis": 0.15,
+      "offer_builder": 0.2,
+      "oman_go_to_market_plan": 0.4,
+      "content_plan_generator": 0.2,
+      "first_10_customers_plan": 0.25,
+      "sales_response_builder": 0.1,
+      "whatsapp_business_setup": 0.2,
+      "monthly_business_financial_report": 0.15,
+      "oman_business_launch_plan": 0.4,
+      "business_90_day_growth_plan": 0.4,
+      "business_risk_check": 0.2,
+      "final_business_plan_builder": 0.5,
+      "oman_business_launch_advisor": 0.5,
+      "oman_business_plan_generator": 1,
+      "oman_small_business_guide": 0.15
     }
   },
   "roadmap": [
@@ -1001,6 +2230,6 @@
     ],
     "note": "Coverage is Muscat governorate only, and only its supported areas. Al Mouj Muscat is the deployment's strongest single-area coverage today because it is the only area with real partner-fed (sourceType partner_feed) sale records; other supported areas may only have demo/manual_benchmark data on a given deployment. This is not nationwide Oman coverage."
   },
-  "generatedAt": "2026-09-24T04:49:34.344Z",
+  "generatedAt": "2026-09-29T03:02:17.325Z",
   "generatedBy": "scripts/generateDistributionManifest.ts (derived from src/domain/capabilities.ts — never hand-edit this file)"
 }

@@ -108,8 +108,20 @@ export type DataSource = "partner_feed" | "demo_manual" | "mixed" | "unknown" | 
  *  via ALTER TABLE ... ADD COLUMN IF NOT EXISTS, so existing rows simply read back as null.
  *  "mpp" = an MPP charge call (one settled payment per call, like x402/L402); "mpp-session" = a
  *  metered call inside an MPP session (paid by the session's eventual channel settlement, so it
- *  is NOT one-settlement-per-call — see revenue/aggregate.ts's isPaidToolExecution()). */
-export type AnalyticsChannel = "rest" | "x402" | "l402" | "mpp" | "mpp-session" | "mcp-remote";
+ *  is NOT one-settlement-per-call — see revenue/aggregate.ts's isPaidToolExecution()).
+ *
+ *  "api_credits" / "subscription" / "free" (added for the Revenue Conversion Audit — see
+ *  src/audit/) are the unified-billing account rails and the zero-priced free path. Before this
+ *  addition every one of these was recorded as the generic "rest" (see api/app.ts's res.on
+ *  ("finish") handler) — accurate for a legacy X-API-Key call (which really is just "REST, no
+ *  unified billing"), but not for a unified-billing call, which the audit must evaluate against
+ *  prepaid-credit reservation/capture or subscription-allowance debit, never against x402
+ *  settlement (see the spec's "REST + prepaid should be evaluated against prepaid capture, not
+ *  x402 settlement"). Purely additive to an existing string-typed union/column — nothing that
+ *  already filters on `channel === "rest"` breaks (grep confirms no code does; only this file
+ *  produces the value) and every pre-existing "rest" row keeps meaning exactly what it always
+ *  meant, a plain legacy API-key REST call with no unified billing involved. */
+export type AnalyticsChannel = "rest" | "x402" | "l402" | "mpp" | "mpp-session" | "mcp-remote" | "api_credits" | "subscription" | "free";
 
 export interface AnalyticsEvent {
   category: AnalyticsCategory;
@@ -150,6 +162,13 @@ export interface AnalyticsEvent {
   /** From X-Client-Name, falling back to X-Agent-Name — an unauthenticated, self-reported
    *  caller identity (never verified, never trusted for authorization decisions). */
   clientName: string | null;
+  source?: string | null;
+  utmMedium?: string | null;
+  campaign?: string | null;
+  utmContent?: string | null;
+  referrerHost?: string | null;
+  clientType?: "browser" | "curl" | "sdk" | "mcp-client" | "unknown";
+  trafficClass?: "production_external" | "internal_test" | "unknown";
   /** Preview category only (see PreviewEventType) — a one-way SHA-256/HMAC digest of capability +
    *  normalized input (preview/fingerprint.ts). NEVER raw input: this is the one field that joins
    *  a preview_requested row to a later paid_capability_started/preview_converted row for the same
@@ -172,6 +191,28 @@ export interface AnalyticsEvent {
    *  analytics module has no dependency on that optional, rarely-loaded billing layer). Optional
    *  so every pre-existing call site keeps compiling unchanged, same as requestFingerprint above. */
   provider?: "stripe" | "usdc_base" | null;
+  /** The SAME per-HTTP-request id every other already-shipped system in this codebase already
+   *  generates and uses for its own accounting — res.locals.requestId (api/app.ts), also written
+   *  onto every RevenueSettlement (revenue/types.ts) and every unified-billing LedgerEntry
+   *  (billing/unified/types.ts). Added for the Revenue Conversion Audit (src/audit/), whose one
+   *  hard requirement is correlating "what happened to THIS call" across every system that
+   *  observed it — and requestId is the only identifier strong enough for that: two funnel steps
+   *  of the SAME physical request (e.g. a "tool" category execution row and an "x402" category
+   *  settlement row) always share it, while two different physical requests (e.g. an unpaid 402
+   *  challenge and a later paid retry) never do, which is honest — they really are different
+   *  requests, not one logical attempt this layer should pretend to stitch together. NEVER used
+   *  to correlate across categories/systems any other way (timestamp proximity, tool name, price
+   *  and client alone are explicitly insufficient — see src/audit/'s correlation-strategy doc
+   *  comment). Optional/nullable so every pre-existing call site and every already-stored row
+   *  keeps compiling/reading back unchanged (null = "recorded before this field existed", or a
+   *  category where no per-request id is meaningful, e.g. a Stripe-webhook-originated "funding"
+   *  row — see recordFundingEvent()'s own doc comment for why that one has no RequestClientContext
+   *  either). */
+  requestId?: string | null;
+  /** x402 challenge quality metadata — never contains payment credentials. */
+  paymentGuidanceVersion?: string | null;
+  paymentDocsUrl?: string | null;
+  challengeParseable?: boolean | null;
   createdAt: string;
 }
 

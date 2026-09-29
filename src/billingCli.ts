@@ -40,7 +40,7 @@ try {
   let result: unknown;
   switch (command) {
     case "migrate": await store!.migrate(); result = { migrated: true }; break;
-    case "plans": result = Object.values(config.plans).map(p => ({ id: p.id, name: p.name, monthlyIncludedUsd: (p.allowance.monthlyIncludedMicros / 1e6).toFixed(2) })); break;
+    case "plans": result = Object.values(config.plans).map(p => ({ id: p.id, name: p.name, monthlyIncludedUsd: (p.allowance.monthlyIncludedMicros / 1e6).toFixed(2), monthlyIncludedCalls: p.allowance.monthlyIncludedCalls })); break;
     case "account:create": need(1); result = await engine!.createAccount({ name: args[0]!, email: args[1] ?? null }); break;
     case "account:show": need(1); result = { ...(await engine!.balanceView(args[0]!)), apiKeys: await engine!.listApiKeys(args[0]!) }; break;
     case "account:status": need(2); {

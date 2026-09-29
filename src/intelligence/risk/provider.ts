@@ -42,20 +42,32 @@ export async function runAnalyzeCompanyRisk(rawInput: unknown, options: RunAnaly
   const companyName = input.company ?? null;
   const website = input.website ?? null;
 
+  // A single optional upstream check must not take down the complete risk report. This is
+  // especially important when live checks are enabled on Vercel: RDAP, sanctions, or a search
+  // adapter can fail independently while the remaining evidence is still useful. The failure is
+  // returned as unavailable/missing information, never converted into a safe/unsafe conclusion.
+  const unavailable = (check: RiskCheckType): CheckOutcome => ({
+    status: "unavailable",
+    summary: `${check} check failed unexpectedly; no conclusion was drawn from this check.`,
+    findings: [], evidence: [], sources: []
+  });
+
   const run = async (check: RiskCheckType): Promise<CheckOutcome> => {
     if (!requestedChecks.includes(check)) return EMPTY_CHECK;
-    switch (check) {
-      case "corporate_identity": return runCorporateIdentityCheck(companyName, now);
-      case "domain": return runDomainCheck(website, now);
-      case "website": return runWebsiteCheck(website, now);
-      case "sanctions": return runSanctionsCheck(companyName, now);
-      case "adverse_news": return runNewsBackedCheck("adverse_news", companyName, buildWebSearchProvider({ requestId: options.requestId ?? null, capability: "analyze_company_risk" }), now);
-      case "reputation": return runNewsBackedCheck("reputation", companyName, buildWebSearchProvider({ requestId: options.requestId ?? null, capability: "analyze_company_risk" }), now);
-      case "legal_signals": return runNewsBackedCheck("legal_signals", companyName, buildWebSearchProvider({ requestId: options.requestId ?? null, capability: "analyze_company_risk" }), now);
-      // security_signals is never dispatched through run() — it's derived below from the
-      // website check's own result (see the "security_signals reuses..." comment) — but the
-      // switch must stay exhaustive over all 8 RiskCheckType values.
-      case "security_signals": return EMPTY_CHECK;
+    try {
+      switch (check) {
+        case "corporate_identity": return await runCorporateIdentityCheck(companyName, now);
+        case "domain": return await runDomainCheck(website, now);
+        case "website": return await runWebsiteCheck(website, now);
+        case "sanctions": return await runSanctionsCheck(companyName, now);
+        case "adverse_news": return await runNewsBackedCheck("adverse_news", companyName, buildWebSearchProvider({ requestId: options.requestId ?? null, capability: "analyze_company_risk" }), now);
+        case "reputation": return await runNewsBackedCheck("reputation", companyName, buildWebSearchProvider({ requestId: options.requestId ?? null, capability: "analyze_company_risk" }), now);
+        case "legal_signals": return await runNewsBackedCheck("legal_signals", companyName, buildWebSearchProvider({ requestId: options.requestId ?? null, capability: "analyze_company_risk" }), now);
+        // security_signals is derived below from the website check.
+        case "security_signals": return EMPTY_CHECK;
+      }
+    } catch {
+      return unavailable(check);
     }
   };
 

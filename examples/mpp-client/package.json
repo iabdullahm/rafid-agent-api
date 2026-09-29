@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Standalone example agents for Rafid Agent API's MPP (Machine Payments Protocol) rail: one-time charges and budgeted, metered sessions, using the official mppx SDK. Not part of the Rafid Agent API server itself.",
+  "description": "Standalone example agents for Rafid Intelligence Network's MPP (Machine Payments Protocol) rail: one-time charges and budgeted, metered sessions, using the official mppx SDK. Not part of the Rafid Intelligence Network server itself.",
   "engines": {
     "node": ">=20"
   },

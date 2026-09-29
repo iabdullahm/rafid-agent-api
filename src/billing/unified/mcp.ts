@@ -44,7 +44,7 @@ export function createCreditsMcpHandler(deps: {
   capabilities: readonly BillableCapability[];
   priceUsd: (tool: string) => number;
   delegate: RequestHandler;
-  onToolCall?: (event: { toolName: string; status: number; durationMs: number; data?: unknown }, req: Request) => void;
+  onToolCall?: (event: { toolName: string; status: number; durationMs: number; data?: unknown; requestId: string }, req: Request) => void;
 }): RequestHandler {
   const availability = railAvailability(deps.config);
   const fallback = deps.config.billing?.subscriptionCreditFallback ?? true;
@@ -95,14 +95,14 @@ export function createCreditsMcpHandler(deps: {
       } });
       switch (result.kind) {
         case "success":
-          deps.onToolCall?.({ toolName: c.name, status: 200, durationMs, data: result.data }, req);
+          deps.onToolCall?.({ toolName: c.name, status: 200, durationMs, data: result.data, requestId }, req);
           res.status(200).json(ok(result.body, false)); return;
         case "replay":
           if (result.status >= 200 && result.status < 300) { res.status(200).json(ok(result.body, true)); return; }
           res.status(200).json(toolError(id, result.body)); return;
         case "failed": {
           const err = publicError(result.error);
-          deps.onToolCall?.({ toolName: c.name, status: err.status, durationMs }, req);
+          deps.onToolCall?.({ toolName: c.name, status: err.status, durationMs, requestId }, req);
           res.status(200).json(toolError(id, { success: false, error: err.error }, { [BILLING_META_KEY]: { rail: result.authorization.rail, amount: "0.00", currency: "USD", refunded: result.refunded } }));
           return;
         }
@@ -110,6 +110,8 @@ export function createCreditsMcpHandler(deps: {
           res.status(200).json(toolError(id, { success: false, error: { code: "idempotency_conflict", message: "This idempotency key was already used for this tool with different arguments." } })); return;
         case "idempotency_in_progress":
           res.status(200).json(toolError(id, { success: false, error: { code: "idempotency_in_progress", message: "A call with this idempotency key is still being processed." } })); return;
+        case "spend_limit":
+          res.status(200).json(toolError(id, { success: false, error: { code: "spend_limit_exceeded", message: `The ${result.scope.replaceAll("_", " ")} has been reached.` }, tool: c.name, limit: money(result.limitMicros), spent: money(result.spentMicros), paymentOptions: enabledPaymentMethodIds(deps.config) })); return;
         case "insufficient":
           res.status(200).json(toolError(id, {
             success: false, error: { code: result.reason, message: result.reason === "insufficient_credits" ? `The account balance does not cover ${c.name}.` : result.reason === "no_active_subscription" ? "This account has no active subscription." : "The subscription allowance for this billing period is exhausted." },

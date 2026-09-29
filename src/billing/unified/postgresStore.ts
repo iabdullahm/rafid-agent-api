@@ -69,6 +69,11 @@ export class PostgresBillingStore implements BillingStore {
     if (!r.rows[0]) throw new BillingStoreError("account_not_found", "Billing account not found");
     return toAccount(r.rows[0]);
   }
+  async updateAccountMetadata(accountId: string, metadata: Record<string, unknown>) {
+    const r = await this.q("UPDATE billing_accounts SET metadata=$2, updated_at=now() WHERE id=$1 RETURNING *", [accountId, metadata]);
+    if (!r.rows[0]) throw new BillingStoreError("account_not_found", "Billing account not found");
+    return toAccount(r.rows[0]);
+  }
 
   async insertApiKey(input: { id: string; accountId: string; keyPrefix: string; keyHash: string; environment: ApiKeyEnvironment; name: string; expiresAt: Date | null; metadata?: Record<string, unknown> }) {
     return this.tx(async c => {
@@ -94,6 +99,11 @@ export class PostgresBillingStore implements BillingStore {
     return toKey(r.rows[0]);
   }
   async listApiKeys(accountId: string) { return (await this.q("SELECT * FROM billing_api_keys WHERE account_id=$1 ORDER BY created_at", [accountId])).rows.map(toKey); }
+  async updateApiKeyMetadata(accountId: string, keyId: string, metadata: Record<string, unknown>) {
+    const r = await this.q("UPDATE billing_api_keys SET metadata=$3 WHERE id=$1 AND account_id=$2 RETURNING *", [keyId, accountId, metadata]);
+    if (!r.rows[0]) throw new BillingStoreError("key_not_found", "API key not found for this account");
+    return toKey(r.rows[0]);
+  }
 
   async applyCredit(input: { accountId: string; amountMicros: number; type: "credit" | "adjustment" | "credit_purchase"; reason: string; externalTransactionId?: string | null; now: Date }) {
     if (!Number.isSafeInteger(input.amountMicros) || input.amountMicros === 0 || ((input.type === "credit" || input.type === "credit_purchase") && input.amountMicros < 0)) throw new BillingStoreError("invalid_amount", "Amount must be a non-zero integer number of micros (positive for a credit)");
@@ -112,21 +122,21 @@ export class PostgresBillingStore implements BillingStore {
     });
   }
 
-  async assignSubscription(input: { accountId: string; plan: string; includedMicros: number; now: Date }): Promise<Subscription> {
+  async assignSubscription(input: { accountId: string; plan: string; includedMicros: number; includedCalls: number | null; now: Date }): Promise<Subscription> {
     return this.tx(async c => {
       const a = await c.query("SELECT id FROM billing_accounts WHERE id=$1 FOR UPDATE", [input.accountId]);
       if (!a.rowCount) throw new BillingStoreError("account_not_found", "Billing account not found");
       await c.query("UPDATE billing_subscriptions SET status='canceled', canceled_at=$2 WHERE account_id=$1 AND status='active'", [input.accountId, input.now]);
-      const r = await c.query("INSERT INTO billing_subscriptions(id,account_id,plan,status,included_micros,anchor_at,created_at) VALUES($1,$2,$3,'active',$4,$5,$5) RETURNING *", [newId("sub"), input.accountId, input.plan, input.includedMicros, input.now]);
+      const r = await c.query("INSERT INTO billing_subscriptions(id,account_id,plan,status,included_micros,included_calls,anchor_at,created_at) VALUES($1,$2,$3,'active',$4,$5,$6,$6) RETURNING *", [newId("sub"), input.accountId, input.plan, input.includedMicros, input.includedCalls, input.now]);
       const row = r.rows[0];
-      return { id: row.id, accountId: row.account_id, plan: row.plan, status: "active", includedMicros: microsFromDb(row.included_micros), periodStart: iso(row.anchor_at), periodEnd: addMonthsUtc(new Date(row.anchor_at), 1).toISOString(), createdAt: iso(row.created_at), canceledAt: null };
+      return { id: row.id, accountId: row.account_id, plan: row.plan, status: "active", includedMicros: microsFromDb(row.included_micros), includedCalls: row.included_calls === null ? null : Number(row.included_calls), periodStart: iso(row.anchor_at), periodEnd: addMonthsUtc(new Date(row.anchor_at), 1).toISOString(), createdAt: iso(row.created_at), canceledAt: null };
     });
   }
   async cancelSubscription(accountId: string, now: Date): Promise<Subscription | null> {
     const r = await this.q("UPDATE billing_subscriptions SET status='canceled', canceled_at=$2 WHERE account_id=$1 AND status='active' RETURNING *", [accountId, now]);
     const row = r.rows[0]; if (!row) return null;
     const p = currentPeriod(new Date(row.anchor_at), now);
-    return { id: row.id, accountId: row.account_id, plan: row.plan, status: "canceled", includedMicros: microsFromDb(row.included_micros), periodStart: p.start.toISOString(), periodEnd: p.end.toISOString(), createdAt: iso(row.created_at), canceledAt: iso(row.canceled_at) };
+    return { id: row.id, accountId: row.account_id, plan: row.plan, status: "canceled", includedMicros: microsFromDb(row.included_micros), includedCalls: row.included_calls === null ? null : Number(row.included_calls), periodStart: p.start.toISOString(), periodEnd: p.end.toISOString(), createdAt: iso(row.created_at), canceledAt: iso(row.canceled_at) };
   }
   async getSubscription(accountId: string, now: Date) {
     return this.tx(c => this.snapshot(c, accountId, now));
@@ -135,9 +145,9 @@ export class PostgresBillingStore implements BillingStore {
     const s = (await c.query("SELECT * FROM billing_subscriptions WHERE account_id=$1 AND status='active'", [accountId])).rows[0];
     if (!s) return null;
     const p = currentPeriod(new Date(s.anchor_at), now);
-    await c.query("INSERT INTO subscription_usage(subscription_id,period_start,period_end,included_micros) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING", [s.id, p.start, p.end, s.included_micros]);
-    const u = (await c.query("SELECT included_micros, used_micros FROM subscription_usage WHERE subscription_id=$1 AND period_start=$2", [s.id, p.start])).rows[0];
-    return { subscriptionId: s.id, plan: s.plan, periodStart: p.start.toISOString(), periodEnd: p.end.toISOString(), includedMicros: microsFromDb(u.included_micros), usedMicros: microsFromDb(u.used_micros) };
+    await c.query("INSERT INTO subscription_usage(subscription_id,period_start,period_end,included_micros,included_calls) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING", [s.id, p.start, p.end, s.included_micros, s.included_calls]);
+    const u = (await c.query("SELECT included_micros, used_micros, included_calls, used_calls FROM subscription_usage WHERE subscription_id=$1 AND period_start=$2", [s.id, p.start])).rows[0];
+    return { subscriptionId: s.id, plan: s.plan, periodStart: p.start.toISOString(), periodEnd: p.end.toISOString(), includedMicros: microsFromDb(u.included_micros), usedMicros: microsFromDb(u.used_micros), includedCalls: u.included_calls === null ? null : Number(u.included_calls), usedCalls: Number(u.used_calls) };
   }
 
   async reserve(input: ReserveInput): Promise<ReserveResult> {
@@ -156,17 +166,30 @@ export class PostgresBillingStore implements BillingStore {
           await c.query("UPDATE billing_idempotency SET status='in_progress', request_id=$4, ledger_entry_id=NULL, updated_at=now() WHERE account_id=$1 AND tool_name=$2 AND idempotency_key=$3", [input.accountId, input.toolName, idem.key, input.requestId]);
         }
       }
+      const limits = input.spendLimits;
+      if (limits?.accountMonthlyMicros !== null && limits?.accountMonthlyMicros !== undefined) {
+        const r = await c.query("SELECT COALESCE(-SUM(amount_micros),0)::bigint AS spent FROM billing_ledger WHERE account_id=$1 AND status IN ('pending','settled') AND type IN ('debit','subscription_usage') AND amount_micros < 0 AND created_at >= date_trunc('month',$2::timestamptz)", [input.accountId, input.now]);
+        const spent = microsFromDb(r.rows[0].spent);
+        if (spent + input.priceMicros > limits.accountMonthlyMicros) { if (idem) await c.query("UPDATE billing_idempotency SET status='failed', updated_at=now() WHERE account_id=$1 AND tool_name=$2 AND idempotency_key=$3", [input.accountId, input.toolName, idem.key]); return { kind: "spend_limit", scope: "account_monthly", limitMicros: limits.accountMonthlyMicros, spentMicros: spent } as const; }
+      }
+      for (const item of [["api_key_daily", limits?.apiKeyDailyMicros, "day"], ["api_key_monthly", limits?.apiKeyMonthlyMicros, "month"]] as const) {
+        const [scope, limit, period] = item;
+        if (limit === null || limit === undefined) continue;
+        const r = await c.query(`SELECT COALESCE(-SUM(amount_micros),0)::bigint AS spent FROM billing_ledger WHERE account_id=$1 AND api_key_id=$2 AND status IN ('pending','settled') AND type IN ('debit','subscription_usage') AND amount_micros < 0 AND created_at >= date_trunc('${period}',$3::timestamptz)`, [input.accountId, input.apiKeyId, input.now]);
+        const spent = microsFromDb(r.rows[0].spent);
+        if (spent + input.priceMicros > limit) { if (idem) await c.query("UPDATE billing_idempotency SET status='failed', updated_at=now() WHERE account_id=$1 AND tool_name=$2 AND idempotency_key=$3", [input.accountId, input.toolName, idem.key]); return { kind: "spend_limit", scope, limitMicros: limit, spentMicros: spent } as const; }
+      }
       const markIdem = (entryId: string) => idem ? c.query("UPDATE billing_idempotency SET ledger_entry_id=$4, updated_at=now() WHERE account_id=$1 AND tool_name=$2 AND idempotency_key=$3", [input.accountId, input.toolName, idem.key, entryId]) : Promise.resolve();
       const balance = microsFromDb(a.credit_balance_micros);
       const snap = input.rails.includes("subscription") ? await this.snapshot(c, input.accountId, input.now) : null;
       for (const rail of input.rails) {
         if (rail === "subscription") {
           if (!snap) continue;
-          const u = await c.query("UPDATE subscription_usage SET used_micros = used_micros + $3, updated_at=now() WHERE subscription_id=$1 AND period_start=$2 AND used_micros + $3 <= included_micros RETURNING used_micros", [snap.subscriptionId, snap.periodStart, input.priceMicros]);
+          const u = await c.query("UPDATE subscription_usage SET used_micros = used_micros + $3, used_calls = used_calls + 1, updated_at=now() WHERE subscription_id=$1 AND period_start=$2 AND used_micros + $3 <= included_micros AND (included_calls IS NULL OR used_calls + 1 <= included_calls) RETURNING used_micros, used_calls", [snap.subscriptionId, snap.periodStart, input.priceMicros]);
           if (u.rows[0]) {
             const e = await this.insertEntry(c, { accountId: input.accountId, apiKeyId: input.apiKeyId, requestId: input.requestId, toolName: input.toolName, type: "subscription_usage", amountMicros: -input.priceMicros, rail: "subscription", status: "pending", externalTransactionId: null, relatedEntryId: null, metadata: { subscriptionId: snap.subscriptionId, plan: snap.plan, periodStart: snap.periodStart } }, input.now);
             await markIdem(e.id);
-            return { kind: "reserved", rail, entryId: e.id, chargedMicros: input.priceMicros, balanceBeforeMicros: balance, balanceAfterMicros: balance, subscription: { ...snap, usedMicros: microsFromDb(u.rows[0].used_micros) } } as const;
+            return { kind: "reserved", rail, entryId: e.id, chargedMicros: input.priceMicros, balanceBeforeMicros: balance, balanceAfterMicros: balance, subscription: { ...snap, usedMicros: microsFromDb(u.rows[0].used_micros), usedCalls: Number(u.rows[0].used_calls) } } as const;
           }
           if (!input.subscriptionFallback) break;
           continue;
@@ -203,7 +226,7 @@ export class PostgresBillingStore implements BillingStore {
       if (e.status === "pending") {
         const amount = -microsFromDb(e.amount_micros);
         if (e.rail === "api_credits") await c.query("UPDATE billing_accounts SET credit_balance_micros = credit_balance_micros + $2, updated_at=now() WHERE id=$1", [e.account_id, amount]);
-        else if (e.rail === "subscription") await c.query("UPDATE subscription_usage SET used_micros = GREATEST(0, used_micros - $3), updated_at=now() WHERE subscription_id=$1 AND period_start=$2", [e.metadata.subscriptionId, e.metadata.periodStart, amount]);
+        else if (e.rail === "subscription") await c.query("UPDATE subscription_usage SET used_micros = GREATEST(0, used_micros - $3), used_calls = GREATEST(0, used_calls - 1), updated_at=now() WHERE subscription_id=$1 AND period_start=$2", [e.metadata.subscriptionId, e.metadata.periodStart, amount]);
         await c.query("UPDATE billing_ledger SET status='refunded', updated_at=clock_timestamp() WHERE id=$1", [e.id]);
         const refund = await this.insertEntry(c, { accountId: e.account_id, apiKeyId: e.api_key_id, requestId: e.request_id, toolName: e.tool_name, type: "refund", amountMicros: amount, rail: e.rail, status: "settled", externalTransactionId: null, relatedEntryId: e.id, metadata: { reason: input.reason, ...(e.rail === "subscription" ? { subscriptionId: e.metadata.subscriptionId, periodStart: e.metadata.periodStart } : {}) } }, new Date());
         const bal = (await c.query("SELECT credit_balance_micros FROM billing_accounts WHERE id=$1", [e.account_id])).rows[0];
@@ -249,6 +272,14 @@ export class PostgresBillingStore implements BillingStore {
     const r = since
       ? await this.q("SELECT * FROM billing_ledger WHERE type='credit_purchase' AND created_at >= $1 ORDER BY created_at DESC LIMIT $2", [since, cappedLimit])
       : await this.q("SELECT * FROM billing_ledger WHERE type='credit_purchase' ORDER BY created_at DESC LIMIT $1", [cappedLimit]);
+    return r.rows.map(toEntry);
+  }
+
+  async listLedgerEntries(since: Date | null, limit = MAX_QUERY_LEDGER_ENTRIES): Promise<LedgerEntry[]> {
+    const cappedLimit = Math.max(1, Math.min(MAX_QUERY_LEDGER_ENTRIES, Math.trunc(limit)));
+    const r = since
+      ? await this.q("SELECT * FROM billing_ledger WHERE created_at >= $1 ORDER BY created_at DESC LIMIT $2", [since, cappedLimit])
+      : await this.q("SELECT * FROM billing_ledger ORDER BY created_at DESC LIMIT $1", [cappedLimit]);
     return r.rows.map(toEntry);
   }
 

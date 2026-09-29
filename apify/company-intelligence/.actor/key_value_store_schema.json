@@ -1,0 +1,1 @@
+{ "actorKeyValueStoreSchemaVersion": 1, "title": "Global Company Intelligence & Risk key-value store", "collections": { "summary": { "title": "Run summary", "description": "Machine-readable completion summary.", "key": "OUTPUT" } } }

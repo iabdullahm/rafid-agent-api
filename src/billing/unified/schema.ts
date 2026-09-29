@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS billing_subscriptions (
   plan text NOT NULL,
   status text NOT NULL CHECK (status IN ('active','canceled')),
   included_micros bigint NOT NULL CHECK (included_micros >= 0),
+  included_calls integer CHECK (included_calls IS NULL OR included_calls >= 0),
   anchor_at timestamptz NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   canceled_at timestamptz,
@@ -82,6 +83,8 @@ CREATE TABLE IF NOT EXISTS subscription_usage (
   period_end timestamptz NOT NULL,
   included_micros bigint NOT NULL CHECK (included_micros >= 0),
   used_micros bigint NOT NULL DEFAULT 0,
+  included_calls integer CHECK (included_calls IS NULL OR included_calls >= 0),
+  used_calls integer NOT NULL DEFAULT 0 CHECK (used_calls >= 0),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (subscription_id, period_start),
   CHECK (used_micros >= 0 AND used_micros <= included_micros)
@@ -101,6 +104,30 @@ CREATE TABLE IF NOT EXISTS billing_idempotency (
   PRIMARY KEY (account_id, tool_name, idempotency_key)
 );
 CREATE INDEX IF NOT EXISTS billing_idempotency_entry_idx ON billing_idempotency(ledger_entry_id);
+`
+  },
+  {
+    // Adds "credit_purchase" — a credit funded by an externally-confirmed payment (Stripe /
+    // USDC on Base — see src/billing/external/), kept distinct from an admin-granted "credit" so
+    // revenue reporting can tell "a customer paid us" apart from "an operator typed a number"
+    // (see types.ts's LedgerType doc comment). Purely additive: every existing row's `type` value
+    // remains valid, the CHECK constraint only ever gets MORE permissive, and the external-tx
+    // dedup index is widened the same way applyCredit()'s own app-level dedup check already is.
+    version: 2,
+    sql: `
+ALTER TABLE billing_ledger DROP CONSTRAINT IF EXISTS billing_ledger_type_check;
+ALTER TABLE billing_ledger ADD CONSTRAINT billing_ledger_type_check CHECK (type IN ('credit','debit','refund','adjustment','subscription_usage','credit_purchase'));
+DROP INDEX IF EXISTS billing_ledger_external_tx;
+CREATE UNIQUE INDEX IF NOT EXISTS billing_ledger_external_tx ON billing_ledger(account_id, external_transaction_id)
+  WHERE external_transaction_id IS NOT NULL AND type IN ('credit','adjustment','credit_purchase');
+`
+  }
+  ,{
+    version: 3,
+    sql: `
+ALTER TABLE billing_subscriptions ADD COLUMN IF NOT EXISTS included_calls integer CHECK (included_calls IS NULL OR included_calls >= 0);
+ALTER TABLE subscription_usage ADD COLUMN IF NOT EXISTS included_calls integer CHECK (included_calls IS NULL OR included_calls >= 0);
+ALTER TABLE subscription_usage ADD COLUMN IF NOT EXISTS used_calls integer NOT NULL DEFAULT 0 CHECK (used_calls >= 0);
 `
   }
 ];

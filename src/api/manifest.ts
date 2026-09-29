@@ -4,19 +4,17 @@ import { buildAccountBillingSummary, buildCapabilitiesRegistry, buildPaymentsSum
 import { accountPaymentMethodIds, paymentMethodsPath, railAvailability } from "../billing/unified/discovery.js";
 import { mcpCreditsPath } from "../billing/unified/mcp.js";
 import { mppBasePath } from "../billing/mpp/routes.js";
-import { x402BasePath } from "../billing/x402.js";
+import { x402BasePath, x402DocsPath, X402_PAYMENT_GUIDANCE_VERSION } from "../billing/x402.js";
 import { l402BasePath } from "../billing/l402/gate.js";
 import { mcpRemotePath } from "../mcp/remote.js";
 import type { Config } from "../config/env.js";
+import { PLATFORM_DESCRIPTION, PLATFORM_NAME } from "../brand.js";
 
 type ManifestConfig = Pick<Config, "x402Enabled" | "x402Network" | "x402WalletAddress" | "cdpConfigured" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp" | "billing">>;
 type PluginManifestConfig = Pick<Config, "logoUrl" | "contactEmail" | "legalInfoUrl"> & Partial<Pick<Config, "x402Enabled" | "x402Network" | "billing">>;
 
-const PRODUCT_NAME = "Rafid Property Intelligence";
-const PRODUCT_DESCRIPTION =
-  "Property and facility intelligence tools built for autonomous AI agents: discover a capability, " +
-  "pay per call over x402 (or authenticate with an API key), execute, get a structured result. " +
-  "Not designed primarily as a human dashboard product.";
+const PRODUCT_NAME = PLATFORM_NAME;
+const PRODUCT_DESCRIPTION = PLATFORM_DESCRIPTION;
 
 /** Shared by every manifest below, so "mcp"/"x402"/"rest" and their roles are described
  *  identically everywhere rather than redrifting per document. Remote MCP is only ever
@@ -26,15 +24,15 @@ const PRODUCT_DESCRIPTION =
 function protocolList(config: Pick<Config, "x402Enabled" | "x402Network" | "mcpRemoteEnabled"> & Partial<Pick<Config, "l402Enabled" | "l402Network" | "mpp" | "billing">>) {
   return [
     {
-      protocol: "mcp", role: "primary" as const,
+      protocol: "mcp", role: "compatibility" as const,
       transports: config.mcpRemoteEnabled ? ["stdio", "http"] : ["stdio"],
       remote: config.mcpRemoteEnabled,
       endpoint: config.mcpRemoteEnabled ? mcpRemotePath : null,
       description: config.mcpRemoteEnabled
-        ? `Every capability exposed as an MCP tool with strict input/output schemas, over local stdio (\`npm run mcp\`) or the remote Streamable HTTP transport at ${mcpRemotePath}.`
+        ? `Discovery and compatibility transport only: capabilities are exposed as MCP tools over local stdio (\`npm run mcp\`) or the remote Streamable HTTP transport at ${mcpRemotePath}; paid execution must use each tool's x402Endpoint.`
         : "Every capability exposed as an MCP tool with strict input/output schemas. Not remotely hosted in this environment — run `npm run mcp` after cloning."
     },
-    { protocol: "x402", role: "primary" as const, enabled: config.x402Enabled, network: config.x402Enabled ? config.x402Network : null, description: "Pay-per-call, no account or API key required." },
+    { protocol: "x402", role: "primary" as const, enabled: config.x402Enabled, network: config.x402Enabled ? config.x402Network : null, description: "Primary paid execution path: pay per call with USDC, no account or API key required." },
     ...(config.l402Enabled ? [{ protocol: "l402", role: "primary" as const, enabled: true, network: `lightning:${config.l402Network}`, endpoint: l402BasePath, description: "Pay-per-call over Lightning (L402: macaroon + BOLT11 invoice), no account or API key required." }] : []),
     ...(config.mpp?.enabled ? [{ protocol: "mpp", role: "primary" as const, enabled: true, modes: [...config.mpp.modes], network: config.mpp.tempo.network, endpoint: mppBasePath, description: "Machine Payments Protocol (HTTP 'Payment' auth scheme): one-time charges per call, or budgeted metered sessions (TIP-1034 payment channels) for high-frequency agents. No account or API key required." }] : []),
     // Unified billing (additive, only when enabled): no wallet needed — a Rafid API key pays from
@@ -52,7 +50,8 @@ function protocolList(config: Pick<Config, "x402Enabled" | "x402Network" | "mcpR
  * single capability registry every other endpoint in this project reads — this file adds no
  * tool metadata of its own.
  */
-export function buildAgentManifest(config: ManifestConfig) {
+export function buildAgentManifest(config: ManifestConfig, baseUrl?: string) {
+  const absolute = (path: string) => baseUrl ? new URL(path, baseUrl).toString() : path;
   return {
     name: PRODUCT_NAME,
     description: PRODUCT_DESCRIPTION,
@@ -72,14 +71,19 @@ export function buildAgentManifest(config: ManifestConfig) {
       facilitator: config.x402Enabled ? (config.cdpConfigured ? "coinbase-cdp" : "public") : null,
       payTo: config.x402Enabled ? config.x402WalletAddress : null,
       info: x402BasePath,
-      status: x402BasePath + "/status"
+      status: x402BasePath + "/status",
+      docs: x402DocsPath,
+      guidanceVersion: X402_PAYMENT_GUIDANCE_VERSION,
+      paymentGuidanceVersion: X402_PAYMENT_GUIDANCE_VERSION,
+      nextAction: { type: "pay_and_retry", protocol: "x402", method: "POST", retrySameBody: true }
     },
     // Additive (MPP rollout): which payment rails are live, in one place.
     payments: buildPaymentsSummary(config),
     paymentMethods: paymentMethodsPath,
+    paymentDocumentation: absolute(x402DocsPath),
     ...(railAvailability(config).billing ? { billing: buildAccountBillingSummary(config) } : {}),
     currency: CURRENCY,
-    tools: buildCapabilitiesRegistry(config),
+    tools: buildCapabilitiesRegistry(config, baseUrl),
     roadmap: plannedCapabilities,
     wellKnown: ["/.well-known/ai-plugin.json", "/.well-known/agent.json"],
     llmsTxt: "/llms.txt"
@@ -102,8 +106,8 @@ export function buildAiPluginManifest(config: PluginManifestConfig, origin: stri
   return {
     schema_version: "v1",
     name_for_human: PRODUCT_NAME,
-    name_for_model: "rafid_property_intelligence",
-    description_for_human: "Property investment analysis, property comparison, maintenance-reserve estimates, and Oman/Muscat-specific rental-comparable analysis. Pay per call, no account needed.",
+    name_for_model: "rafid_intelligence_network",
+    description_for_human: PLATFORM_DESCRIPTION,
     description_for_model:
       "Calculates property investment metrics (rental yield, income, simple payback), compares multiple " +
       "properties by net yield, estimates an annual maintenance reserve, and (analyze_oman_property) analyzes " +
@@ -156,7 +160,10 @@ export function buildAgentCard(config: Pick<Config, "x402Enabled"> & Partial<Pic
       tags: [...c.useCases],
       examples: [JSON.stringify(c.example)],
       inputModes: ["application/json"],
-      outputModes: ["application/json"]
+      outputModes: ["application/json"],
+      ...(config.x402Enabled ? {
+        payment: { protocol: "x402", guidanceVersion: X402_PAYMENT_GUIDANCE_VERSION, documentation: origin + x402DocsPath, nextAction: { type: "pay_and_retry", protocol: "x402", method: "POST", retrySameBody: true } }
+      } : {})
     }))
   };
 }

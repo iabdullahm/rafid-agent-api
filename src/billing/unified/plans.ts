@@ -12,21 +12,21 @@ import { usdToMicros } from "./money.js";
 export interface PlanDefinition {
   id: string;
   name: string;
-  allowance: { type: "usd"; monthlyIncludedMicros: number };
+  allowance: { type: "usd"; monthlyIncludedMicros: number; monthlyIncludedCalls: number | null };
 }
 
-const DEFAULT_PLANS: Record<string, { name: string; monthlyIncludedUsd: string }> = {
-  free: { name: "Free", monthlyIncludedUsd: "0" },
-  developer: { name: "Developer", monthlyIncludedUsd: "10" },
-  growth: { name: "Growth", monthlyIncludedUsd: "50" },
-  enterprise: { name: "Enterprise", monthlyIncludedUsd: "500" }
+const DEFAULT_PLANS: Record<string, { name: string; monthlyIncludedUsd: string; monthlyIncludedCalls: number | null }> = {
+  free: { name: "Free", monthlyIncludedUsd: "0", monthlyIncludedCalls: 0 },
+  developer: { name: "Developer", monthlyIncludedUsd: "10", monthlyIncludedCalls: 1_000 },
+  growth: { name: "Growth", monthlyIncludedUsd: "50", monthlyIncludedCalls: 10_000 },
+  enterprise: { name: "Enterprise", monthlyIncludedUsd: "500", monthlyIncludedCalls: 100_000 }
 };
 
 /** Parses BILLING_PLANS_JSON (optional): `{"developer":{"monthlyIncludedUsd":"10"}, ...}`. Plans
  *  given there replace/extend the defaults above; the enterprise allowance can additionally be
  *  overridden per subscription at assignment time. */
 export function loadPlans(json: string | undefined): Record<string, PlanDefinition> {
-  let source: Record<string, { name?: string; monthlyIncludedUsd: string | number }> = { ...DEFAULT_PLANS };
+  let source: Record<string, { name?: string; monthlyIncludedUsd: string | number; monthlyIncludedCalls?: number | null }> = { ...DEFAULT_PLANS };
   if (json && json.trim()) {
     let parsed: unknown;
     try { parsed = JSON.parse(json); } catch { throw new Error("BILLING_PLANS_JSON must be valid JSON"); }
@@ -38,7 +38,8 @@ export function loadPlans(json: string | undefined): Record<string, PlanDefiniti
     if (!/^[a-z][a-z0-9_-]{0,39}$/.test(id)) throw new Error(`BILLING_PLANS_JSON: invalid plan id "${id}"`);
     const micros = usdToMicros(def.monthlyIncludedUsd);
     if (micros < 0) throw new Error(`BILLING_PLANS_JSON: plan "${id}" allowance must not be negative`);
-    plans[id] = { id, name: def.name ?? id, allowance: { type: "usd", monthlyIncludedMicros: micros } };
+    if (def.monthlyIncludedCalls !== null && def.monthlyIncludedCalls !== undefined && (!Number.isSafeInteger(def.monthlyIncludedCalls) || def.monthlyIncludedCalls < 0)) throw new Error(`BILLING_PLANS_JSON: plan "${id}" monthlyIncludedCalls must be a non-negative integer or null`);
+    plans[id] = { id, name: def.name ?? id, allowance: { type: "usd", monthlyIncludedMicros: micros, monthlyIncludedCalls: def.monthlyIncludedCalls ?? null } };
   }
   return plans;
 }

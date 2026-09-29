@@ -163,10 +163,18 @@ export function buildSettlementRecord(args: {
  *  revenue/types.ts's RevenueLedger.record() doc comment. */
 export function recordSettlement(ledger: RevenueLedger, input: RevenueSettlementInput): void {
   try {
-    void Promise.resolve(ledger.record(input)).catch(error => {
+    void recordSettlementAwaited(ledger, input).catch(error => {
       process.stderr.write(`Revenue ledger write failed for request ${input.requestId} (${input.toolName}): ${error instanceof Error ? error.message : String(error)}\n`);
     });
   } catch (error) {
     process.stderr.write(`Revenue ledger write threw synchronously for request ${input.requestId} (${input.toolName}): ${error instanceof Error ? error.message : String(error)}\n`);
   }
+}
+
+/** Awaitable form used before a paid x402 response is sent. Serverless runtimes may freeze
+ * immediately after the response finishes, so a successful settlement must not rely solely on
+ * the fire-and-forget observer above. The unique dedupe key still makes the finish observer safe
+ * if it also sees the same response. */
+export async function recordSettlementAwaited(ledger: RevenueLedger, input: RevenueSettlementInput): Promise<void> {
+  await ledger.record(input);
 }

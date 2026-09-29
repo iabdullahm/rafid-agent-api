@@ -6,9 +6,9 @@ import { ApiError, publicError } from "../utils/errors.js";
 import { createLogger, type Logger } from "../utils/logging.js";
 import { disabledBilling, prices, type BillingGate, type CapabilityName } from "../billing/catalog.js";
 import { BillingService } from "../billing/service.js";
-import { buildX402Gate, buildX402Info, buildX402Status, x402BasePath } from "../billing/x402.js";
+import { buildX402Gate, buildX402Info, buildX402Status, x402BasePath, x402DocsPath, X402_PAYMENT_GUIDANCE_VERSION } from "../billing/x402.js";
 import { capabilities } from "../domain/capabilities.js";
-import { agentBasePath, buildAgentInfo, buildCapabilitiesRegistry, buildPricingInfo, buildToolCatalog, capabilitiesBasePath, pricingBasePath, toolsBasePath } from "./agent.js";
+import { agentBasePath, buildAgentInfo, buildCapabilitiesRegistry, buildPricingInfo, buildSubscriptionPlans, buildToolCatalog, capabilitiesBasePath, pricingBasePath, subscriptionPlansPath, toolsBasePath } from "./agent.js";
 import { createPreviewRoutes, previewBasePath } from "./previewRoutes.js";
 import { createPreviewGlobalRateLimiters, createPreviewExpensiveTierRateLimiter } from "../preview/rateLimit.js";
 import { createInMemoryPreviewCache, type PreviewCache } from "../preview/cache.js";
@@ -41,13 +41,16 @@ import { getAnalyticsDatabaseUrl, getAnalyticsInternalApiKey } from "../analytic
 import { createAnalyticsRoutes } from "./analyticsRoutes.js";
 import { classifyDataSource } from "../analytics/dataSource.js";
 import { extractClientContext } from "../analytics/attribution.js";
-import { recordDiscoveryHit, recordFundingEvent, recordToolInvocation, recordX402Event, classifyX402Outcome, decodeX402SettlementHeader } from "../analytics/recorder.js";
+import { recordDiscoveryHit, recordFundingEvent, recordToolInvocation, recordToolInvocationAwaited, recordX402Event, recordX402EventAwaited, classifyX402Outcome, decodeX402SettlementHeader } from "../analytics/recorder.js";
+import { getWebsiteDownloadArtifact } from "../website-download/service.js";
 import type { RevenueLedger } from "../revenue/types.js";
 import { MemoryRevenueLedger } from "../revenue/memoryLedger.js";
 import { PostgresRevenueLedger } from "../db/revenueStore.js";
 import { getRevenueDatabaseUrl, getRevenueInternalApiKey } from "../revenue/config.js";
 import { createRevenueRoutes } from "./revenueRoutes.js";
-import { decodeX402SettlementMetadata, buildSettlementRecord, recordSettlement } from "../revenue/settlementCapture.js";
+import { getAuditInternalApiKey } from "../audit/config.js";
+import { createAuditRoutes } from "./auditRoutes.js";
+import { decodeX402SettlementMetadata, buildSettlementRecord, recordSettlement, recordSettlementAwaited } from "../revenue/settlementCapture.js";
 import { createDashboardRoutes } from "./dashboardRoutes.js";
 import { buildL402Info, buildL402Status, createL402Gate, l402BasePath } from "../billing/l402/gate.js";
 import { LndRestBackend, type LightningBackend } from "../billing/l402/lightning.js";
@@ -56,10 +59,14 @@ import { PublicBtcUsdRateProvider, type BtcUsdRateProvider } from "../billing/l4
 import { MemoryL402RedemptionStore, PostgresL402RedemptionStore, type L402RedemptionStore } from "../billing/l402/redemptions.js";
 import { buildL402SettlementRecord } from "../billing/l402/settlement.js";
 import { recordL402Event } from "../analytics/recorder.js";
+import { createVoiceRoutes } from "./voiceRoutes.js";
+import { defaultVoiceService } from "../voice/service.js";
 import { createMppMcpHandler, mppMcpPath } from "../billing/mpp/mcp.js";
+import { PLATFORM_NAME } from "../brand.js";
 import { BillingEngine, MemoryBillingStore, PostgresBillingStore, BILLING_RESPONSE_HEADERS, buildPaymentMethods, createAccountRoutes, createBillingAdminRoutes, createCreditsMcpHandler, createPaymentDispatcher, disabledBillingConfig, mcpCreditsPath, paymentMethodsPath, type BillingStore } from "../billing/unified/index.js";
 import { ExternalPaymentsService, MemoryExternalPaymentStore, PostgresExternalPaymentStore, RealStripeClient, buildJsonRpcCaller, createExternalPaymentsAdminRoutes, createExternalPaymentsRoutes, disabledExternalPaymentsConfig, type ExternalPaymentStore, type JsonRpcCall, type StripeClient } from "../billing/external/index.js";
 import { buildMppService, buildMppInfo, buildMppStatus, createMppDisabledRoutes, createMppRoutes, createMppSessionCreateLimiter, mppBasePath, type MppAuditSink, type MppProvider, type MppSessionRepository, type MppChargeRedemptionStore, type MppKv, type MppService } from "../billing/mpp/index.js";
+import { createMonitoringRoutes, MonitoringService } from "../monitoring/service.js";
 /** The largest per-capability JSON body limit (bytes → body-parser string), for shared endpoints. */
 function maxCapabilityBodyLimit(): string {
   const toBytes = (l: string) => { const m = /^(\d+(?:\.\d+)?)\s*(kb|mb)$/i.exec(l.trim()); return m ? Number(m[1]) * (m[2]!.toLowerCase() === "mb" ? 1024 * 1024 : 1024) : 32 * 1024; };
@@ -72,6 +79,11 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
   const store = config.authMode === "postgres" ? options.store : undefined;
   const app = express();
+  // Vercel terminates TLS before forwarding to the Node runtime. Express otherwise
+  // reports req.protocol as "http", which makes the x402 SDK put an unusable HTTP
+  // resource URL into PAYMENT-REQUIRED. Trust exactly the platform's single proxy hop
+  // so x402 challenges and any other protocol-generated absolute URLs remain HTTPS.
+  app.set("trust proxy", 1);
   const logger = options.logger ?? createLogger(config.logLevel);
   const billing = options.billing ?? disabledBilling;
   // Section D/E: usage tracking + centralized pricing/billing decisions. Defaults to an
@@ -109,6 +121,10 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         now: options.billingNow
       })
     : null;
+  const monitoringService = billingEngine && billingConfig.databaseUrl && config.monitoringCronSecret
+    ? new MonitoringService(billingConfig.databaseUrl, billingEngine, config.monitoringCronSecret)
+    : null;
+  if (monitoringService) void monitoringService.migrate().catch(() => {});
   // External payment collection (src/billing/external/): Stripe Checkout + USDC-on-Base top-ups
   // that FUND unified billing's prepaid credits from outside this codebase — never a replacement
   // for x402/L402/MPP, never a second credit ledger (see external/types.ts's accounting-model doc
@@ -147,6 +163,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     res.locals.startedAt = start;
     res.locals.requestId = randomUUID();
     res.setHeader("X-Request-ID", res.locals.requestId);
+    res.setHeader("X-Rafid-Request-Id", res.locals.requestId);
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
@@ -169,7 +186,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-PAYMENT, PAYMENT-SIGNATURE, Authorization, Payment-Authorization, Idempotency-Key, X-Rafid-Payment-Method, X-Rafid-Api-Key, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID");
     // WWW-Authenticate carries the L402 challenge (macaroon + invoice); a browser client must be
     // able to read it back.
-    res.setHeader("Access-Control-Expose-Headers", `Mcp-Session-Id, WWW-Authenticate, X-L402-Error, PAYMENT-REQUIRED, X-PAYMENT-RESPONSE, PAYMENT-RESPONSE, Payment-Receipt, Idempotent-Replay, ${BILLING_RESPONSE_HEADERS.join(", ")}, X-Rafid-Refunded-Transaction-Id`);
+    res.setHeader("Access-Control-Expose-Headers", `Mcp-Session-Id, WWW-Authenticate, X-L402-Error, PAYMENT-REQUIRED, X-PAYMENT-RESPONSE, PAYMENT-RESPONSE, Payment-Receipt, Idempotent-Replay, X-Request-ID, X-Rafid-Request-Id, ${BILLING_RESPONSE_HEADERS.join(", ")}, X-Rafid-Refunded-Transaction-Id`);
     res.setHeader("Access-Control-Max-Age", "600");
     res.on("finish", () => {
       const durationMs = Math.round((performance.now() - start) * 100) / 100;
@@ -199,12 +216,21 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         // remote MCP invocations are recorded separately (mcp/remote.ts), since they never reach
         // this Express middleware chain at all. `dataSource` is set by the capability handler
         // itself right after execute() (see below) — classifyDataSource() reads it straight off
-        // the already-computed response, never a second execute() call.
-        recordToolInvocation(analyticsRepository, {
-          toolName, channel: accessMode === "api-key" || accessMode === "api_credits" || accessMode === "subscription" || accessMode === "free" ? "rest" : accessMode, success: res.statusCode < 400, durationMs,
-          dataSource: (res.locals.dataSource as DataSource | undefined) ?? null,
-          client: extractClientContext(req)
-        });
+        // the already-computed response, never a second execute() call. `channel` keeps
+        // api_credits/subscription/free distinct from a plain legacy "rest" API-key call (only
+        // "api-key" itself collapses to "rest" — see analytics/types.ts's AnalyticsChannel doc
+        // comment) so the Revenue Conversion Audit (src/audit/) can evaluate a prepaid/
+        // subscription/free call against the right ledger instead of assuming x402. `requestId` is
+        // the same res.locals.requestId this exact "finish" handler already used above for
+        // billingService.recordUsage() — the join key the audit correlates every signal by.
+        if (!res.locals.x402DurableToolRecorded) {
+          recordToolInvocation(analyticsRepository, {
+            toolName, channel: accessMode === "api-key" ? "rest" : accessMode, success: res.statusCode < 400, durationMs,
+            dataSource: (res.locals.dataSource as DataSource | undefined) ?? null,
+            client: extractClientContext(req),
+            requestId: typeof res.locals.requestId === "string" ? res.locals.requestId : null
+          });
+        }
         // Free Preview conversion analytics (src/preview/analytics.ts): this `finish` handler is
         // the single point every paid rail (REST/x402/L402/MPP) already funnels through via
         // res.locals.toolName, so it is also the single correct place to detect "a preview was
@@ -273,10 +299,22 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // behind TLS termination; read X-Forwarded-Proto directly instead so /agent.json and the
   // two /.well-known manifests always report the URL the caller actually reached us on.
   const getOrigin = (req: express.Request) => `${(req.header("x-forwarded-proto") ?? req.protocol).split(",")[0]}://${req.get("host")}`;
+  // Keep local contract tests and local callers relative, while public/deployed discovery
+  // receives absolute URLs that an unknown external agent can use without guessing a host.
+  const getPublicBaseUrl = (req: express.Request) => {
+    const host = req.get("host") ?? "";
+    return /^(?:127\.0\.0\.1|localhost)(?::\d+)?$/i.test(host) ? undefined : getOrigin(req);
+  };
   const sendToolResult = (res: express.Response, data: unknown, toolName: CapabilityName) =>
     res.json({ success: true, data, meta: { requestId: res.locals.requestId, tool: toolName, price: prices[toolName], currency: "USD" } });
+  app.get("/api/v1/websites/download/artifacts/:fileId", async (req, res, next) => {
+    try {
+      const archive = await getWebsiteDownloadArtifact(req.params.fileId);
+      res.type("application/zip").setHeader("Content-Disposition", `attachment; filename="website-${req.params.fileId}.zip"`).send(archive);
+    } catch { next(new ApiError(404, "ARTIFACT_NOT_FOUND", "The requested website archive was not found.")); }
+  });
   const discoveryData = {
-    name: "Rafid Agent API", version: "0.1.0", docs: "/docs",
+    name: PLATFORM_NAME, version: "0.1.0", docs: "/docs",
     openapi: "/openapi.json", health: "/api/v1/health",
     agent: agentBasePath, pricing: pricingBasePath, tools: toolsBasePath,
     ...(config.x402Enabled ? { x402: x402BasePath } : {}),
@@ -303,8 +341,9 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   });
   // Section A/B/C: public, unauthenticated agent-marketplace discovery. Always available
   // regardless of X402_ENABLED so an agent can learn how to pay before it decides to.
-  app.get(agentBasePath, discoveryLimiter, (_req, res) => send(res, buildAgentInfo(config)));
+  app.get(agentBasePath, discoveryLimiter, (req, res) => send(res, buildAgentInfo(config, getPublicBaseUrl(req))));
   app.get(pricingBasePath, discoveryLimiter, (_req, res) => send(res, buildPricingInfo(config)));
+  app.get(subscriptionPlansPath, discoveryLimiter, (_req, res) => send(res, buildSubscriptionPlans(config)));
   app.get(toolsBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, toolsBasePath); send(res, buildToolCatalog()); });
   // Machine-first capability registry (Section 8/13): the same data /agent.json's `tools`
   // field carries, exposed on its own path so a caller that only wants tool metadata doesn't
@@ -313,13 +352,13 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // how to authenticate. Always mounted, like /api/v1/x402 — even when billing is disabled it
   // still truthfully lists whichever of x402 / L402 / MPP are live.
   app.get(paymentMethodsPath, discoveryLimiter, (_req, res) => send(res, buildPaymentMethods(config)));
-  app.get(capabilitiesBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, capabilitiesBasePath); send(res, buildCapabilitiesRegistry(config)); });
+  app.get(capabilitiesBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, capabilitiesBasePath); send(res, buildCapabilitiesRegistry(config, getPublicBaseUrl(req))); });
   // Top-level agent discovery manifests. Unauthenticated, GET-only, and — like every other
   // discovery endpoint here — read straight from the shared capability registry.
-  app.get("/agent.json", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/agent.json"); res.json(buildAgentManifest(config)); });
+  app.get("/agent.json", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/agent.json"); res.json(buildAgentManifest(config, getPublicBaseUrl(req))); });
   app.get("/.well-known/ai-plugin.json", discoveryLimiter, (req, res) => res.json(buildAiPluginManifest(config, getOrigin(req))));
   app.get("/.well-known/agent.json", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/.well-known/agent.json"); res.json(buildAgentCard(config, getOrigin(req))); });
-  app.get("/llms.txt", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/llms.txt"); res.type("text/plain").send(buildLlmsTxt(config)); });
+  app.get("/llms.txt", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/llms.txt"); res.type("text/plain").send(buildLlmsTxt(config, `${req.protocol}://${req.get("host")}`)); });
   // GET /api/v1/mcp/status — always mounted (independent of MCP_REMOTE_ENABLED, like
   // /api/v1/x402/status is independent of X402_ENABLED), so a caller can check whether the
   // remote transport is live without guessing from a manifest.
@@ -329,6 +368,18 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // limited as one group with the payment-gated POST routes below (same path prefix).
   app.use(x402BasePath, x402Limiter);
   app.get(x402BasePath, (_req, res) => send(res, buildX402Info(config, billingService)));
+  app.get(x402DocsPath, (_req, res) => res.json({
+    protocol: "x402", x402Version: 2, guidanceVersion: X402_PAYMENT_GUIDANCE_VERSION,
+    purpose: "Machine-readable payment instructions for agents calling Rafid x402 capability endpoints.",
+    flow: ["POST the capability endpoint without payment", "parse PAYMENT-REQUIRED", "create the exact payment", "retry the same method, URL, and JSON body with X-PAYMENT"],
+    headers: { challenge: "PAYMENT-REQUIRED", payment: "X-PAYMENT", settlement: ["X-PAYMENT-RESPONSE", "PAYMENT-RESPONSE"] },
+    clients: { javascript: { packages: ["@x402/fetch", "@x402/evm"], install: "npm install @x402/fetch @x402/evm" }, generic: "Any client that implements x402 v2 exact payments can parse the challenge and retry the unchanged request." },
+    network: config.x402Enabled ? config.x402Network : null,
+    asset: config.x402Enabled ? "USDC" : null,
+    paymentRequired: config.x402Enabled,
+    noPayment: "A 402 challenge never charges the caller. Do not retry unpaid requests repeatedly; use an x402-compatible client or SDK.",
+    endpointPattern: `${x402BasePath}/<capability-path>`
+  }));
   // Section F hardening: a small, factual runtime status report — always mounted, GET-only,
   // and registered before the payment gate below so it is never mistaken for one of the
   // payment-gated POST routes it reports on. See buildX402Status()'s doc comment.
@@ -346,6 +397,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   app.get(mppBasePath + "/status", mppLimiter, async (_req, res, next) => {
     try { send(res, mppServiceRef ? { ...buildMppStatus(config.mpp), ...(await mppServiceRef.status()) } : buildMppStatus(config.mpp)); } catch (error) { next(error); }
   });
+  app.use(createVoiceRoutes(defaultVoiceService));
   const authenticate: RequestHandler = store ? async (req, res, next) => {
     try {
       const principal = await store.authenticate(req.header("x-api-key") ?? "");
@@ -438,6 +490,10 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     app.use((req, res, next) => {
       const toolName = toolNameForX402Path(req.path);
       if (!toolName) { next(); return; }
+      // @x402/express response-body callbacks receive a protocol adapter rather than the
+      // Express response. Preserve the server-generated correlation id in an internal request
+      // header so the agent-facing 402 JSON can include the same id without trusting caller input.
+      req.headers["x-rafid-request-id"] = res.locals.requestId;
       const hadPaymentHeader = Boolean(req.header("x-payment"));
       res.on("finish", () => {
         const settlementHeader = (res.getHeader("x-payment-response") ?? res.getHeader("payment-response")) as string | string[] | undefined;
@@ -445,12 +501,25 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         const eventType = classifyX402Outcome({ hadPaymentHeader, status: res.statusCode, settlement });
         if (!eventType) return;
         const amount = billingService.getToolPrice(toolName);
-        recordX402Event(analyticsRepository, req, { eventType, toolName, amount, currency: "USD", txHash: settlement?.transaction ?? null });
+        // requestId: the same res.locals.requestId used below for recordSettlement's join key —
+        // threaded through so the Revenue Conversion Audit can correlate this analytics row back
+        // to the exact physical request. Fallback is null (never a fabricated randomUUID()): an
+        // analytics event with no requestId is honestly "uncorrelatable", whereas a made-up id
+        // could be mistaken for a real join key. RevenueSettlement.requestId is non-nullable so
+        // recordSettlement below still falls back to randomUUID() for its own record.
+        const x402RequestId = typeof res.locals.requestId === "string" ? res.locals.requestId : null;
+        if (!res.locals.x402DurableSettlementRecorded) {
+          const paymentDocsUrl = `${getOrigin(req)}${x402DocsPath}`;
+          recordX402Event(analyticsRepository, req, {
+            eventType, toolName, amount, currency: "USD", txHash: settlement?.transaction ?? null, requestId: x402RequestId,
+            ...(eventType === "challenge" ? { paymentGuidanceVersion: X402_PAYMENT_GUIDANCE_VERSION, paymentDocsUrl, challengeParseable: true } : {})
+          });
+        }
         // A settled payment implies verification already succeeded (buildX402Gate()'s doc
         // comment: settlement is never attempted on an unverified payment) — record both funnel
         // steps from the one observable success, rather than only the terminal one.
-        if (eventType === "settlement_success") {
-          recordX402Event(analyticsRepository, req, { eventType: "payment_verified", toolName, amount, currency: "USD", txHash: null });
+        if (eventType === "settlement_success" && !res.locals.x402DurableSettlementRecorded) {
+          recordX402Event(analyticsRepository, req, { eventType: "payment_verified", toolName, amount, currency: "USD", txHash: null, requestId: x402RequestId });
         }
         // Revenue ledger (trustworthy accounting — see src/revenue/types.ts): only when a
         // settlement was actually observed (succeeded or failed), never for a bare 402 challenge
@@ -458,7 +527,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         // RevenueSettlementStatus doc comment for why. Decoded independently of the analytics
         // decode above (revenue/settlementCapture.ts's doc comment explains why) from the exact
         // same header, so this never changes what's sent back to the caller.
-        if (eventType === "settlement_success" || eventType === "settlement_failure") {
+        if (!res.locals.x402DurableSettlementRecorded && (eventType === "settlement_success" || eventType === "settlement_failure")) {
           const decoded = decodeX402SettlementMetadata(settlementHeader);
           if (decoded) {
             recordSettlement(revenueLedger, buildSettlementRecord({
@@ -481,9 +550,42 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         (_req, res, next) => { res.locals.toolName = c.name; res.locals.channel = "x402"; next(); },
         (req, _res, next) => req.is("application/json") ? next() : next(new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Use application/json")),
         c.requestBodyLimit ? parseJsonFor(c) : parseJsonX402, async (req, res) => {
+          const startedAt = performance.now();
           const input = c.input.parse(req.body);
           const data = await c.execute(input);
           res.locals.dataSource = classifyDataSource(c.name, data);
+          // Persist successful settlement evidence before sending the paid response. A Vercel
+          // function may be frozen immediately after `finish`, so the old finish-only observer
+          // could return HTTP 200 while losing the accounting insert and analytics rows. The
+          // ledger's transaction-hash dedupe key makes this safe even if the finish observer also
+          // runs (for older routes, failures, or a persistence error here).
+          const settlementHeader = (res.getHeader("x-payment-response") ?? res.getHeader("payment-response")) as string | string[] | undefined;
+          const settled = decodeX402SettlementMetadata(settlementHeader);
+          if (settled?.success && settled.transaction) {
+            const requestId = typeof res.locals.requestId === "string" ? res.locals.requestId : randomUUID();
+            const amount = billingService.getToolPrice(c.name);
+            try {
+              const record = buildSettlementRecord({
+                settlement: settled, requestId, toolName: c.name, network: config.x402Network,
+                facilitator: config.cdpConfigured ? "coinbase-cdp" : "public",
+                payToAddress: config.x402WalletAddress, requirementAmountDecimal: amount, currency: "USDC"
+              });
+              await recordSettlementAwaited(revenueLedger, record);
+              await recordX402EventAwaited(analyticsRepository, req, { eventType: "settlement_success", toolName: c.name, amount, currency: "USD", txHash: settled.transaction, requestId });
+              await recordX402EventAwaited(analyticsRepository, req, { eventType: "payment_verified", toolName: c.name, amount, currency: "USD", txHash: null, requestId });
+              await recordToolInvocationAwaited(analyticsRepository, {
+                toolName: c.name, channel: "x402", success: true,
+                durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+                dataSource: (res.locals.dataSource as DataSource | undefined) ?? null, client: extractClientContext(req), requestId
+              });
+              res.locals.x402DurableSettlementRecorded = true;
+              res.locals.x402DurableToolRecorded = true;
+            } catch (error) {
+              // Keep the already-settled paid call usable, but leave the finish observer active
+              // and emit a secret-free diagnostic so the reconciliation path can recover it.
+              process.stderr.write(`x402 post-settlement persistence failed for ${c.name}/${requestId}: ${error instanceof Error ? error.message : String(error)}\n`);
+            }
+          }
           sendToolResult(res, data, c.name);
         });
     }
@@ -511,13 +613,20 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     const l402Gate = createL402Gate({
       config, backend: l402Backend, rates: l402Rates, redemptions: l402Redemptions, now: options.l402Now,
       priceUsd: t => billingService.getToolPrice(t),
-      onChallenge: (req, tool) => recordL402Event(analyticsRepository, req, { eventType: "challenge", toolName: tool, amount: billingService.getToolPrice(tool), txHash: null }),
-      onRejected: (req, tool) => recordL402Event(analyticsRepository, req, { eventType: "payment_failed", toolName: tool, amount: billingService.getToolPrice(tool), txHash: null }),
+      // requestId: onChallenge/onRejected only receive `req`, not `res` — express-serve-static-
+      // core's Request type declares `req.res?: Response`, the same live response object the
+      // top-level middleware stamped res.locals.requestId onto (app.ts:148), so this reads the
+      // same join key recordSettlement below uses, never a fabricated one. Fallback is null (an
+      // analytics row with no requestId is honestly uncorrelatable) — recordSettlement's own
+      // requestId is non-nullable so it keeps its randomUUID() fallback.
+      onChallenge: (req, tool) => recordL402Event(analyticsRepository, req, { eventType: "challenge", toolName: tool, amount: billingService.getToolPrice(tool), txHash: null, requestId: typeof req.res?.locals.requestId === "string" ? req.res.locals.requestId : null }),
+      onRejected: (req, tool) => recordL402Event(analyticsRepository, req, { eventType: "payment_failed", toolName: tool, amount: billingService.getToolPrice(tool), txHash: null, requestId: typeof req.res?.locals.requestId === "string" ? req.res.locals.requestId : null }),
       onRedeemed: (req, res, ctx) => {
-        recordL402Event(analyticsRepository, req, { eventType: "settlement_success", toolName: ctx.toolName, amount: ctx.priceUsd, txHash: ctx.paymentHashHex });
+        const l402RequestId = typeof res.locals.requestId === "string" ? res.locals.requestId : null;
+        recordL402Event(analyticsRepository, req, { eventType: "settlement_success", toolName: ctx.toolName, amount: ctx.priceUsd, txHash: ctx.paymentHashHex, requestId: l402RequestId });
         recordSettlement(revenueLedger, buildL402SettlementRecord({
           ctx, network: config.l402Network, payTo: l402PayTo, facilitator: config.l402Backend,
-          requestId: typeof res.locals.requestId === "string" ? res.locals.requestId : randomUUID()
+          requestId: l402RequestId ?? randomUUID()
         }));
       }
     });
@@ -571,6 +680,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // (BILLING_ADMIN_SECRET; 503 until configured) and MCP + API-key billing at /mcp/credits.
   const billingLimiter = config.rateLimitEnabled ? createRateLimiter(rateLimitOptions) : disabledRateLimiter;
   if (billingEngine) app.use(createAccountRoutes({ engine: billingEngine, limiter: billingLimiter }));
+  if (monitoringService && billingEngine) app.use(createMonitoringRoutes({ service: monitoringService, engine: billingEngine, limiter: billingLimiter, cronSecret: config.monitoringCronSecret }));
   app.use(createBillingAdminRoutes({ engine: billingEngine, adminSecret: billingConfig.adminSecret, limiter: billingLimiter }));
   // External payment collection (Stripe Checkout / USDC on Base — src/billing/external/http.ts):
   // each of the three money-moving actions the spec calls out (Section 22) gets its OWN rate
@@ -591,8 +701,12 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       priceUsd: tool => billingService.getToolPrice(tool as CapabilityName),
       delegate: createRemoteMcpHandler(billingService, logger, analyticsRepository, config),
       onToolCall: (event, req) => {
-        void billingService.recordUsage({ requestId: randomUUID(), keyIdentifier: "mcp-credits", toolName: event.toolName as CapabilityName, accessMode: "mcp-credits", status: event.status, durationMs: event.durationMs, billableAmount: event.status < 400 ? billingService.getToolPrice(event.toolName as CapabilityName) : 0, currency: "USD" });
-        recordToolInvocation(analyticsRepository, { toolName: event.toolName, channel: "mcp-remote", success: event.status < 400, durationMs: event.durationMs, dataSource: event.data === undefined ? null : classifyDataSource(event.toolName as CapabilityName, event.data), client: extractClientContext(req) });
+        // event.requestId is the real res.locals.requestId threaded through from
+        // createCreditsMcpHandler (billing/unified/mcp.ts) — using it here (instead of a fresh
+        // randomUUID() per event) lets the Revenue Conversion Audit correlate this usage-ledger
+        // row with the same request's analytics row below and its billing ledger entries.
+        void billingService.recordUsage({ requestId: event.requestId, keyIdentifier: "mcp-credits", toolName: event.toolName as CapabilityName, accessMode: "mcp-credits", status: event.status, durationMs: event.durationMs, billableAmount: event.status < 400 ? billingService.getToolPrice(event.toolName as CapabilityName) : 0, currency: "USD" });
+        recordToolInvocation(analyticsRepository, { toolName: event.toolName, channel: "mcp-remote", success: event.status < 400, durationMs: event.durationMs, dataSource: event.data === undefined ? null : classifyDataSource(event.toolName as CapabilityName, event.data), client: extractClientContext(req), requestId: event.requestId });
       }
     }));
   }
@@ -610,7 +724,26 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     // through untouched.
     // The MCP endpoint carries every tool's arguments, so it accepts the largest per-tool body limit.
     app.use(mcpRemotePath, express.json({ limit: maxCapabilityBodyLimit() }));
-    app.all(mcpRemotePath, createRemoteMcpHandler(billingService, logger, analyticsRepository, config));
+    const remoteMcpHandler = createRemoteMcpHandler(billingService, logger, analyticsRepository, config);
+    // A billing-configured MCP client commonly keeps the server URL as `/mcp` and supplies its
+    // Rafid key as a static Authorization header. Route that shape through the paid handler so it
+    // cannot accidentally execute billable tools on the legacy transport. Calls without a billing
+    // key receive HTTP 402 for priced tools; clients can pay through `/mcp/credits` explicitly.
+    const paidMcpHandler = billingEngine ? createCreditsMcpHandler({
+      engine: billingEngine, config, capabilities,
+      priceUsd: tool => billingService.getToolPrice(tool as CapabilityName),
+      delegate: remoteMcpHandler,
+      onToolCall: (event, req) => {
+        void billingService.recordUsage({ requestId: event.requestId, keyIdentifier: "mcp-credits", toolName: event.toolName as CapabilityName, accessMode: "mcp-credits", status: event.status, durationMs: event.durationMs, billableAmount: event.status < 400 ? billingService.getToolPrice(event.toolName as CapabilityName) : 0, currency: "USD" });
+        recordToolInvocation(analyticsRepository, { toolName: event.toolName, channel: "mcp-remote", success: event.status < 400, durationMs: event.durationMs, dataSource: event.data === undefined ? null : classifyDataSource(event.toolName as CapabilityName, event.data), client: extractClientContext(req), requestId: event.requestId });
+      }
+    }) : null;
+    app.all(mcpRemotePath, (req, res, next) => {
+      const authorization = req.header("authorization") ?? "";
+      const hasRafidBillingKey = /^Bearer\s+raf_(?:live|test)_\S+$/i.test(authorization);
+      if (paidMcpHandler && hasRafidBillingKey) return paidMcpHandler(req, res, next);
+      return remoteMcpHandler(req, res, next);
+    });
   }
   // Partner Data Feed layer (Section 3/4/9/11) — deliberately outside the `capabilities` registry
   // above, so it never appears in /agent.json, the tool catalog, remote MCP, or the x402 route
@@ -645,7 +778,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   if (config.adminEnabled && businessRepository) {
     app.use(createAdminRoutes({ config, repository: businessRepository }));
   }
-  // Internal Rafid Property Intelligence dashboard (/internal/dashboard — see dashboardRoutes.ts's
+  // Internal Rafid Intelligence Network dashboard (/internal/dashboard — see dashboardRoutes.ts's
   // doc comment). Deliberately mounted on config.adminEnabled ALONE, unlike the business admin
   // dashboard immediately above: this dashboard reads only the analytics and revenue layers
   // (always constructed, regardless of database configuration), never businessRepository, so it
@@ -670,6 +803,11 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // its own dedicated REVENUE_INTERNAL_API_KEY (revenue/config.ts). Never registered in the
   // `capabilities` array; never a public dashboard.
   app.use(createRevenueRoutes({ ledger: revenueLedger, analyticsRepository, billingService, internalApiKey: getRevenueInternalApiKey() }));
+  // Revenue Conversion Audit (spec: "explains, for every capability/tool call, why it did or did
+  // not convert into paid revenue" — src/audit/): its own dedicated internal key (see
+  // audit/config.ts's doc comment), reusing this exact analyticsRepository/revenueLedger/
+  // billingEngine/billingService — never a new store.
+  app.use(createAuditRoutes({ analyticsRepository, revenueLedger, billingEngine, priceUsd: tool => billingService.getToolPrice(tool), internalApiKey: getAuditInternalApiKey() }));
   app.use((_req, _res, next) => next(new ApiError(404, "NOT_FOUND", "Endpoint not found")));
   const errors: ErrorRequestHandler = async (error, _req, res, _next) => {
     const type = (error as { type?: string })?.type;

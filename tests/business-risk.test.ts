@@ -22,6 +22,7 @@ import { BRS_SYNTHETIC_EXAMPLE_NOTICE } from "../src/domain/examples/businessRis
 import { BUSINESS_RISK_SCORE_EXAMPLE_OUTPUT } from "../src/domain/examples/businessRiskScoreExample.js";
 import { FixtureProvider, newsItem, registryRecord, sanctionsEntry } from "../src/company-reputation/examples/syntheticScenario.js";
 import { MemoryReputationEvidenceCache } from "../src/company-reputation/evidenceCache.js";
+import { hasStrongIdentitySignal, resolveIdentity, scoreCandidate } from "../src/company-reputation/companyResolver.js";
 import { CompaniesHouseFilingsProvider, RegulatoryActionsProvider, SafeBrowsingProvider, withRole } from "../src/business-risk/providers/index.js";
 import { DEFAULT_CATEGORY_WEIGHTS, RISK_LEVEL_BANDS, SEVERITY_POINTS, SIGNAL_RULES, getCategoryWeights, riskLevelFor } from "../src/business-risk/config.js";
 import { clamp, computeScore, scoreCategory } from "../src/business-risk/scoring.js";
@@ -183,6 +184,46 @@ test("6. entity ambiguity: similar same-country registry candidates → AMBIGUOU
   const rendered = publicError(err);
   assert.equal(rendered.status, 409);
   assert.deepEqual((rendered.error as { details: unknown }).details, err.details);
+});
+
+test("entity-resolution eligibility rejects country-only Microsoft candidates", () => {
+  const now = new Date("2026-01-01T00:00:00.000Z");
+  const query = buildBusinessRiskQuery(businessRiskScoreInput.parse({ companyName: "Microsoft", website: "microsoft.com", country: "US" }));
+  const microsoftIndia = registryRecord("registry_gleif", now, { recordId: "E0634802012-0", legalName: "Microsoft India Corporation", registrationNumber: "E0634802012-0", lei: null, country: "US", city: "Renaissance Drive", status: "active", incorporationDate: "2012-12-11", registryName: "GLEIF Global LEI Index" });
+  const microsoftCapital = registryRecord("registry_gleif", now, { recordId: "E0251202009-0", legalName: "MICROSOFT CAPITAL GROUP, LLC", registrationNumber: "E0251202009-0", lei: null, country: "US", city: "CARSON CITY", status: "active", incorporationDate: "2009-11-05", registryName: "GLEIF Global LEI Index" });
+  const resolution = resolveIdentity(query, [microsoftIndia, microsoftCapital], true, null);
+  assert.equal(scoreCandidate(query, microsoftIndia).matchedOn.includes("country"), true);
+  assert.equal(hasStrongIdentitySignal(scoreCandidate(query, microsoftIndia)), false);
+  assert.equal(hasStrongIdentitySignal(scoreCandidate(query, microsoftCapital)), false);
+  assert.equal(resolution.status, "unresolved");
+  assert.equal(resolution.candidates.length, 0);
+});
+
+test("entity-resolution eligibility requires recorded strong evidence and ranks stable identifiers", () => {
+  const now = new Date("2026-01-01T00:00:00.000Z");
+  const query = buildBusinessRiskQuery(businessRiskScoreInput.parse({ companyName: "Microsoft", website: "microsoft.com", country: "US" }));
+  const named = registryRecord("registry_gleif", now, { recordId: "named", legalName: "Microsoft Corporation", registrationNumber: "named-reg", lei: null, country: "US", city: null, status: "active", incorporationDate: null, registryName: "Example Registry" });
+  const domain = registryRecord("registry_gleif", now, { recordId: "domain", legalName: "Unrelated Holdings", registrationNumber: "domain-reg", lei: null, country: "US", city: null, status: "active", incorporationDate: null, registryName: "Example Registry" });
+  domain.companyIdentifiers.domain = "microsoft.com";
+  domain.metadata.domain = "microsoft.com";
+  const namedScore = scoreCandidate(query, named);
+  const domainScore = scoreCandidate(query, domain);
+  assert.equal(namedScore.matchedOn.includes("name"), true);
+  assert.equal(hasStrongIdentitySignal(namedScore), true);
+  assert.equal(domainScore.matchedOn.includes("domain"), true);
+  assert.equal(hasStrongIdentitySignal(domainScore), true);
+  assert.ok(domainScore.score >= 0.8);
+
+  const byRegistration = buildBusinessRiskQuery(businessRiskScoreInput.parse({ companyName: "Microsoft", website: "microsoft.com", country: "US", registrationNumber: "named-reg" }));
+  const resolved = resolveIdentity(byRegistration, [named], true, null);
+  assert.equal(resolved.status, "resolved");
+  assert.equal(resolved.matched?.matchedOn.includes("registration_number"), true);
+
+  const secondNamed = registryRecord("registry_gleif", now, { recordId: "named-2", legalName: "Microsoft Corporation", registrationNumber: "second-reg", lei: null, country: "US", city: null, status: "active", incorporationDate: null, registryName: "Example Registry" });
+  const ambiguous = resolveIdentity(query, [named, secondNamed], true, null);
+  assert.equal(ambiguous.status, "ambiguous");
+  assert.equal(ambiguous.candidates.length, 2);
+  assert.ok(ambiguous.candidates.every(candidate => candidate.matchedOn.includes("name")));
 });
 
 test("7. entity not found: jurisdiction registry has no such company and no other presence → ENTITY_NOT_FOUND 404; with a working website it is scored as an unverified identity instead", async () => {
@@ -646,8 +687,8 @@ test("26. REST exposure: POST /api/v1/risk/business-risk-score returns the envel
   });
 });
 
-test("27. MCP registration: business_risk_score is an MCP tool with the registry description, strict input schema and structured output", async () => {
-  await withServer(loadConfig({ RAFID_API_KEYS: key }), async base => {
+test("27. MCP registration: business_risk_score is an MCP tool with the registry description, strict input schema and paid execution gate", async () => {
+  await withServer(loadConfig({ RAFID_API_KEYS: key, MCP_REMOTE_ENABLED: "true" }), async base => {
     const rpc = async (id: number, method: string, params: unknown) => (await (await fetch(base + "/mcp", {
       method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params })
@@ -661,11 +702,14 @@ test("27. MCP registration: business_risk_score is an MCP tool with the registry
     assert.deepEqual(tool.inputSchema.required, ["companyName"]);
     assert.ok(tool.outputSchema.properties.riskScore && tool.outputSchema.properties.recommendation);
     assert.equal(tool.annotations.idempotentHint, true);
-    const called = await rpc(2, "tools/call", { name: "business_risk_score", arguments: { companyName: "Example Trading Ltd", country: "GB" } });
-    assert.ok(!called.result.isError);
-    assert.ok(businessRiskScoreOutput.safeParse(called.result.structuredContent).success);
+    const called = await fetch(base + "/mcp", {
+      method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "business_risk_score", arguments: { companyName: "Example Trading Ltd", country: "GB" } } })
+    });
+    assert.equal(called.status, 402);
+    assert.equal((await called.json() as any).error.code, -32002);
     const invalid = await rpc(3, "tools/call", { name: "business_risk_score", arguments: { country: "GB" } });
-    assert.ok(invalid.result?.isError || invalid.error);
+    assert.equal(invalid.error.code, -32002);
   });
 });
 
@@ -764,6 +808,20 @@ test("32. x402 enforcement: an unpaid request gets 402 with a $0.50 (500000 USDC
       assert.equal(required.accepts[0].amount, "500000");
       assert.equal(required.accepts[0].payTo, wallet);
       assert.ok(String(required.resource.url).endsWith("/api/v1/x402/risk/business-risk-score"));
+      const guidance = await res.clone().json();
+      assert.equal(guidance.error, "payment_required");
+      assert.equal(guidance.protocol, "x402");
+      assert.equal(guidance.x402Version, 2);
+      assert.equal(guidance.payment.network, "eip155:84532");
+      assert.equal(guidance.payment.asset, "USDC");
+      assert.equal(guidance.retry.header, "X-PAYMENT");
+      assert.equal(guidance.retry.preserveRequestBody, true);
+      assert.match(guidance.docs, /\/docs\/x402$/);
+      assert.equal(guidance.requestId, res.headers.get("x-rafid-request-id"));
+      assert.ok(!JSON.stringify(guidance).includes("test-only-not-a-real-credential"));
+      const docs = await (await fetch(base + "/docs/x402")).json();
+      assert.deepEqual(docs.headers.challenge, "PAYMENT-REQUIRED");
+      assert.ok(docs.flow.includes("retry the same method, URL, and JSON body with X-PAYMENT"));
       // An API key does not bypass the payment gate.
       const withKey = await fetch(base + "/api/v1/x402" + cap.path, { method: "POST", headers: { "Content-Type": "application/json", "X-API-Key": key }, body: JSON.stringify(cap.example) });
       assert.equal(withKey.status, 402);

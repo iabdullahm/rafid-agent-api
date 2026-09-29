@@ -1,0 +1,25 @@
+{
+  "actorSpecification": 1,
+  "title": "Global Company Intelligence & Risk dataset",
+  "fields": {
+    "type": "object",
+    "properties": {
+      "companyName": { "type": "string", "title": "Company" },
+      "domain": { "type": ["string", "null"], "title": "Domain" },
+      "country": { "type": ["string", "null"], "title": "Country" },
+      "mode": { "type": "string", "title": "Mode" },
+      "success": { "type": "boolean", "title": "Success" },
+      "resolutionStatus": { "type": ["string", "null"], "title": "Resolution status" },
+      "candidateCount": { "type": ["integer", "null"], "title": "Candidate count" },
+      "resolution": { "type": ["object", "null"], "title": "Entity resolution" },
+      "reputationScore": { "type": ["number", "null"], "title": "Reputation score" },
+      "riskScore": { "type": ["number", "null"], "title": "Risk score" },
+      "riskLevel": { "type": ["string", "null"], "title": "Risk level" },
+      "confidence": { "type": ["number", "null"], "title": "Confidence" },
+      "generatedAt": { "type": "string", "title": "Generated at" },
+      "result": { "type": ["object", "null"], "title": "Full structured result" },
+      "error": { "type": ["object", "null"], "title": "Error" }
+    }
+  },
+  "views": { "overview": { "title": "Company results", "transformation": { "fields": ["companyName", "domain", "country", "mode", "success", "reputationScore", "riskScore", "riskLevel", "confidence", "generatedAt"] }, "display": { "component": "table", "properties": {} } } }
+}

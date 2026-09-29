@@ -680,7 +680,7 @@ async function withServer<T>(env: Record<string, string>, fn: (base: string) => 
 }
 
 test("MCP + discovery + REST: registered as an MCP tool, listed on every discovery surface, REST returns the envelope and 400 on invalid input", async () => {
-  await withServer({ RAFID_API_KEYS: key, X402_ENABLED: "true", X402_WALLET_ADDRESS: "0x1234567890123456789012345678901234567890" }, async base => {
+  await withServer({ RAFID_API_KEYS: key, X402_ENABLED: "true", MCP_REMOTE_ENABLED: "true", X402_WALLET_ADDRESS: "0x1234567890123456789012345678901234567890" }, async base => {
     const rpc = async (id: number, method: string, params: unknown) => (await (await fetch(base + "/mcp", {
       method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
       body: JSON.stringify({ jsonrpc: "2.0", id, method, params })
@@ -692,8 +692,9 @@ test("MCP + discovery + REST: registered as an MCP tool, listed on every discove
     assert.equal(tool.inputSchema.additionalProperties, false);
     assert.equal(tool.annotations.idempotentHint, true);
     const called = await rpc(2, "tools/call", { name: "company_reputation_check", arguments: { companyName: "Example Technologies Ltd", country: "GB" } });
-    assert.ok(!called.result.isError);
-    assert.ok(companyReputationCheckOutput.safeParse(called.result.structuredContent).success);
+    assert.equal(called.error?.code, -32002);
+    assert.match(called.error?.message ?? "", /Payment required/);
+    assert.equal(called.error?.data?.paymentEndpoint, "/mcp/credits");
     const invalid = await rpc(3, "tools/call", { name: "company_reputation_check", arguments: { country: "GB" } });
     assert.ok(invalid.result?.isError || invalid.error);
 

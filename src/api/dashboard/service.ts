@@ -25,6 +25,12 @@ import {
 } from "../../billing/unified/reporting.js";
 import type { ExternalPaymentsService } from "../../billing/external/service.js";
 import type { ExternalPayment } from "../../billing/external/types.js";
+import { buildCallAuditRecords } from "../../audit/build.js";
+import {
+  buildToolAudit, buildCommercialFunnel, buildAuditReconciliation, diagnoseToolRow, recommendationFor,
+  type ToolAuditRow, type CommercialFunnel, type AuditAnomaly
+} from "../../audit/aggregate.js";
+import type { CallAuditRecord, FinalStatus, ReasonCode } from "../../audit/types.js";
 
 /**
  * Internal dashboard BFF (backend-for-frontend) business logic (spec sections 2-9, 11, 14).
@@ -267,6 +273,37 @@ export interface RevenueByToolRow extends RevenueToolStats {
   sharePct: number | null;
 }
 
+export interface RevenueAttributionRow {
+  source: string;
+  campaign: string;
+  clientType: string;
+  capability: string;
+  settledCalls: number;
+  revenueByCurrency: Record<string, number>;
+}
+
+function buildRevenueByAttribution(settlements: readonly RevenueSettlement[], events: readonly AnalyticsEvent[]): RevenueAttributionRow[] {
+  const eventByRequest = new Map<string, AnalyticsEvent>();
+  for (const event of events) {
+    if (event.category === "x402" && event.eventType === "settlement_success" && event.requestId && event.trafficClass !== "internal_test") eventByRequest.set(event.requestId, event);
+  }
+  const grouped = new Map<string, RevenueAttributionRow>();
+  for (const settlement of settlements) {
+    const event = eventByRequest.get(settlement.requestId);
+    if (!event) continue;
+    const row: RevenueAttributionRow = {
+      source: event.source ?? "unknown", campaign: event.campaign ?? "unknown", clientType: event.clientType ?? "unknown",
+      capability: settlement.capabilityName, settledCalls: 0, revenueByCurrency: {}
+    };
+    const key = [row.source, row.campaign, row.clientType, row.capability].join("\u001f");
+    const existing = grouped.get(key) ?? row;
+    existing.settledCalls++;
+    if (settlement.amountDecimal !== null && settlement.currency) existing.revenueByCurrency[settlement.currency] = round((existing.revenueByCurrency[settlement.currency] ?? 0) + settlement.amountDecimal, 4);
+    grouped.set(key, existing);
+  }
+  return [...grouped.values()].sort((a, b) => b.settledCalls - a.settledCalls || a.source.localeCompare(b.source));
+}
+
 /**
  * "Top Tools / Conversion by Tool" (dashboard section added 2026-09-23) — which capabilities
  * attract usage vs. which actually convert into paid revenue. Reuses three already-fetched,
@@ -343,6 +380,9 @@ export const CAPABILITY_OVERVIEW_SORT_KEYS: readonly CapabilityOverviewSortKey[]
 
 export interface CapabilityOverviewRow {
   toolName: string;
+  /** Human-readable vertical derived from the capability registry's category metadata. */
+  /** Optional for callers constructing compatibility/test rows; registry-built rows always set it. */
+  vertical?: string;
   /** The capability's current public price, read straight off the registry (domain/
    *  capabilities.ts) — the single source of truth billing/catalog.ts's `prices` is itself
    *  derived from — never a second literal. */
@@ -371,6 +411,26 @@ export interface CapabilityOverviewRow {
   averageRevenuePerSettledCall: number | null;
   p50LatencyMs: number | null;
   p95LatencyMs: number | null;
+}
+
+const VERTICAL_LABELS: Record<string, string> = {
+  property: "Property Intelligence",
+  company: "Company Intelligence",
+  supplier: "Supplier Intelligence",
+  document_intelligence: "Document Intelligence",
+  risk_intelligence: "Risk Intelligence",
+  finance_risk: "Finance & Risk Intelligence",
+  automotive: "Vehicle Intelligence",
+  logistics: "Logistics Intelligence",
+  recruitment: "Recruitment Intelligence",
+  trading: "Trading Intelligence",
+  voice: "Voice Intelligence",
+  website_services: "Website Intelligence",
+  video_generation: "Video Generation"
+};
+
+function capabilityVertical(capability: (typeof capabilities)[number]): string {
+  return VERTICAL_LABELS[capability.category ?? ""] ?? "General Intelligence";
 }
 
 /** Builds one row per REGISTERED capability (domain/capabilities.ts's `capabilities` array),
@@ -402,6 +462,7 @@ export function buildCapabilityOverview(args: {
     const conversionPct = challenges === 0 ? null : round((revStats.settledCalls / challenges) * 100, 1);
     return {
       toolName: capability.name,
+      vertical: capabilityVertical(capability),
       price: capability.price,
       priceCurrency: capability.currency,
       registryIndex,
@@ -444,6 +505,7 @@ export interface X402FunnelReport {
   paymentVerified: number;
   settlementSucceeded: number;
   settlementFailed: number;
+  challengeQuality?: X402Window["challengeQuality"];
   conversion: {
     challengeToVerifiedPct: number | null;
     verifiedToSettledPct: number | null;
@@ -466,6 +528,76 @@ export interface UsageReport {
 }
 
 // -----------------------------------------------------------------------------------------------
+// Revenue Conversion Audit (spec: "explains, for every capability/tool call, why it did or did
+// not convert into paid revenue" — src/audit/). Augments this dashboard; never replaces any
+// section above (Revenue, Revenue Overview, Collection & Funding, All Capabilities Overview,
+// Top Tools/Conversion by Tool, Active Agents, Reconciliation all stay exactly as they were).
+// -----------------------------------------------------------------------------------------------
+
+export interface RevenueConversionAuditSection {
+  funnel: CommercialFunnel;
+  toolAudit: ToolAuditRow[];
+  /** reasonCode -> how many calls carried it, across every non-converted/non-free-success call —
+   *  the dashboard's "top conversion blockers" list (spec section 11). Excludes the two reason
+   *  codes that mean "this call was never expected to convert" (payment_not_required,
+   *  execution_succeeded_free_path) so a busy free-tier tool never crowds out real blockers. */
+  topBlockers: { reasonCode: ReasonCode; count: number }[];
+  /** Latest 20 non-converted calls (spec section 13) — finalStatus !== "converted" and !==
+   *  "free_success" (a free call was never expected to convert, so it isn't a "blocker" row). */
+  recentNonConverted: CallAuditRecord[];
+  /** Latest 20 converted calls — the positive counterpart, for a quick sanity check that revenue
+   *  IS flowing when it should be. */
+  recentConverted: CallAuditRecord[];
+  anomalies: AuditAnomaly[];
+  diagnoses: string[];
+  recommendations: { reasonCode: ReasonCode; recommendation: string }[];
+  totalCalls: number;
+}
+
+const RECENT_AUDIT_ROWS = 20;
+const NON_CONVERTING_STATUSES: readonly FinalStatus[] = [
+  "not_converted", "failed_before_payment", "payment_failed", "settlement_failed", "reconciliation_issue", "unknown"
+];
+
+/** Builds the whole Revenue Conversion Audit dashboard section from CallAuditRecords already
+ *  reconstructed by buildCallAuditRecords() over this SAME period's already-fetched `events`,
+ *  `settlements`, and unified-billing `ledgerEntries` — no new query beyond the one additional
+ *  listLedgerEntries() call buildDashboardData() below makes (settled-only listSettledCharges()
+ *  doesn't carry the pending/refunded rows the audit needs to reconstruct a release). */
+export function buildRevenueConversionAuditSection(records: readonly CallAuditRecord[], catalogPriceByTool: Record<string, number>): RevenueConversionAuditSection {
+  const funnel = buildCommercialFunnel(records);
+  const toolAudit = buildToolAudit(records);
+  const anomalies = buildAuditReconciliation(records, catalogPriceByTool);
+  const diagnoses = toolAudit.map(diagnoseToolRow);
+
+  const blockerCounts = new Map<ReasonCode, number>();
+  for (const r of records) {
+    if (r.reasonCode === "payment_not_required" || r.reasonCode === "execution_succeeded_free_path") continue;
+    if (r.finalStatus === "converted" || r.finalStatus === "free_success") continue;
+    blockerCounts.set(r.reasonCode, (blockerCounts.get(r.reasonCode) ?? 0) + 1);
+  }
+  const topBlockers = [...blockerCounts.entries()]
+    .map(([reasonCode, count]) => ({ reasonCode, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  const seenReasons = new Set<ReasonCode>();
+  const recommendations: { reasonCode: ReasonCode; recommendation: string }[] = [];
+  for (const b of topBlockers) {
+    const rec = recommendationFor(b.reasonCode);
+    if (rec && !seenReasons.has(b.reasonCode)) { recommendations.push({ reasonCode: b.reasonCode, recommendation: rec }); seenReasons.add(b.reasonCode); }
+  }
+
+  const sorted = [...records].sort((a, b) => b.calledAt.localeCompare(a.calledAt));
+  return {
+    funnel, toolAudit, topBlockers,
+    recentNonConverted: sorted.filter(r => NON_CONVERTING_STATUSES.includes(r.finalStatus)).slice(0, RECENT_AUDIT_ROWS),
+    recentConverted: sorted.filter(r => r.finalStatus === "converted").slice(0, RECENT_AUDIT_ROWS),
+    anomalies, diagnoses, recommendations, totalCalls: records.length
+  };
+}
+
+// -----------------------------------------------------------------------------------------------
 // AI Agent Operations Command Center (dashboard redesign added 2026-09-23) — three new,
 // PRESENTATION-ONLY derived views, computed entirely from data already fetched above (`events`,
 // `toolsWindow`, `x402Funnel`, reconciliation's anomaly count). No new analytics system, no new
@@ -485,7 +617,7 @@ export type AgentStatusLevel = "active" | "processing" | "waiting" | "error";
  *  capability is added to the registry, add its name to the best-fit group's toolNames below (or a
  *  new group, if none fits) — buildAgentStatuses() falls through to the generic tool-group branch
  *  for any id other than "payment"/"reconciliation", so no other code change is required. */
-export type AgentGroupId = "research" | "property" | "supplier" | "risk" | "document" | "valuation" | "payment" | "reconciliation";
+export type AgentGroupId = "research" | "property" | "supplier" | "risk" | "document" | "valuation" | "logistics" | "trading" | "recruitment" | "voice" | "business" | "website" | "video" | "payment" | "reconciliation";
 
 export interface AgentGroupDef {
   id: AgentGroupId;
@@ -498,11 +630,18 @@ export interface AgentGroupDef {
 
 export const AGENT_GROUPS: readonly AgentGroupDef[] = [
   { id: "research", name: "Research Agent", toolNames: ["research_company", "find_companies"] },
-  { id: "property", name: "Property Agent", toolNames: ["analyze_property", "compare_properties", "estimate_maintenance", "analyze_oman_property"] },
-  { id: "supplier", name: "Supplier Intelligence Agent", toolNames: ["search_oman_company", "get_oman_company_profile", "analyze_oman_company", "due_diligence_oman_company", "oman_supplier_check"] },
-  { id: "risk", name: "Risk Agent", toolNames: ["analyze_company_risk", "company_reputation_check", "business_risk_score", "invoice_anomaly_check"] },
+  { id: "property", name: "Property Agent", toolNames: ["analyze_property", "compare_properties", "estimate_maintenance", "analyze_oman_property", "property_investment_report", "portfolio_screen"] },
+  { id: "supplier", name: "Supplier Intelligence Agent", toolNames: ["search_oman_company", "get_oman_company_profile", "analyze_oman_company", "due_diligence_oman_company", "oman_supplier_check", "supplier_due_diligence_report", "procurement_vendor_shortlist"] },
+  { id: "risk", name: "Risk Agent", toolNames: ["analyze_company_risk", "company_reputation_check", "business_risk_score", "company_due_diligence", "company_risk_report", "company_risk_batch", "invoice_anomaly_check"] },
   { id: "document", name: "Document Intelligence Agent", toolNames: ["document_facts_extract"] },
   { id: "valuation", name: "Vehicle Valuation Agent", toolNames: ["vehicle_value_estimate"] },
+  { id: "logistics", name: "Logistics Agent", toolNames: ["shipping_cost_estimate"] },
+  { id: "trading", name: "Trading Analysis Agent", toolNames: ["strategy_performance_analysis", "trade_risk_score", "portfolio_exposure_check", "trade_log_analysis"] },
+  { id: "recruitment", name: "Recruitment Intelligence Agent", toolNames: ["extract_candidate_profile", "generate_job_profile", "cv_score", "cv_job_match", "cv_improve", "candidate_shortlist_score"] },
+  { id: "voice", name: "Voice Operations Agent", toolNames: ["ai_call_agent", "voice_lead_qualifier", "appointment_call_agent"] },
+  { id: "business", name: "Business Planning Agent", toolNames: ["startup_readiness_score", "business_idea_validate", "business_idea_generator", "business_validation_plan", "ideal_customer_profile", "competitor_analysis", "business_model_builder", "startup_cost_estimate", "product_pricing_calculator", "break_even_calculator", "business_profitability_analysis", "offer_builder", "oman_go_to_market_plan", "content_plan_generator", "first_10_customers_plan", "sales_response_builder", "whatsapp_business_setup", "monthly_business_financial_report", "oman_business_launch_plan", "business_90_day_growth_plan", "business_risk_check", "final_business_plan_builder", "oman_business_launch_advisor", "oman_business_plan_generator", "oman_small_business_guide"] },
+  { id: "website", name: "Website Operations Agent", toolNames: ["website_project_estimate", "website_audit", "website_download"] },
+  { id: "video", name: "Video Generation Agent", toolNames: ["social_video_generate", "news_video_generate", "product_promo_video"] },
   { id: "payment", name: "Payment / Settlement Agent", toolNames: [] },
   { id: "reconciliation", name: "Reconciliation Agent", toolNames: [] }
 ];
@@ -525,6 +664,15 @@ export interface AgentStatusRow {
   toolNames: readonly string[];
   calls: number;
   lastEventAt: string | null;
+  /** Revenue Conversion Audit additions (spec section 15) — summed from src/audit/'s
+   *  ToolAuditRow across this group's own toolNames, so a tool-group card can show HOW MANY of
+   *  its calls actually became revenue and why the rest didn't, not just raw call/success counts.
+   *  Undefined (never a fabricated zero) for the two cross-cutting agents ("payment"/
+   *  "reconciliation", which have no toolNames of their own) and whenever the audit section
+   *  itself wasn't computed for this render. */
+  paidConversions?: number;
+  revenueUsd?: number | null;
+  topFailureReason?: string | null;
 }
 
 function fmtPctForStatus(n: number | null): string {
@@ -545,8 +693,12 @@ export function buildAgentStatuses(args: {
   settledPayments: number;
   anomalyCount: number;
   now: Date;
+  /** Revenue Conversion Audit's per-tool rows (see RevenueConversionAuditSection) — optional so
+   *  every pre-existing call site/test keeps compiling and rendering unchanged when omitted (the
+   *  three new fields on AgentStatusRow are then simply absent, never a fabricated zero). */
+  toolAudit?: readonly ToolAuditRow[];
 }): AgentStatusRow[] {
-  const { events, toolsWindow, x402Funnel, settledPayments, anomalyCount, now } = args;
+  const { events, toolsWindow, x402Funnel, settledPayments, anomalyCount, now, toolAudit } = args;
 
   const rows: AgentStatusRow[] = AGENT_GROUPS.map(group => {
     if (group.id === "payment") {
@@ -609,10 +761,33 @@ export function buildAgentStatuses(args: {
     } else {
       status = "active"; statusLabel = "Active"; currentTask = `${calls} call(s) this period · ${fmtPctForStatus(successRatePct)} success`;
     }
+    // Revenue Conversion Audit rollup for this group (spec section 15) — summed across the
+    // group's own toolNames from the already-computed toolAudit rows; undefined (not zero) when
+    // toolAudit wasn't passed at all.
+    let paidConversions: number | undefined; let revenueUsd: number | null | undefined; let topFailureReasonForGroup: string | null | undefined;
+    if (toolAudit) {
+      const groupRows = toolAudit.filter(r => (group.toolNames as readonly string[]).includes(r.toolName));
+      paidConversions = groupRows.reduce((sum, r) => sum + r.settled, 0);
+      const revenueByCurrency: Record<string, number> = {};
+      for (const r of groupRows) for (const [cur, amt] of Object.entries(r.revenueByCurrency)) revenueByCurrency[cur] = round((revenueByCurrency[cur] ?? 0) + amt, 6);
+      const currencies = Object.keys(revenueByCurrency);
+      revenueUsd = currencies.length === 1 && currencies[0] === "USD" ? revenueByCurrency.USD! : (currencies.length === 0 ? 0 : null);
+      const reasonCounts = new Map<string, number>();
+      for (const r of groupRows) {
+        if (!r.topFailureReason) continue;
+        const failingCalls = (r.dropOffBreakdown as Record<string, number>);
+        const failingCount = Object.entries(failingCalls).filter(([status]) => status !== "converted" && status !== "free_success").reduce((s, [, n]) => s + n, 0);
+        if (failingCount > 0) reasonCounts.set(r.topFailureReason, (reasonCounts.get(r.topFailureReason) ?? 0) + failingCount);
+      }
+      let best: string | null = null; let bestCount = 0;
+      for (const [reason, count] of reasonCounts) if (count > bestCount) { best = reason; bestCount = count; }
+      topFailureReasonForGroup = best;
+    }
     return {
       id: group.id, name: group.name, status, statusLabel, currentTask,
       metricLabel: `${calls} call(s) · ${fmtPctForStatus(successRatePct)} success`,
-      toolNames: group.toolNames, calls, lastEventAt: lastEvent?.createdAt ?? null
+      toolNames: group.toolNames, calls, lastEventAt: lastEvent?.createdAt ?? null,
+      paidConversions, revenueUsd, topFailureReason: topFailureReasonForGroup
     };
   });
 
@@ -784,7 +959,7 @@ export interface PreviewFunnelReport {
 }
 
 function buildPreviewFunnel(events: readonly AnalyticsEvent[]): PreviewFunnelReport {
-  const previewEvents = events.filter(e => e.category === "preview");
+  const previewEvents = events.filter(e => e.category === "preview" && e.trafficClass !== "internal_test");
   const count = (t: AnalyticsEvent["eventType"]) => previewEvents.filter(e => e.eventType === t).length;
   const requested = count("preview_requested");
   const cacheHits = count("preview_cache_hit");
@@ -1068,6 +1243,7 @@ export interface DashboardData {
   paidCalls: number;
   revenueTrend: RevenueTrend;
   revenueByTool: RevenueByToolRow[];
+  revenueByAttribution: RevenueAttributionRow[];
   /** Default-sorted by revenue descending (same tie-break as revenueByTool); the dashboard's own
    *  sort control re-orders this array client-side — see page.ts. Only includes a tool that had
    *  some real activity this period (a call, a challenge, or a settlement) — deliberately NOT the
@@ -1110,6 +1286,9 @@ export interface DashboardData {
   /** Recent external payments / top-up history (spec section 19) — see ExternalPaymentRow's own
    *  doc comment. Newest first, capped at MAX_TRANSACTIONS_SHOWN like `transactions` above. */
   externalPaymentsTable: ExternalPaymentRow[];
+  /** "REVENUE CONVERSION AUDIT" section (spec section 11) — see RevenueConversionAuditSection's
+   *  own doc comment. Augments this dashboard; never replaces any section above. */
+  revenueConversionAudit: RevenueConversionAuditSection;
 }
 
 export interface DashboardServiceOptions {
@@ -1140,12 +1319,15 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   const revenueSince = periodSince(period, now);
   const eventsSince = analyticsSince(period, now);
 
-  const [settlements, events, unifiedBillingEntries, externalPayments, totalOutstandingBalanceMicros] = await Promise.all([
+  const [settlements, events, unifiedBillingEntries, externalPayments, totalOutstandingBalanceMicros, auditLedgerEntries] = await Promise.all([
     opts.revenueLedger.query({ since: revenueSince }),
     opts.analyticsRepository.queryEvents(eventsSince),
     opts.billingEngine ? opts.billingEngine.store.listSettledCharges(revenueSince) : Promise.resolve<LedgerEntry[]>([]),
     opts.externalPaymentsService ? opts.externalPaymentsService.listExternalPayments({ since: revenueSince }) : Promise.resolve<ExternalPayment[]>([]),
-    opts.billingEngine ? opts.billingEngine.store.totalOutstandingBalanceMicros() : Promise.resolve(0)
+    opts.billingEngine ? opts.billingEngine.store.totalOutstandingBalanceMicros() : Promise.resolve(0),
+    // Revenue Conversion Audit needs the FULL reserve->settle/release lifecycle (pending/settled/
+    // refunded), not just settled charges — see store.ts's listLedgerEntries() doc comment.
+    opts.billingEngine ? opts.billingEngine.store.listLedgerEntries(revenueSince) : Promise.resolve<LedgerEntry[]>([])
   ]);
 
   // ---- Revenue (source of truth: settlement_succeeded rows only — see aggregate.ts) ----
@@ -1176,6 +1358,7 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
     paymentVerified: x402Window.paymentVerified,
     settlementSucceeded: x402Window.settlementSuccess,
     settlementFailed: x402Window.settlementFailure,
+    challengeQuality: x402Window.challengeQuality,
     conversion: {
       challengeToVerifiedPct: conversionPct(x402Window.paymentVerified, x402Window.challenges),
       verifiedToSettledPct: conversionPct(x402Window.settlementSuccess, x402Window.paymentVerified),
@@ -1291,10 +1474,19 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
     period, periodEvents: events, periodSettlements: settlements
   });
 
+  // ---- Revenue Conversion Audit (spec: "explains, for every capability/tool call, why it did or
+  // did not convert into paid revenue" — src/audit/) — reuses the exact same `events`/
+  // `settlements` already fetched above, plus `auditLedgerEntries` (the full reserve->settle/
+  // release lifecycle, fetched alongside unifiedBillingEntries above). No new query beyond that
+  // one additional listLedgerEntries() call. ----
+  const callAuditRecords = buildCallAuditRecords({ events, settlements, ledgerEntries: auditLedgerEntries });
+  const revenueConversionAudit = buildRevenueConversionAuditSection(callAuditRecords, catalogPriceByTool);
+
   // ---- AI Agent Operations Command Center additions — all computed from data already fetched
   // above; see each function's own doc comment for the exact real fields behind it. ----
   const agents = buildAgentStatuses({
-    events, toolsWindow, x402Funnel, settledPayments: revenue.settledPayments, anomalyCount: anomalies.length, now
+    events, toolsWindow, x402Funnel, settledPayments: revenue.settledPayments, anomalyCount: anomalies.length, now,
+    toolAudit: revenueConversionAudit.toolAudit
   });
   const activityFeed = buildActivityFeed(events);
   const systemHealth = buildSystemHealthScore(systemStatus, anomalies.length);
@@ -1338,9 +1530,10 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   };
 
   return {
-    period, generatedAt: now.toISOString(), revenue, paidCalls, revenueTrend, revenueByTool, toolConversion,
+    period, generatedAt: now.toISOString(), revenue, paidCalls, revenueTrend, revenueByTool,
+    revenueByAttribution: buildRevenueByAttribution(settlements, events), toolConversion,
     capabilityOverview, x402Funnel, previewFunnel, unifiedBillingRevenue, revenueOverview, collectionFunding, externalPaymentsTable, usage,
     transactions, reconciliation: { anomalyCount: anomalies.length, anomalies }, systemStatus,
-    agents, activityFeed, systemHealth, sparklines
+    agents, activityFeed, systemHealth, sparklines, revenueConversionAudit
   };
 }

@@ -40,10 +40,10 @@ const digest = (s: string) => createHash("sha256").update(s).digest();
  * like middleware/auth.ts's apiKeyAuth(), so neither the key's length nor its value can be
  * inferred from response timing.
  */
-export function requireInternalAuth(internalApiKey: string | null): RequestHandler {
+export function requireInternalAuth(internalApiKey: string | null, variableName = "MARKET_DATA_INTERNAL_API_KEY"): RequestHandler {
   const expected = internalApiKey ? digest(internalApiKey) : null;
   return (req, res, next) => {
-    if (!expected) { next(new ApiError(503, "SERVICE_UNAVAILABLE", "Internal market-data endpoints are not configured (MARKET_DATA_INTERNAL_API_KEY is unset)")); return; }
+    if (!expected) { next(new ApiError(503, "SERVICE_UNAVAILABLE", `Internal endpoints are not configured (${variableName} is unset)`)); return; }
     const presented = digest(req.header("x-internal-api-key") ?? "");
     if (!timingSafeEqual(presented, expected)) { next(new ApiError(401, "UNAUTHORIZED", "A valid X-Internal-Api-Key header is required")); return; }
     next();

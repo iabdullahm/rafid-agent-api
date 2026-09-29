@@ -1,0 +1,21 @@
+{
+  "$schema": "https://apify-projects.github.io/actor-json-schemas/output.json?v=0.3",
+  "actorOutputSchemaVersion": 1,
+  "title": "Website Business Analysis Results",
+  "description": "Structured website business analysis stored in the default dataset, with the latest complete result available in the default key-value store.",
+  "type": "object",
+  "properties": {
+    "websiteBusinessAnalysisResults": {
+      "type": "string",
+      "title": "Website Business Analysis Results",
+      "description": "Main analysis result in the default dataset. The dataset schema describes schemaVersion, success, company, businessModel, products, services, pricing, contacts, socialProfiles, technology, seo, conversion, businessSignals, scores, opportunities, salesIntelligence, crawl, confidence, and generatedAt.",
+      "template": "{{links.apiDefaultDatasetUrl}}/items"
+    },
+    "latestAnalysis": {
+      "type": "string",
+      "title": "Latest Analysis Record",
+      "description": "Latest complete result written to the OUTPUT record in the default key-value store, including structured error output for failed runs.",
+      "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/OUTPUT"
+    }
+  }
+}

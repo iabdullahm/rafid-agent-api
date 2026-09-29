@@ -321,6 +321,22 @@ test("analyze_company_risk: with nothing configured beyond the always-on corpora
   assert.equal(result.checks.domain.status, "not_configured");
 });
 
+test("analyze_company_risk: optional live checks fail closed into an unavailable check instead of failing the whole report", async () => {
+  process.env.RISK_LIVE_CHECKS_ENABLED = "true";
+  delete process.env.WEB_SEARCH_PROVIDER;
+  try {
+    const result = await runAnalyzeCompanyRisk({ company: "Acme Corporation", website: "https://acme.example.com" });
+    analyzeCompanyRiskOutput.parse(result);
+    assert.ok(result.checks.corporateIdentity);
+    // With no search provider, news checks remain an honest configuration result; the key
+    // regression is that the complete report is still returned and schema-valid.
+    assert.ok(["not_configured", "unavailable", "performed"].includes(result.checks.adverseNews.status));
+    assert.ok(["not_configured", "unavailable", "performed"].includes(result.checks.website.status));
+  } finally {
+    delete process.env.RISK_LIVE_CHECKS_ENABLED;
+  }
+});
+
 test("analyze_company_risk: calling execute() twice in the same process returns identical results (no cache-induced drift) — the exact invariant the generic per-capability test loops rely on", async () => {
   delete process.env.RISK_LIVE_CHECKS_ENABLED;
   delete process.env.WEB_SEARCH_PROVIDER;

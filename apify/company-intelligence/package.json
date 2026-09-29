@@ -1,0 +1,17 @@
+{
+  "name": "@rafid/apify-company-intelligence",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "apify": "^3.4.0",
+    "tsx": "^4.20.0"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.0"
+  }
+}

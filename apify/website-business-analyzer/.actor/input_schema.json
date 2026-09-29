@@ -1,0 +1,23 @@
+{
+  "title": "Website Business Analyzer input",
+  "description": "Analyze one public business website. The crawler is bounded, same-domain by default, and SSRF protected.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "websiteUrl": { "title": "Website URL", "type": "string", "description": "Public http(s) website URL, for example https://example.com", "editor": "textfield", "default": "https://example.com", "pattern": "^https?://" },
+    "maxPages": { "title": "Maximum pages", "type": "integer", "description": "Maximum HTML pages to analyze (1–50).", "default": 15, "minimum": 1, "maximum": 50, "editor": "number" },
+    "maxDepth": { "title": "Maximum link depth", "type": "integer", "description": "Maximum number of internal link hops from the homepage (0–5).", "default": 2, "minimum": 0, "maximum": 5, "editor": "number" },
+    "includeBusinessAnalysis": { "title": "Business analysis", "description": "Extract company, business model, products, and services.", "type": "boolean", "default": true },
+    "includeTechnology": { "title": "Technology detection", "description": "Detect technologies from public HTML, scripts, headers, and metadata.", "type": "boolean", "default": true },
+    "includeSEO": { "title": "SEO signals", "description": "Analyze measurable on-page SEO and indexability signals.", "type": "boolean", "default": true },
+    "includeSalesIntelligence": { "title": "Sales intelligence", "description": "Generate evidence-based sales, marketing, and automation opportunities.", "type": "boolean", "default": true },
+    "includeContacts": { "title": "Contacts", "description": "Extract publicly displayed business emails, phones, addresses, and contact page.", "type": "boolean", "default": true },
+    "includeSocialProfiles": { "title": "Social profiles", "description": "Detect public links to major social and developer profiles.", "type": "boolean", "default": true },
+    "includePricing": { "title": "Pricing intelligence", "description": "Detect pricing pages, plans, prices, trials, and contact-for-pricing signals.", "type": "boolean", "default": true },
+    "includeOpportunities": { "title": "Opportunities", "description": "Return prioritized, evidence-based website improvement opportunities.", "type": "boolean", "default": true },
+    "sameDomainOnly": { "title": "Same domain only", "type": "boolean", "description": "Do not follow links or redirects to another hostname.", "default": true },
+    "language": { "title": "Content language", "description": "Language hint for the website content; auto is recommended.", "type": "string", "enum": ["auto", "en", "ar", "other"], "default": "auto", "editor": "select" }
+  },
+  "required": ["websiteUrl"],
+  "additionalProperties": false
+}

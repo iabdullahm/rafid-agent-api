@@ -1,0 +1,6 @@
+{
+  "actorSpecification": 1,
+  "title": "Website Business Analyzer dataset",
+  "views": { "overview": { "title": "Business intelligence", "transformation": { "fields": ["success", "company.name", "company.domain", "scores.websiteQuality", "scores.conversionReadiness", "crawl.pagesAnalyzed", "generatedAt"] } } },
+  "fields": { "type": "object", "properties": { "success": { "type": "boolean" }, "schemaVersion": { "type": "string" }, "company": { "type": "object" }, "businessModel": { "type": "object" }, "products": { "type": "array" }, "services": { "type": "array" }, "pricing": { "type": "object" }, "contacts": { "type": "object" }, "socialProfiles": { "type": "object" }, "technology": { "type": "object" }, "seo": { "type": "object" }, "conversion": { "type": "object" }, "businessSignals": { "type": "object" }, "scores": { "type": "object" }, "opportunities": { "type": "array" }, "salesIntelligence": { "type": "object" }, "crawl": { "type": "object" }, "confidence": { "type": "object" }, "generatedAt": { "type": "string" }, "error": { "type": "object" } } }
+}

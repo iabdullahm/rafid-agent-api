@@ -582,7 +582,7 @@ test("17. discovery metadata: registry entry and every discovery surface (/api/v
   assert.equal(cap.sideEffects, false);
   assert.equal(capabilities.filter(c => c.name === "document_facts_extract").length, 1);
   assert.ok(!/\bOman\b/.test(cap.description + cap.whenToUse), "the capability is global, not Oman-specific");
-  await withServer(loadConfig({ RAFID_API_KEYS: key, X402_ENABLED: "true", X402_WALLET_ADDRESS: wallet }), async base => {
+  await withServer(loadConfig({ RAFID_API_KEYS: key, X402_ENABLED: "true", X402_WALLET_ADDRESS: wallet, MCP_REMOTE_ENABLED: "true" }), async base => {
     for (const path of ["/agent.json", "/.well-known/agent.json", "/llms.txt", "/api/v1/capabilities", "/api/v1/pricing", "/api/v1/tools", "/openapi.json", "/api/v1/x402"]) {
       const text = await (await fetch(base + path)).text();
       assert.ok(text.includes("document_facts_extract") || text.includes("documents/facts-extract"), path);
@@ -611,9 +611,9 @@ test("17. discovery metadata: registry entry and every discovery surface (/api/v
     const big = SAMPLE_INVOICE + "\n" + "Note line for the file. ".repeat(3000);
     assert.ok(big.length > 40_000);
     const called = await rpc(2, "tools/call", { name: "document_facts_extract", arguments: { text: big, requestedFacts: ["invoice number"] } });
-    assert.ok(!called.result.isError, JSON.stringify(called).slice(0, 300));
-    assert.ok(documentFactsExtractOutput.safeParse(called.result.structuredContent).success);
-    assert.equal(called.result.structuredContent.requestedFacts[0].value, "INV-2026-0042");
+    assert.equal(called.error?.code, -32002, JSON.stringify(called).slice(0, 300));
+    assert.match(called.error?.message ?? "", /Payment required/i);
+    assert.equal(called.error?.data?.paymentEndpoint, "/mcp/credits");
     const missing = await rpc(3, "tools/call", { name: "document_facts_extract", arguments: {} });
     assert.ok(missing.result?.isError || missing.error);
   });

@@ -24,6 +24,13 @@ export interface RequestClientContext {
   userAgent: string | null;
   referer: string | null;
   clientName: string | null;
+  source?: string | null;
+  utmMedium?: string | null;
+  campaign?: string | null;
+  utmContent?: string | null;
+  referrerHost?: string | null;
+  clientType?: "browser" | "curl" | "sdk" | "mcp-client" | "unknown";
+  trafficClass?: "production_external" | "internal_test" | "unknown";
 }
 
 export const mcpClientContext = new AsyncLocalStorage<RequestClientContext>();

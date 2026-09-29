@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Standalone example client for Rafid Agent API's pay-per-call x402 endpoints. Demonstrates the unpaid 402 quote, then (optionally) a real x402 payment using the official x402 client SDK. Not part of the Rafid Agent API server itself.",
+  "description": "Standalone example client for Rafid Intelligence Network's pay-per-call x402 endpoints. Demonstrates the unpaid 402 quote, then (optionally) a real x402 payment using the official x402 client SDK. Not part of the Rafid Intelligence Network server itself.",
   "engines": {
     "node": ">=18"
   },

@@ -1,6 +1,6 @@
 import {
   companyNameSimilarity, countriesMentioned, domainLabel, foldForMatch, legalFormConflict, legalFormFamilies, legalFormsNearName,
-  mentionStrength, normalizeCompanyName, registrationNumbersMatch
+  mentionStrength, normalizeCompanyName, normalizeDomain, registrationNumbersMatch
 } from "./normalization.js";
 import type { ReputationQuery } from "./providers/types.js";
 import type { NormalizedEvidence } from "./types.js";
@@ -57,6 +57,7 @@ const MATCH_THRESHOLD = 0.6;
 const PROBABLE_THRESHOLD = 0.7;
 const RESOLVED_THRESHOLD = 0.85;
 const AMBIGUITY_MARGIN = 0.08;
+const STRONG_NAME_MATCH_THRESHOLD = 0.75;
 
 function str(v: unknown): string | null { return typeof v === "string" && v.length > 0 ? v : null; }
 function strs(v: unknown): string[] { return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []; }
@@ -79,11 +80,14 @@ export function scoreCandidate(q: ReputationQuery, e: NormalizedEvidence): Regis
   let score: number;
   const leiMatch = Boolean(q.lei && lei && q.lei === lei);
   const regMatch = registrationNumbersMatch(q.registrationNumber, regNo);
+  const candidateDomain = str(e.companyIdentifiers.domain) ?? str(e.metadata.domain);
+  const domainMatch = Boolean(q.domain && candidateDomain && normalizeDomain(candidateDomain) === q.domain);
   if (leiMatch) { matchedOn.push("lei"); score = nameSim >= 0.5 ? 0.98 : 0.85; }
   else if (regMatch) { matchedOn.push("registration_number"); score = nameSim >= 0.5 ? 0.95 : 0.8; }
   else score = nameSim * 0.8;
+  if (domainMatch) { matchedOn.push("domain"); score = Math.max(score, nameSim >= 0.5 ? 0.9 : 0.8); }
   if ((leiMatch || regMatch) && nameSim < 0.5) conflicts.push("identifier_matches_differently_named_entity");
-  if (nameSim >= 0.85) matchedOn.push("name");
+  if (nameSim >= STRONG_NAME_MATCH_THRESHOLD) { matchedOn.push("name"); score = Math.max(score, nameSim * 0.8); }
   if (q.country && country === q.country.code) { matchedOn.push("country"); if (!leiMatch && !regMatch) score += 0.1; }
   if (q.city && city && foldForMatch(q.city) === foldForMatch(city)) { matchedOn.push("city"); if (!leiMatch && !regMatch) score += 0.05; }
   else if (q.city && city) { conflicts.push("city_differs"); if (!leiMatch && !regMatch) score -= 0.1; }
@@ -92,6 +96,12 @@ export function scoreCandidate(q: ReputationQuery, e: NormalizedEvidence): Regis
   if (q.lei && lei && !leiMatch) { conflicts.push("lei_differs"); score -= 0.5; }
   score = Math.max(0, Math.min(0.98, Math.round(score * 100) / 100));
   return { evidenceId: e.id, legalName, country, city, registrationNumber: regNo, lei, status: str(e.metadata.status) ?? "unknown", incorporationDate: str(e.metadata.incorporationDate), registryName: str(e.metadata.registryName) ?? e.sourceName, score, matchedOn, conflicts };
+}
+
+/** Country, city and address are supporting context only. A candidate must carry a stable or
+ * strong identity signal before it can resolve or participate in AMBIGUOUS_ENTITY. */
+export function hasStrongIdentitySignal(candidate: Pick<RegistryCandidateView, "matchedOn">): boolean {
+  return candidate.matchedOn.some(signal => ["lei", "registration_number", "domain", "name"].includes(signal));
 }
 
 /** Does the domain's brand label plausibly belong to this company name (e.g. "exampletech" for
@@ -110,7 +120,7 @@ export function domainConsistentWithName(domain: string | null, companyName: str
 
 export function resolveIdentity(q: ReputationQuery, registryEvidence: readonly NormalizedEvidence[], registryChecked: boolean, websiteEvidence: NormalizedEvidence | null): Resolution {
   const all = registryEvidence.map(e => scoreCandidate(q, e)).sort((a, b) => b.score - a.score || a.evidenceId.localeCompare(b.evidenceId));
-  const candidates = all.filter(c => c.score >= MATCH_THRESHOLD);
+  const candidates = all.filter(c => c.score >= MATCH_THRESHOLD && hasStrongIdentitySignal(c));
 
   const siteText = websiteEvidence && websiteEvidence.metadata.reachable === true ? `${websiteEvidence.title ?? ""} ${str(websiteEvidence.metadata.textExcerpt) ?? ""}` : "";
   const websiteCorroborates = Boolean(siteText) && [q.companyName, q.legalName].some(n => n && mentionStrength(siteText, n) >= 0.6);
@@ -133,7 +143,7 @@ export function resolveIdentity(q: ReputationQuery, registryEvidence: readonly N
   if (!best) {
     return {
       status: registryChecked ? "unresolved" : "registry_not_checked", confidence: round(inputOnlyConfidence()), resolvedName: null, matched: null,
-      corroboratingRecords: [], candidates: all.slice(0, 5), methods: [...methods, "input_identifiers_only"], conflicts, websiteCorroborates, domainConsistentWithName: domainConsistent
+      corroboratingRecords: [], candidates: candidates.slice(0, 5), methods: [...methods, "input_identifiers_only"], conflicts, websiteCorroborates, domainConsistentWithName: domainConsistent
     };
   }
   const decisive = best.matchedOn.includes("lei") || best.matchedOn.includes("registration_number");

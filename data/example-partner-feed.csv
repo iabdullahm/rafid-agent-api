@@ -1,0 +1,7 @@
+governorate,wilayat,area,propertyType,bedrooms,bathrooms,sizeSqm,transactionType,priceOMR,rentPeriod,furnished,sourceType,sourceName,sourceRecordId,sourceUrl,observedAt,metadata
+Muscat,Muscat,Al Mouj,apartment,2,2,135,rental,820,monthly,furnished,partner_feed,Gulf Realty Oman,GRO-2001,https://example-partner.test/units/2001,2026-08-01,"{""floor"": 6}"
+Muscat,Muscat,Al Mouj,apartment,1,1,85,rental,540,monthly,unfurnished,partner_feed,Gulf Realty Oman,GRO-2002,https://example-partner.test/units/2002,2026-08-02,
+Muscat,Bawshar,Bausher,villa,4,4,350,rental,1050,monthly,semi_furnished,partner_feed,Gulf Realty Oman,GRO-2003,https://example-partner.test/units/2003,2026-07-28,
+Muscat,Muscat,Al Mouj,apartment,2,2,128,sale,124000,,furnished,partner_feed,Gulf Realty Oman,GRO-2004,https://example-partner.test/units/2004,2026-07-20,"{""floor"": 3}"
+Muscat,Bawshar,Muscat Hills,villa,5,5,460,sale,420000,,unfurnished,partner_feed,Gulf Realty Oman,GRO-2005,https://example-partner.test/units/2005,2026-07-15,
+Muscat,Seeb,Madinat Al Irfan,apartment,3,2,160,rental,9600,annual,semi_furnished,partner_feed,Gulf Realty Oman,GRO-2006,https://example-partner.test/units/2006,2026-08-05,

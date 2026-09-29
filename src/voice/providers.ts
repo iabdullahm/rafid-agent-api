@@ -1,0 +1,14 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { ApiError } from "../utils/errors.js";
+export interface TelephonyProvider { readonly name: string; initiate(input: { callId: string; to: string; maxDurationSeconds: number; callbackUrl: string }): Promise<{ providerCallId: string }>; verifyWebhook(rawBody: string, signature: string | undefined): boolean; }
+export interface SpeechToTextProvider { transcribe(audio: Buffer): Promise<string>; }
+export interface TextToSpeechProvider { synthesize(text: string, language: "en" | "ar"): Promise<Buffer>; }
+export interface ConversationModelProvider { summarize(input: { objective: string; transcript: string }): Promise<{ summary: string; outcome: string | null; nextAction: string | null; facts: Record<string, unknown> }>; }
+export interface CalendarProvider { create(input: { type: string; slot: string; timezone: string }): Promise<{ eventId: string }>; cancel(eventId: string): Promise<void>; }
+export class DisabledTelephonyProvider implements TelephonyProvider { readonly name = "disabled"; async initiate(): Promise<{ providerCallId: string }> { throw new ApiError(503, "VOICE_PROVIDER_NOT_CONFIGURED", "Real telephone calls are disabled until a telephony provider is configured."); } verifyWebhook(): boolean { return false; } }
+export class TwilioTelephonyProvider implements TelephonyProvider {
+  readonly name = "twilio";
+  constructor(private readonly accountSid: string, private readonly authToken: string, private readonly fromNumber: string, private readonly callbackSecret: string) {}
+  async initiate(input: { callId: string; to: string; maxDurationSeconds: number; callbackUrl: string }) { const body = new URLSearchParams({ To: input.to, From: this.fromNumber, Url: input.callbackUrl, StatusCallback: input.callbackUrl, StatusCallbackEvent: "initiated ringing answered completed", Timeout: String(Math.min(60, input.maxDurationSeconds)) }); const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(this.accountSid)}/Calls.json`, { method: "POST", headers: { Authorization: `Basic ${Buffer.from(`${this.accountSid}:${this.authToken}`).toString("base64")}`, "Content-Type": "application/x-www-form-urlencoded" }, body }); if (!response.ok) throw new ApiError(502, "TELEPHONY_PROVIDER_ERROR", "Telephony provider rejected the call request."); const data = await response.json() as { sid?: string }; if (!data.sid) throw new ApiError(502, "TELEPHONY_PROVIDER_ERROR", "Telephony provider returned no call identifier."); return { providerCallId: data.sid }; }
+  verifyWebhook(rawBody: string, signature: string | undefined) { if (!signature) return false; const expected = createHmac("sha256", this.callbackSecret).update(rawBody).digest("hex"); const a = Buffer.from(expected); const b = Buffer.from(signature); return a.length === b.length && timingSafeEqual(a, b); }
+}

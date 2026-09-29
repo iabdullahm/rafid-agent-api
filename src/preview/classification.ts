@@ -33,6 +33,7 @@ export const PREVIEW_COST_TIER: Readonly<Record<string, PreviewCostTier>> = Obje
   vehicle_value_estimate: "medium",
   document_facts_extract: "expensive",
   invoice_anomaly_check: "expensive"
+  ,shipping_cost_estimate: "lightweight"
 });
 
 /** Unknown/uncatalogued capabilities default to "medium" — the middle-ground budget — rather than

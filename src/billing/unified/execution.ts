@@ -38,7 +38,7 @@ export async function runBilledCall(input: {
   toolInput: unknown;
   account: BillingAccount;
   key: ApiKeyRecord;
-  rails: AccountRail[];
+  rails: readonly AccountRail[];
   subscriptionFallback: boolean;
   requestId: string;
   idempotency?: { key: string; requestHash: string };

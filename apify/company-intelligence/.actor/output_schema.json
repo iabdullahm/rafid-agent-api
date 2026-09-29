@@ -1,0 +1,8 @@
+{
+  "actorOutputSchemaVersion": 1,
+  "title": "Global Company Intelligence & Risk output",
+  "properties": {
+    "dataset": { "title": "Company results", "description": "One record per company, including partial failures.", "type": "string", "template": "{{links.apiDefaultDatasetUrl}}/items" },
+    "summary": { "title": "Run summary", "description": "Counts and charged PPE events.", "type": "string", "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/OUTPUT" }
+  }
+}

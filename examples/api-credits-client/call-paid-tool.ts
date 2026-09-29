@@ -1,5 +1,5 @@
 /**
- * Rafid Agent API — pay for a tool call with prepaid API credits (no crypto wallet).
+ * Rafid Intelligence Network — pay for a tool call with prepaid API credits (no crypto wallet).
  *
  *   RAFID_API_KEY=raf_live_… node call-paid-tool.ts            (Node 24 runs .ts directly)
  *   RAFID_API_KEY=raf_live_… TOOL_PATH=/finance/invoice-anomaly-check TOOL_INPUT='{…}' node call-paid-tool.ts

@@ -124,6 +124,13 @@ export function classifyDataSource(toolName: string, data: unknown): DataSource 
     return (coverage as Record<string, unknown>).liveMarketDataAvailable === true ? "live_provider" : "not_configured";
   }
 
+  if (toolName === "shipping_cost_estimate") {
+    if (record.rateSource === "live_carrier") return "live_provider";
+    if (record.rateSource === "internal_estimate") return "partner_feed";
+    if (record.rateSource === "heuristic_estimate") return "not_configured";
+    return "unknown";
+  }
+
   return null;
 }
 

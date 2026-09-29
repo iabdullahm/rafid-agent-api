@@ -30,6 +30,13 @@ export interface BillingRequest {
   requestHash?: string;
 }
 
+/** Optional machine-account spend controls. Null/undefined means unlimited. */
+export interface SpendLimits {
+  accountMonthlyMicros?: number | null;
+  apiKeyDailyMicros?: number | null;
+  apiKeyMonthlyMicros?: number | null;
+}
+
 export interface BillingAuthorization {
   authorized: true;
   rail: BillingRail;
@@ -47,7 +54,13 @@ export interface BillingAuthorization {
 export type AccountStatus = "active" | "suspended" | "closed";
 export type ApiKeyEnvironment = "live" | "test";
 export type ApiKeyStatus = "active" | "revoked";
-export type LedgerType = "credit" | "debit" | "refund" | "adjustment" | "subscription_usage";
+/** "credit_purchase" is a credit funded by an EXTERNALLY confirmed payment (Stripe or USDC on
+ *  Base — see src/billing/external/) — always positive, always carries externalTransactionId set
+ *  to the external payment's own id. Kept distinct from "credit" (an admin-granted top-up with no
+ *  external payment behind it, e.g. a manual goodwill credit or a test-fixture grant) so revenue
+ *  reporting can tell "a real customer paid us $X" apart from "an operator typed a number" without
+ *  having to parse metadata. Both still increase creditBalanceMicros identically. */
+export type LedgerType = "credit" | "debit" | "refund" | "adjustment" | "subscription_usage" | "credit_purchase";
 export type LedgerStatus = "pending" | "settled" | "refunded" | "failed";
 export type LedgerRail = "api_credits" | "subscription" | "admin";
 
@@ -105,6 +118,7 @@ export interface Subscription {
   plan: string;
   status: SubscriptionStatus;
   includedMicros: number;
+  includedCalls: number | null;
   periodStart: string;
   periodEnd: string;
   createdAt: string;
@@ -118,6 +132,8 @@ export interface SubscriptionSnapshot {
   periodEnd: string;
   includedMicros: number;
   usedMicros: number;
+  includedCalls: number | null;
+  usedCalls: number;
 }
 
 export interface ReserveInput {
@@ -127,11 +143,12 @@ export interface ReserveInput {
   toolName: string;
   priceMicros: number;
   /** Ordered rails to try, first success wins (see selection.ts). */
-  rails: AccountRail[];
+  rails: readonly AccountRail[];
   /** When the account HAS an active subscription whose allowance can't cover the call: may the
    *  next rail (prepaid credits) be tried? false for an explicit `subscription` hint. */
   subscriptionFallback: boolean;
   idempotency?: { key: string; requestHash: string };
+  spendLimits?: SpendLimits;
   now: Date;
 }
 
@@ -140,6 +157,7 @@ export type ReserveResult =
   | { kind: "replay"; responseStatus: number; responseBody: unknown; entryId: string | null }
   | { kind: "idempotency_conflict" }
   | { kind: "idempotency_in_progress" }
+  | { kind: "spend_limit"; scope: "account_monthly" | "api_key_daily" | "api_key_monthly"; limitMicros: number; spentMicros: number }
   | { kind: "insufficient"; balanceMicros: number; subscription: SubscriptionSnapshot | null };
 
 export interface SettleInput {

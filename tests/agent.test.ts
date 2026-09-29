@@ -31,7 +31,7 @@ test("GET /api/v1/agent returns agent-marketplace discovery metadata", async () 
     assert.equal(response.status, 200);
     const body = await response.json();
     assert.equal(body.success, true);
-    assert.equal(body.data.name, "Rafid Property Intelligence");
+    assert.equal(body.data.name, "Rafid Intelligence Network");
     assert.equal(body.data.mcp, true);
     assert.equal(body.data.openapi, "/openapi.json");
     assert.equal(body.data.pricing, "/api/v1/pricing");
@@ -87,14 +87,14 @@ test("GET / serves an HTML landing page by default and JSON discovery on request
     assert.equal(browser.status, 200);
     assert.match(browser.headers.get("content-type") ?? "", /text\/html/);
     const html = await browser.text();
-    assert.match(html, /Rafid Property Intelligence/);
-    assert.match(html, /Property intelligence built for AI agents\./);
+    assert.match(html, /Rafid Intelligence Network/);
+    assert.match(html, /Structured intelligence and paid tools for AI agents\./);
     assert.match(html, /Discover\. Pay per call\. Execute\./);
 
     const agent = await fetch(base + "/", { headers: { Accept: "application/json" } });
     assert.match(agent.headers.get("content-type") ?? "", /application\/json/);
     const body = await agent.json();
-    assert.equal(body.data.name, "Rafid Agent API");
+    assert.equal(body.data.name, "Rafid Intelligence Network");
     assert.equal(body.data.agent, "/api/v1/agent");
   });
 });

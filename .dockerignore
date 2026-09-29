@@ -1,0 +1,10 @@
+**/node_modules
+node_modules
+dist
+.git
+.vercel
+.npm-cache
+_to_delete
+apify/*/tests
+*.tar.gz
+*.log

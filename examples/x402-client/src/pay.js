@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // npm run test:x402-payment
 //
-// Full x402 flow against the live Rafid Agent API:
+// Full x402 flow against the live Rafid Intelligence Network:
 //   1. Call the paid endpoint with no payment (same as `npm run test:x402-unpaid`) and show
 //      the decoded 402 quote.
 //   2. If a real-money network is quoted, require an explicit typed confirmation before
@@ -25,8 +25,8 @@ async function confirmOrAbort(networkId) {
   const isRealMoney = networkId === "eip155:8453";
   console.log(
     isRealMoney
-      ? "\n⚠️  You are about to make a real USDC payment on Base Mainnet to Rafid Agent API."
-      : `\n⚠️  You are about to send a real x402 payment on ${networkId} to Rafid Agent API.`
+      ? "\n⚠️  You are about to make a real USDC payment on Base Mainnet to Rafid Intelligence Network."
+      : `\n⚠️  You are about to send a real x402 payment on ${networkId} to Rafid Intelligence Network.`
   );
   console.log("This will sign and broadcast an on-chain transaction from your configured wallet.");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -39,7 +39,7 @@ async function confirmOrAbort(networkId) {
 }
 
 async function main() {
-  console.log("Rafid Agent API x402 client example — full payment flow");
+  console.log("Rafid Intelligence Network x402 client example — full payment flow");
   console.log(`POST ${ANALYZE_URL}`);
   console.log(`Payload: ${JSON.stringify(TEST_PAYLOAD)}`);
 
@@ -128,7 +128,7 @@ async function main() {
     console.error(`\nRequest did not succeed (HTTP ${response.status}) — see the response body above.`);
     process.exitCode = 1;
   } else {
-    console.log("\nDone. This request was paid for on-chain and executed by Rafid Agent API.");
+  console.log("\nDone. This request was paid for on-chain and executed by Rafid Intelligence Network.");
   }
 }
 

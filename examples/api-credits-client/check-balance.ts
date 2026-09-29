@@ -1,5 +1,5 @@
 /**
- * Rafid Agent API — show the API key's prepaid credit balance, subscription allowance, usage
+ * Rafid Intelligence Network — show the API key's prepaid credit balance, subscription allowance, usage
  * per tool, and the most recent ledger transactions.
  *
  *   RAFID_API_KEY=raf_live_… node check-balance.ts

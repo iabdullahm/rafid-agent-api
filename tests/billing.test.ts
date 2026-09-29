@@ -21,7 +21,7 @@ billingStoreContract("MemoryBillingStore", async () => new MemoryBillingStore())
 const key = "test-only-not-a-real-credential-12345";
 const ADMIN = "billing-admin-secret-for-tests-only-0123456789";
 const wallet = "0x1234567890123456789012345678901234567890";
-const billingEnv = { RAFID_API_KEYS: key, LOG_LEVEL: "silent", RATE_LIMIT_ENABLED: "false", API_CREDITS_ENABLED: "true", SUBSCRIPTIONS_ENABLED: "true", BILLING_ADMIN_SECRET: ADMIN };
+const billingEnv = { RAFID_API_KEYS: key, LOG_LEVEL: "silent", RATE_LIMIT_ENABLED: "false", API_CREDITS_ENABLED: "true", SUBSCRIPTIONS_ENABLED: "true", BILLING_ADMIN_SECRET: ADMIN, MCP_REMOTE_ENABLED: "true" };
 const tool = (name: string) => capabilities.find(c => c.name === name)!;
 const research = tool("research_company");          // $0.15
 const omanProperty = tool("analyze_oman_property");  // $0.25
@@ -529,7 +529,7 @@ const mcpCall = (base: string, path: string, body: unknown, apiKey?: string, hea
   body: JSON.stringify(body)
 });
 
-test("MCP + API credits (/mcp/credits): paid tools/call billed to the key's account, billing in _meta, /mcp unchanged and free", async t => {
+test("MCP + API credits (/mcp/credits): paid tools/call billed to the key's account, while /mcp requires payment", async t => {
   const { base, newAccount, balance } = await start(t);
   const { apiKey } = await newAccount({ credit: "0.20" });
   const unauth = await mcpCall(base, "/mcp/credits", { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
@@ -559,9 +559,12 @@ test("MCP + API credits (/mcp/credits): paid tools/call billed to the key's acco
   const preview = await (await mcpCall(base, "/mcp/credits", { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "preview_capability", arguments: { capability: "research_company", input: research.example } } }, apiKey)).json() as any;
   assert.ok(preview.result.structuredContent, "free preview tool stays free over /mcp/credits");
   assert.equal((await balance(apiKey)).credits.available, "0.05");
-  // The original free /mcp endpoint needs no key and charges nothing.
-  const free = await (await mcpCall(base, "/mcp", { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "research_company", arguments: research.example } })).json() as any;
-  assert.deepEqual(free.result.structuredContent, await research.execute(research.example));
+  // The public /mcp endpoint does not execute priced tools without payment.
+  const free = await mcpCall(base, "/mcp", { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "research_company", arguments: research.example } });
+  assert.equal(free.status, 402);
+  const freeBody = await free.json() as any;
+  assert.equal(freeBody.error.code, -32002);
+  assert.equal(freeBody.error.data.paymentEndpoint, "/mcp/credits");
   assert.equal((await balance(apiKey)).credits.available, "0.05");
 });
 

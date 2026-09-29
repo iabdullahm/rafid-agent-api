@@ -2,7 +2,7 @@ import { generateApiKey, hashApiKey, parseApiKey } from "./apiKeys.js";
 import type { BillingConfig } from "./config.js";
 import { formatMicros, money, usdToMicros } from "./money.js";
 import { BillingStoreError, type BillingStore } from "./store.js";
-import type { AccountRail, ApiKeyEnvironment, ApiKeyRecord, BillingAccount, BillingAuthorization, LedgerEntry, SubscriptionSnapshot } from "./types.js";
+import type { AccountRail, ApiKeyEnvironment, ApiKeyRecord, BillingAccount, BillingAuthorization, LedgerEntry, SpendLimits, SubscriptionSnapshot } from "./types.js";
 
 export type AuthResult =
   | { ok: true; key: ApiKeyRecord; account: BillingAccount }
@@ -13,6 +13,7 @@ export type AuthorizeOutcome =
   | { kind: "replay"; responseStatus: number; responseBody: unknown }
   | { kind: "idempotency_conflict" }
   | { kind: "idempotency_in_progress" }
+  | { kind: "spend_limit"; scope: "account_monthly" | "api_key_daily" | "api_key_monthly"; limitMicros: number; spentMicros: number }
   | { kind: "insufficient"; priceMicros: number; balanceMicros: number; subscription: SubscriptionSnapshot | null; reason: "insufficient_credits" | "subscription_exhausted" | "no_active_subscription" };
 
 export class BillingAdminError extends Error {
@@ -51,12 +52,12 @@ export class BillingEngine {
 
   /** Reserves the charge for one call on the first rail that can pay (see selection.ts for the
    *  order). A zero-priced tool authorizes as the `free` rail without touching any account. */
-  async authorize(input: { toolName: string; account: BillingAccount; key: ApiKeyRecord; rails: AccountRail[]; subscriptionFallback: boolean; requestId: string; idempotency?: { key: string; requestHash: string } }): Promise<AuthorizeOutcome> {
+  async authorize(input: { toolName: string; account: BillingAccount; key: ApiKeyRecord; rails: readonly AccountRail[]; subscriptionFallback: boolean; requestId: string; idempotency?: { key: string; requestHash: string } }): Promise<AuthorizeOutcome> {
     const priceMicros = this.priceMicros(input.toolName);
     if (priceMicros === 0) return { kind: "authorized", authorization: { authorized: true, rail: "free", priceMicros: 0, chargedMicros: 0, accountId: input.account.id, apiKeyId: input.key.id } };
     const result = await this.deps.store.reserve({
       accountId: input.account.id, apiKeyId: input.key.id, requestId: input.requestId, toolName: input.toolName, priceMicros,
-      rails: input.rails, subscriptionFallback: input.subscriptionFallback, idempotency: input.idempotency, now: this.now()
+      rails: input.rails, subscriptionFallback: input.subscriptionFallback, idempotency: input.idempotency, spendLimits: readSpendLimits(input.account.metadata, input.key.metadata), now: this.now()
     });
     switch (result.kind) {
       case "reserved":
@@ -67,6 +68,7 @@ export class BillingEngine {
       case "replay": return { kind: "replay", responseStatus: result.responseStatus, responseBody: result.responseBody };
       case "idempotency_conflict": return { kind: "idempotency_conflict" };
       case "idempotency_in_progress": return { kind: "idempotency_in_progress" };
+      case "spend_limit": return { kind: "spend_limit", scope: result.scope, limitMicros: result.limitMicros, spentMicros: result.spentMicros };
       case "insufficient": {
         const onlySubscription = input.rails.length === 1 && input.rails[0] === "subscription";
         const blockedBySubscription = Boolean(result.subscription) && input.rails[0] === "subscription" && !input.subscriptionFallback;
@@ -108,11 +110,59 @@ export class BillingEngine {
   async revokeApiKey(accountId: string, keyId: string) { return publicKey(await this.wrap(() => this.deps.store.revokeApiKey(accountId, keyId, this.now()))); }
   async listApiKeys(accountId: string) { await this.mustAccount(accountId); return (await this.deps.store.listApiKeys(accountId)).map(publicKey); }
 
+  async setAccountSpendLimits(accountId: string, limits: { monthlyUsd?: string | null }) {
+    const account = await this.mustAccount(accountId);
+    const next = { ...account.metadata, spendLimits: { ...readStoredSpendLimits(account.metadata), accountMonthlyMicros: limits.monthlyUsd === null || limits.monthlyUsd === undefined ? null : this.parseLimit(limits.monthlyUsd) } };
+    return this.deps.store.updateAccountMetadata(accountId, next);
+  }
+
+  async setApiKeySpendLimits(accountId: string, keyId: string, limits: { dailyUsd?: string | null; monthlyUsd?: string | null }) {
+    const keys = await this.deps.store.listApiKeys(accountId);
+    const key = keys.find(k => k.id === keyId);
+    if (!key) throw new BillingAdminError(404, "key_not_found", "API key not found for this account");
+    const next = { ...key.metadata, spendLimits: { ...readStoredSpendLimits(key.metadata), apiKeyDailyMicros: limits.dailyUsd === null || limits.dailyUsd === undefined ? null : this.parseLimit(limits.dailyUsd), apiKeyMonthlyMicros: limits.monthlyUsd === null || limits.monthlyUsd === undefined ? null : this.parseLimit(limits.monthlyUsd) } };
+    return this.deps.store.updateApiKeyMetadata(accountId, keyId, next);
+  }
+
   async addCredit(input: { accountId: string; amount: string; reason?: string; externalTransactionId?: string | null }) {
     const micros = this.parseAmount(input.amount);
     if (micros <= 0) throw new BillingAdminError(400, "invalid_amount", "A credit amount must be positive");
     const r = await this.wrap(() => this.deps.store.applyCredit({ accountId: input.accountId, amountMicros: micros, type: "credit", reason: input.reason ?? "prepaid credit", externalTransactionId: input.externalTransactionId ?? null, now: this.now() }));
     return { transaction: ledgerView(r.entry), balance: money(r.balanceMicros), duplicate: r.duplicate };
+  }
+
+  /** Credits an account from an EXTERNALLY verified payment (Stripe checkout / USDC on Base —
+   *  see src/billing/external/service.ts, the only caller). `externalPaymentId` is passed as
+   *  `externalTransactionId` so store.applyCredit()'s existing dedup guarantees "the same
+   *  external payment can fund a balance at most once" — a Stripe webhook replay or a repeated
+   *  USDC confirmation call is always safe to retry. Never called for ordinary paid-capability
+   *  consumption (that stays on the reserve/settle/release path — see execution.ts) and never
+   *  called outside a verified external payment (see billing/external/service.ts's doc comment
+   *  for what "verified" means for each rail). */
+  async fundExternalCredit(input: { accountId: string; amountMicros: number; externalPaymentId: string; reason: string }) {
+    if (input.amountMicros <= 0) throw new BillingAdminError(400, "invalid_amount", "A funded amount must be positive");
+    const r = await this.wrap(() => this.deps.store.applyCredit({
+      accountId: input.accountId, amountMicros: input.amountMicros, type: "credit_purchase",
+      reason: input.reason, externalTransactionId: input.externalPaymentId, now: this.now()
+    }));
+    return { transaction: ledgerView(r.entry), balance: money(r.balanceMicros), duplicate: r.duplicate };
+  }
+
+  /** GET /api/v1/billing/balance's shape (src/billing/external/http.ts) — balanceUSD is the
+   *  total funded remaining (spendable now + tied up in an in-flight reservation), distinct from
+   *  balanceView()'s pre-existing `credits.available`, which already excludes reservations (a
+   *  reserve() call decrements creditBalanceMicros immediately — see store.ts's doc comment).
+   *  availableUSD === balanceView().credits.available; this method exists only to add reservedUSD
+   *  without changing that pre-existing endpoint's response shape. */
+  async billingBalanceView(accountId: string) {
+    const account = await this.mustAccount(accountId);
+    const reservedMicros = await this.deps.store.pendingReservedMicros(accountId);
+    return {
+      currency: "USD" as const,
+      balanceUSD: Number(formatMicros(account.creditBalanceMicros + reservedMicros)),
+      reservedUSD: Number(formatMicros(reservedMicros)),
+      availableUSD: Number(formatMicros(account.creditBalanceMicros))
+    };
   }
 
   async adjustCredit(input: { accountId: string; amount: string; reason: string; externalTransactionId?: string | null }) {
@@ -129,8 +179,8 @@ export class BillingEngine {
     const includedMicros = input.includedUsd !== undefined ? this.parseAmount(input.includedUsd) : plan.allowance.monthlyIncludedMicros;
     if (includedMicros < 0) throw new BillingAdminError(400, "invalid_amount", "includedUsd must not be negative");
     await this.mustAccount(input.accountId);
-    const sub = await this.deps.store.assignSubscription({ accountId: input.accountId, plan: plan.id, includedMicros, now: this.now() });
-    return { ...sub, includedMicros: undefined, included: money(sub.includedMicros) };
+    const sub = await this.deps.store.assignSubscription({ accountId: input.accountId, plan: plan.id, includedMicros, includedCalls: plan.allowance.monthlyIncludedCalls, now: this.now() });
+    return { ...sub, includedMicros: undefined, included: money(sub.includedMicros), includedCalls: sub.includedCalls };
   }
 
   async cancelSubscription(accountId: string) {
@@ -147,7 +197,8 @@ export class BillingEngine {
       accountId: account.id,
       status: account.status,
       credits: { available: formatMicros(account.creditBalanceMicros), currency: "USD" },
-      subscription: sub ? subscriptionView(sub) : null
+      subscription: sub ? subscriptionView(sub) : null,
+      spendLimits: { monthly: account.metadata.spendLimits && typeof account.metadata.spendLimits === "object" ? formatOptionalMicros((account.metadata.spendLimits as Record<string, unknown>).accountMonthlyMicros) : null, currency: "USD" }
     };
   }
 
@@ -181,6 +232,11 @@ export class BillingEngine {
   private parseAmount(amount: string): number {
     try { return usdToMicros(String(amount)); } catch (e) { throw new BillingAdminError(400, "invalid_amount", (e as Error).message); }
   }
+  private parseLimit(amount: string): number {
+    const micros = this.parseAmount(amount);
+    if (micros < 0) throw new BillingAdminError(400, "invalid_amount", "Spend limits must not be negative");
+    return micros;
+  }
   private async mustAccount(id: string) {
     const account = typeof id === "string" && id ? await this.deps.store.getAccount(id) : null;
     if (!account) throw new BillingAdminError(404, "account_not_found", "Billing account not found");
@@ -194,11 +250,34 @@ export class BillingEngine {
   }
 }
 
-export const publicKey = (k: ApiKeyRecord) => ({ id: k.id, accountId: k.accountId, prefix: k.keyPrefix, environment: k.environment, name: k.name, status: k.status, createdAt: k.createdAt, lastUsedAt: k.lastUsedAt, expiresAt: k.expiresAt, revokedAt: k.revokedAt });
+function readStoredSpendLimits(metadata: Record<string, unknown>): SpendLimits {
+  const raw = metadata.spendLimits;
+  if (!raw || typeof raw !== "object") return {};
+  const r = raw as Record<string, unknown>;
+  const numberOrNull = (v: unknown) => v === null ? null : typeof v === "number" && Number.isSafeInteger(v) && v >= 0 ? v : undefined;
+  return { accountMonthlyMicros: numberOrNull(r.accountMonthlyMicros), apiKeyDailyMicros: numberOrNull(r.apiKeyDailyMicros), apiKeyMonthlyMicros: numberOrNull(r.apiKeyMonthlyMicros) };
+}
+
+function readSpendLimits(accountMetadata: Record<string, unknown>, keyMetadata: Record<string, unknown>): SpendLimits {
+  const account = readStoredSpendLimits(accountMetadata);
+  const key = readStoredSpendLimits(keyMetadata);
+  return {
+    accountMonthlyMicros: account.accountMonthlyMicros,
+    apiKeyDailyMicros: key.apiKeyDailyMicros,
+    apiKeyMonthlyMicros: key.apiKeyMonthlyMicros
+  };
+}
+
+function formatOptionalMicros(value: unknown): string | null {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? formatMicros(value) : null;
+}
+
+export const publicKey = (k: ApiKeyRecord) => ({ id: k.id, accountId: k.accountId, prefix: k.keyPrefix, environment: k.environment, name: k.name, status: k.status, createdAt: k.createdAt, lastUsedAt: k.lastUsedAt, expiresAt: k.expiresAt, revokedAt: k.revokedAt, spendLimits: k.metadata.spendLimits ?? null });
 
 export const subscriptionView = (s: SubscriptionSnapshot) => ({
   id: s.subscriptionId, plan: s.plan, periodStartsAt: s.periodStart, periodEndsAt: s.periodEnd,
-  included: formatMicros(s.includedMicros), used: formatMicros(s.usedMicros), remaining: formatMicros(Math.max(0, s.includedMicros - s.usedMicros)), currency: "USD"
+  included: formatMicros(s.includedMicros), used: formatMicros(s.usedMicros), remaining: formatMicros(Math.max(0, s.includedMicros - s.usedMicros)),
+  includedCalls: s.includedCalls, usedCalls: s.usedCalls, remainingCalls: s.includedCalls === null ? null : Math.max(0, s.includedCalls - s.usedCalls), currency: "USD"
 });
 
 export const ledgerView = (e: LedgerEntry) => ({

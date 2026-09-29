@@ -1,6 +1,6 @@
 # Unified billing: x402, API credits, subscriptions, L402 and MPP
 
-Rafid Agent API sells every paid capability through one **billing layer** with several
+Rafid Intelligence Network sells every paid capability through one **billing layer** with several
 interchangeable payment rails. The capability itself never knows which rail paid for it:
 
 ```text
@@ -68,6 +68,26 @@ Periods are monthly, anchored on the assignment date, and roll over automaticall
 job). Default plans (`BILLING_PLANS_JSON` overrides/extends them): `free` $0, `developer` $10,
 `growth` $50, `enterprise` $500 (overridable per subscription with `includedUsd`). The model
 reserves `allowance.type` for a future "included tool calls" allowance; only USD is implemented.
+
+## Agent and organization spend limits
+
+Spend limits are optional and are enforced inside the same atomic reservation used for API-credit
+and subscription charges. A limit is checked before the tool executes; a failed tool execution
+releases the reservation, so it does not consume the limit permanently.
+
+Internal billing-admin routes configure them (with `BILLING_ADMIN_SECRET`):
+
+```http
+PUT /api/internal/billing/accounts/{accountId}/spend-limits
+{"monthlyUsd":"100"}
+
+PUT /api/internal/billing/accounts/{accountId}/api-keys/{keyId}/spend-limits
+{"dailyUsd":"10","monthlyUsd":"50"}
+```
+
+The account monthly limit applies to the organization. API-key limits apply to the individual
+agent key. A rejected request returns `429 spend_limit_exceeded` with the limit and current spend;
+the MCP transport returns the same machine-readable error in its JSON-RPC result.
 
 **L402** — Lightning pay-per-request, only when `L402_ENABLED=true`: `POST /api/v1/l402/<path>`,
 or the canonical route with `Authorization: L402 …` / `X-Rafid-Payment-Method: l402`.
@@ -243,13 +263,38 @@ SUBSCRIPTIONS_ENABLED=false          # subscription allowances
 API_KEY_AUTH_ENABLED=true            # accept raf_ keys (only matters when one of the above is on)
 BILLING_DATABASE_URL=                # falls back to DATABASE_URL; REQUIRED in production
 BILLING_ADMIN_SECRET=                # ≥32 chars (openssl rand -hex 32); enables /api/internal/billing
-BILLING_PLANS_JSON=                  # {"developer":{"monthlyIncludedUsd":"10"}, …}
+BILLING_PLANS_JSON=                  # {"developer":{"monthlyIncludedUsd":"10","monthlyIncludedCalls":1000}, …}
 BILLING_SUBSCRIPTION_CREDIT_FALLBACK=true
 BILLING_RESERVATION_TTL_SECONDS=900
 X402_ENABLED / L402_ENABLED / MPP_ENABLED   # unchanged, see README
 ```
 
 With every flag at its default the canonical routes behave exactly as before this layer existed.
+
+## Agent/company subscriptions
+
+Subscriptions belong to a billing account (agent or organization), never to an individual user.
+The default Developer plan includes a `$10` monthly allowance and `1,000` calls. The Growth and
+Enterprise defaults include `10,000` and `100,000` calls respectively. Both the USD allowance and
+the call counter renew automatically when the anchored monthly period rolls over; no renewal worker
+is needed for entitlement reset. A custom plan may set `monthlyIncludedCalls` to a non-negative
+integer or `null` for unlimited calls.
+
+Agents discover the active plan catalog at `GET /api/v1/subscription-plans`. Authenticated account
+reports are machine-readable at `GET /api/v1/account/balance`, `GET /api/v1/account/usage`, and
+`GET /api/v1/account/transactions`. Assignment and cancellation remain protected internal billing
+operations; the API-key account is the billing boundary.
+
+## Long-running monitoring
+
+When `MONITORING_CRON_SECRET` and a PostgreSQL billing database are configured, an agent can create
+account-scoped monitoring jobs with `POST /api/v1/account/monitoring`. Supported cadences are
+`weekly` and `monthly`; results are available at `/api/v1/account/monitoring/:id/results` and an
+optional webhook receives signed `X-Rafid-Signature: sha256=...` deliveries. Vercel runs the due-job
+endpoint hourly (`POST /api/internal/monitoring/run-due`) using `MONITORING_CRON_SECRET` as the
+deployment's cron secret.
+Each run is authorized through the normal subscription/API-credit billing rails before the selected
+workflow executes.
 
 ## Migration
 

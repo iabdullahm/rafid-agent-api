@@ -93,6 +93,11 @@ export interface RevenueSettlement {
    *  reconciliation endpoint's duplicate_transaction_hash check can reason about it directly. */
   dedupeKey: string;
   createdAt: string;
+  /** Present only when an operator/importer recovered a facilitator-settled row by independently
+   * verifying its transaction on-chain. */
+  reconciliationSource?: "onchain";
+  reconciledAt?: string;
+  auditMetadata?: Record<string, string>;
 }
 
 export type RevenueSettlementInput = Omit<RevenueSettlement, "createdAt"> & { createdAt?: string };

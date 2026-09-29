@@ -1,10 +1,29 @@
-# Rafid Property Intelligence — agent-native property and facility intelligence
+# Rafid Intelligence Network — structured intelligence and paid tools for AI agents
 
-Rafid provides deterministic property intelligence for autonomous AI agents, starting with OMR calculations for the Oman market. **AI agents are the primary consumer of this product, not human SaaS users.** MCP and x402 are the primary interfaces; the `X-API-Key` REST routes are the underlying transport and a compatibility layer for callers that can't do MCP or x402 yet. This MVP does not fetch market data, provide investment recommendations, or (outside x402) collect payments.
+Rafid Intelligence Network provides structured intelligence and paid APIs for AI agents across property, companies, suppliers, documents, risk, vehicles and logistics. **AI agents are the primary consumer of this platform.** MCP, OpenAPI, REST, x402 and API Credits are supported access channels.
+
+## Platform architecture
+
+```text
+Rafid Intelligence Network
+├── Property Intelligence
+├── Company Intelligence
+├── Supplier Intelligence
+├── Document Intelligence
+├── Risk Intelligence
+├── Vehicle Intelligence
+└── Logistics Intelligence
+```
+
+Existing property-specific capability contracts, routes and MCP tool names remain unchanged.
 
 The intended flow for an agent is: **discover** a capability → **select** the right tool → **pay per call** over x402 (or authenticate with an API key) → **execute** → get a **structured, machine-readable** result. No account, dashboard or subscription is required for either access model, and none is planned — see "Design constraints" below.
 
 ## Agent discovery
+
+Website planning and inspection are available as the paid `website_project_estimate` ($0.25)
+and `website_audit` ($0.75) capabilities. See [website capabilities](docs/website-capabilities.md)
+for contracts, limitations, preview calls and an audit-to-estimate chaining example.
 
 An agent (or an agent marketplace/directory crawler) can start from any of the following; all are public, unauthenticated, always present, and contain no secrets (no wallet private keys, no API keys, no usage data for other customers):
 
@@ -290,7 +309,7 @@ curl -s https://api.rafidsystem.com/api/v1/agent
 {
   "success": true,
   "data": {
-    "name": "Rafid Property Intelligence",
+    "name": "Rafid Intelligence Network",
     "description": "Property and facility intelligence tools for AI agents",
     "version": "0.1.0",
     "mcp": true,
@@ -468,7 +487,21 @@ Any provider can be switched off with `COMPANY_REPUTATION_DISABLED_PROVIDERS` (i
 
 **Unit economics:** worst case uncached ~3 web searches (≈ $0.024 at Tavily-class pricing); everything else is free public data. Estimated gross margin at $0.40 ≈ $0.37/call before hosting and facilitator fees. OpenSanctions, if enabled, adds its own per-call licence cost. Per-provider calls, cache hits, stale serves, outages and latency are recorded in-process (`src/company-reputation/telemetry.ts`) and returned by the internal `GET /api/v1/internal/revenue/unit-economics` route (`companyReputationTelemetry`).
 
-**Future product ladder:** `oman_supplier_check` ($0.50, Oman procurement) and `company_reputation_check` ($0.40, global reputation) are independent capabilities. They share only generic sanctions-list code (`src/shared/sanctions/`). A future `company_due_diligence` (~$1.50+: ownership/UBO, financials, litigation, PEP, corporate structure) can reuse the normalized evidence model, the evidence cache table and the provider interface without changing either.
+### Premium decision API: `company_due_diligence` ($1.50/call)
+
+`POST /api/v1/risk/company-due-diligence` · MCP tool `company_due_diligence`. This is the normalized decision layer over the existing `business_risk_score` evidence pipeline: it resolves the company, evaluates registration, website identity, sanctions, adverse news, legal, financial and reputation signals, then returns a deterministic `riskScore`/`riskLevel`, confidence, provenance, a recommendation and a machine-actionable `decision.action`.
+
+Request fields are `company` (required), plus optional `domain`, `country`, `registrationNumber`, `lei`, `purpose`, `depth` (`quick`, `standard`, `enhanced`, default `standard`) and a strict `checks` object (`registry`, `sanctions`, `adverseMedia`, `reputation`, `businessRisk`, all defaulting to `true`). The capability costs `$1.50 USD` and uses the shared registry/payment rails; it is automatically present in REST, MCP, x402/L402/MPP/account billing where enabled, OpenAPI and discovery manifests.
+
+Example:
+
+```bash
+curl -X POST https://<host>/api/v1/risk/company-due-diligence \
+  -H "Content-Type: application/json" -H "X-API-Key: <key>" \
+  -d '{"company":"Example Ltd","domain":"example.com","country":"GB","purpose":"supplier_onboarding"}'
+```
+
+The free preview only reports recognized input, source coverage and available result sections. It never returns the paid score, sanctions result, red flags, recommendation or decision. If the entity is ambiguous or cannot be reliably resolved, the paid request returns `AMBIGUOUS_ENTITY` or `ENTITY_NOT_FOUND` rather than guessing; unavailable providers lower coverage/confidence and remain explicit in the result.
 
 ### Risk intelligence: global business risk score (`business_risk_score`, $0.50/call)
 

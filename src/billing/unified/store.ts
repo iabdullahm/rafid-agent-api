@@ -16,12 +16,14 @@ export interface BillingStore {
   createAccount(input: { name: string; email?: string | null; metadata?: Record<string, unknown> }): Promise<BillingAccount>;
   getAccount(accountId: string): Promise<BillingAccount | null>;
   setAccountStatus(accountId: string, status: AccountStatus): Promise<BillingAccount>;
+  updateAccountMetadata(accountId: string, metadata: Record<string, unknown>): Promise<BillingAccount>;
 
   insertApiKey(input: { id: string; accountId: string; keyPrefix: string; keyHash: string; environment: ApiKeyEnvironment; name: string; expiresAt: Date | null; metadata?: Record<string, unknown> }): Promise<ApiKeyRecord>;
   findApiKeyByHash(keyHash: string): Promise<{ key: ApiKeyRecord; account: BillingAccount } | null>;
   touchApiKey(keyId: string, at: Date): Promise<void>;
   revokeApiKey(accountId: string, keyId: string, at: Date): Promise<ApiKeyRecord>;
   listApiKeys(accountId: string): Promise<ApiKeyRecord[]>;
+  updateApiKeyMetadata(accountId: string, keyId: string, metadata: Record<string, unknown>): Promise<ApiKeyRecord>;
 
   /** Credit (top-up, amount > 0), signed adjustment, or an externally-funded "credit_purchase"
    *  (also amount > 0 — see types.ts's LedgerType doc comment). Rejects a result below zero. When
@@ -31,7 +33,7 @@ export interface BillingStore {
    *  is safe to call this from a replayed Stripe webhook or a re-submitted USDC confirmation. */
   applyCredit(input: { accountId: string; amountMicros: number; type: "credit" | "adjustment" | "credit_purchase"; reason: string; externalTransactionId?: string | null; now: Date }): Promise<{ entry: LedgerEntry; balanceMicros: number; duplicate: boolean }>;
 
-  assignSubscription(input: { accountId: string; plan: string; includedMicros: number; now: Date }): Promise<Subscription>;
+  assignSubscription(input: { accountId: string; plan: string; includedMicros: number; includedCalls: number | null; now: Date }): Promise<Subscription>;
   cancelSubscription(accountId: string, now: Date): Promise<Subscription | null>;
   /** The active subscription with its CURRENT period's usage (periods roll forward on read). */
   getSubscription(accountId: string, now: Date): Promise<SubscriptionSnapshot | null>;
@@ -58,6 +60,18 @@ export interface BillingStore {
    *  exactly one matching ledger row (matched by externalTransactionId) and vice versa. Never
    *  called from the reserve/settle/release or fundExternalCredit path itself. */
   listCreditPurchases(since: Date | null, limit?: number): Promise<LedgerEntry[]>;
+  /** EVERY ledger row across ALL accounts, any type/status, with createdAt >= since (or every row
+   *  ever, when since is null), newest first — the general-purpose cross-account read
+   *  listSettledCharges()/listCreditPurchases() deliberately are NOT (each is pre-filtered to one
+   *  status+type combination for its own specific reporting need). Added for the Revenue
+   *  Conversion Audit (src/audit/), which reconstructs the full reserve → settle/release lifecycle
+   *  for prepaid-credit and subscription calls — a "pending" row still mid-flight, a "refunded"
+   *  row (an execution failure released the reservation — see execution.ts's doc comment), and a
+   *  "settled" row (a captured charge) are all first-class facts the audit must be able to tell
+   *  apart, so no server-side status/type filter would serve it. Same "fetch an already-window-
+   *  filtered array, aggregate in plain JS" shape as listSettledCharges()/listCreditPurchases();
+   *  never called from the reserve/settle/release path itself. */
+  listLedgerEntries(since: Date | null, limit?: number): Promise<LedgerEntry[]>;
   /** Sum of every currently-"pending" ledger entry's magnitude for one account (money reserved
    *  for an in-flight call, already subtracted from creditBalanceMicros but not yet settled or
    *  released) — always >= 0. Used only for reporting (GET /api/v1/billing/balance's reservedUSD

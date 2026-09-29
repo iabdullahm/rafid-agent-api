@@ -12,7 +12,7 @@ Rafid's remote MCP endpoint (`POST /mcp`, see [`MCP.md`](MCP.md)) can be listed 
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.iabdullahm/rafid-agent-api",
-  "title": "Rafid Property Intelligence",
+  "title": "Rafid Intelligence Network",
   "description": "Oman property and facility intelligence for AI agents: rental yield/income/payback metrics, multi-property comparison, an annual maintenance-reserve estimate, and Al Mouj Muscat market analysis (price positioning, historical contracted-price context, comparable sales) using real partner-fed sale records where configured. Pay per call over x402, or authenticate with an API key.",
   "version": "0.1.0",
   "websiteUrl": "https://api.rafidsystem.com",

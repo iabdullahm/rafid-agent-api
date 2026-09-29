@@ -24,7 +24,7 @@ export class MemoryBillingStore implements BillingStore {
   private ledger: LedgerEntry[] = [];
   private ledgerById = new Map<string, LedgerEntry>();
   private subs = new Map<string, SubRow>();
-  private usage = new Map<string, { includedMicros: number; usedMicros: number }>();
+  private usage = new Map<string, { includedMicros: number; usedMicros: number; includedCalls: number | null; usedCalls: number }>();
   private idem = new Map<string, IdemRow>();
 
   async migrate(): Promise<void> {}
@@ -41,6 +41,9 @@ export class MemoryBillingStore implements BillingStore {
     const a = this.mustAccount(accountId);
     a.status = status; a.updatedAt = new Date().toISOString();
     return clone(a);
+  }
+  async updateAccountMetadata(accountId: string, metadata: Record<string, unknown>) {
+    const a = this.mustAccount(accountId); a.metadata = clone(metadata); a.updatedAt = new Date().toISOString(); return clone(a);
   }
 
   async insertApiKey(input: { id: string; accountId: string; keyPrefix: string; keyHash: string; environment: ApiKeyEnvironment; name: string; expiresAt: Date | null; metadata?: Record<string, unknown> }) {
@@ -62,6 +65,10 @@ export class MemoryBillingStore implements BillingStore {
     return clone(k);
   }
   async listApiKeys(accountId: string) { return [...this.keys.values()].filter(k => k.accountId === accountId).map(clone); }
+  async updateApiKeyMetadata(accountId: string, keyId: string, metadata: Record<string, unknown>) {
+    const k = this.keys.get(keyId); if (!k || k.accountId !== accountId) throw new BillingStoreError("key_not_found", "API key not found for this account");
+    k.metadata = clone(metadata); return clone(k);
+  }
 
   async applyCredit(input: { accountId: string; amountMicros: number; type: "credit" | "adjustment" | "credit_purchase"; reason: string; externalTransactionId?: string | null; now: Date }) {
     const a = this.mustAccount(input.accountId);
@@ -77,10 +84,10 @@ export class MemoryBillingStore implements BillingStore {
     return { entry: clone(entry), balanceMicros: next, duplicate: false };
   }
 
-  async assignSubscription(input: { accountId: string; plan: string; includedMicros: number; now: Date }) {
+  async assignSubscription(input: { accountId: string; plan: string; includedMicros: number; includedCalls: number | null; now: Date }) {
     this.mustAccount(input.accountId);
     for (const s of this.subs.values()) if (s.accountId === input.accountId && s.status === "active") { s.status = "canceled"; s.canceledAt = input.now.toISOString(); }
-    const row: SubRow = { id: newId("sub"), accountId: input.accountId, plan: input.plan, status: "active", includedMicros: input.includedMicros, periodStart: input.now.toISOString(), periodEnd: addMonthsUtc(input.now, 1).toISOString(), createdAt: input.now.toISOString(), canceledAt: null, anchor: input.now.toISOString() };
+    const row: SubRow = { id: newId("sub"), accountId: input.accountId, plan: input.plan, status: "active", includedMicros: input.includedMicros, includedCalls: input.includedCalls, periodStart: input.now.toISOString(), periodEnd: addMonthsUtc(input.now, 1).toISOString(), createdAt: input.now.toISOString(), canceledAt: null, anchor: input.now.toISOString() };
     this.subs.set(row.id, row);
     const { anchor: _a, ...pub } = row; return clone(pub);
   }
@@ -103,18 +110,28 @@ export class MemoryBillingStore implements BillingStore {
         if (existing.status === "in_progress") return { kind: "idempotency_in_progress" };
       }
       this.idem.set(idemKey, { requestHash: input.idempotency!.requestHash, status: "in_progress", entryId: null, responseStatus: null, responseBody: null });
-    }
-    const snap = input.rails.includes("subscription") ? this.snapshot(input.accountId, input.now) : null;
+      }
+      const spend = spendUsage(this.ledger, input.accountId, input.apiKeyId, input.now);
+      for (const [scope, limit, spent] of [
+        ["account_monthly", input.spendLimits?.accountMonthlyMicros, spend.accountMonthlyMicros],
+        ["api_key_daily", input.spendLimits?.apiKeyDailyMicros, spend.apiKeyDailyMicros],
+        ["api_key_monthly", input.spendLimits?.apiKeyMonthlyMicros, spend.apiKeyMonthlyMicros]
+      ] as const) if (limit !== null && limit !== undefined && spent + input.priceMicros > limit) {
+        if (idemKey) this.idem.get(idemKey)!.status = "failed";
+        return { kind: "spend_limit", scope, limitMicros: limit, spentMicros: spent };
+      }
+      const snap = input.rails.includes("subscription") ? this.snapshot(input.accountId, input.now) : null;
     const balance = account.creditBalanceMicros;
     for (const rail of input.rails) {
       if (rail === "subscription") {
         if (!snap) continue;
         const usageRow = this.usage.get(`${snap.subscriptionId}|${snap.periodStart}`)!;
-        if (usageRow.includedMicros - usageRow.usedMicros >= input.priceMicros) {
+        if (usageRow.includedMicros - usageRow.usedMicros >= input.priceMicros && (usageRow.includedCalls === null || usageRow.usedCalls < usageRow.includedCalls)) {
           usageRow.usedMicros += input.priceMicros;
+          usageRow.usedCalls += 1;
           const entry = this.addEntry({ accountId: account.id, apiKeyId: input.apiKeyId, requestId: input.requestId, toolName: input.toolName, type: "subscription_usage", amountMicros: -input.priceMicros, rail: "subscription", status: "pending", externalTransactionId: null, relatedEntryId: null, metadata: { subscriptionId: snap.subscriptionId, plan: snap.plan, periodStart: snap.periodStart } }, input.now);
           if (idemKey) this.idem.get(idemKey)!.entryId = entry.id;
-          return { kind: "reserved", rail, entryId: entry.id, chargedMicros: input.priceMicros, balanceBeforeMicros: balance, balanceAfterMicros: balance, subscription: { ...snap, usedMicros: usageRow.usedMicros } };
+          return { kind: "reserved", rail, entryId: entry.id, chargedMicros: input.priceMicros, balanceBeforeMicros: balance, balanceAfterMicros: balance, subscription: { ...snap, usedMicros: usageRow.usedMicros, usedCalls: usageRow.usedCalls } };
         }
         if (!input.subscriptionFallback) break;
         continue;
@@ -148,7 +165,7 @@ export class MemoryBillingStore implements BillingStore {
       if (e.rail === "api_credits") { account.creditBalanceMicros += amount; account.updatedAt = new Date().toISOString(); }
       else if (e.rail === "subscription") {
         const u = this.usage.get(`${String(e.metadata.subscriptionId)}|${String(e.metadata.periodStart)}`);
-        if (u) u.usedMicros = Math.max(0, u.usedMicros - amount);
+        if (u) { u.usedMicros = Math.max(0, u.usedMicros - amount); u.usedCalls = Math.max(0, u.usedCalls - 1); }
       }
       e.status = "refunded"; e.updatedAt = new Date().toISOString();
       const refund = this.addEntry({ accountId: e.accountId, apiKeyId: e.apiKeyId, requestId: e.requestId, toolName: e.toolName, type: "refund", amountMicros: amount, rail: e.rail, status: "settled", externalTransactionId: null, relatedEntryId: e.id, metadata: { reason: input.reason, ...(e.rail === "subscription" ? { subscriptionId: e.metadata.subscriptionId, periodStart: e.metadata.periodStart } : {}) } }, new Date());
@@ -197,6 +214,12 @@ export class MemoryBillingStore implements BillingStore {
     return rows.slice(-limit).reverse().map(clone);
   }
 
+  async listLedgerEntries(since: Date | null, limit = MAX_QUERY_LEDGER_ENTRIES): Promise<LedgerEntry[]> {
+    const sinceMs = since ? since.getTime() : null;
+    const rows = this.ledger.filter(e => sinceMs === null || Date.parse(e.createdAt) >= sinceMs);
+    return rows.slice(-limit).reverse().map(clone);
+  }
+
   async pendingReservedMicros(accountId: string): Promise<number> {
     return this.ledger.filter(e => e.accountId === accountId && e.status === "pending").reduce((sum, e) => sum + Math.abs(e.amountMicros), 0);
   }
@@ -225,12 +248,25 @@ export class MemoryBillingStore implements BillingStore {
     s.periodStart = period.start.toISOString(); s.periodEnd = period.end.toISOString();
     const key = `${s.id}|${s.periodStart}`;
     let u = this.usage.get(key);
-    if (!u) { u = { includedMicros: s.includedMicros, usedMicros: 0 }; this.usage.set(key, u); }
-    return { subscriptionId: s.id, plan: s.plan, periodStart: s.periodStart, periodEnd: s.periodEnd, includedMicros: u.includedMicros, usedMicros: u.usedMicros };
+    if (!u) { u = { includedMicros: s.includedMicros, usedMicros: 0, includedCalls: s.includedCalls, usedCalls: 0 }; this.usage.set(key, u); }
+    return { subscriptionId: s.id, plan: s.plan, periodStart: s.periodStart, periodEnd: s.periodEnd, includedMicros: u.includedMicros, usedMicros: u.usedMicros, includedCalls: u.includedCalls, usedCalls: u.usedCalls };
   }
   private addEntry(e: Omit<LedgerEntry, "id" | "currency" | "createdAt" | "updatedAt">, now: Date): LedgerEntry {
     const entry: LedgerEntry = { ...e, id: newId("txn"), currency: "USD", createdAt: now.toISOString(), updatedAt: now.toISOString() };
     this.ledger.push(entry); this.ledgerById.set(entry.id, entry);
     return entry;
   }
+}
+
+function spendUsage(rows: readonly LedgerEntry[], accountId: string, apiKeyId: string, now: Date) {
+  const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).getTime();
+  const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).getTime();
+  const totals = { accountMonthlyMicros: 0, apiKeyDailyMicros: 0, apiKeyMonthlyMicros: 0 };
+  for (const e of rows) {
+    if (e.accountId !== accountId || e.status !== "pending" && e.status !== "settled" || (e.type !== "debit" && e.type !== "subscription_usage") || e.amountMicros >= 0) continue;
+    const t = Date.parse(e.createdAt); const amount = -e.amountMicros;
+    if (t >= month) totals.accountMonthlyMicros += amount;
+    if (e.apiKeyId === apiKeyId) { if (t >= day) totals.apiKeyDailyMicros += amount; if (t >= month) totals.apiKeyMonthlyMicros += amount; }
+  }
+  return totals;
 }
