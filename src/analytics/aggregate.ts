@@ -273,3 +273,59 @@ export function summarizeX402(events: readonly AnalyticsEvent[], now: Date): Rec
 export function summarizeX402AllTime(events: readonly AnalyticsEvent[]): X402Window {
   return summarizeX402Window(events);
 }
+
+// -----------------------------------------------------------------------------------------------
+// Capability discovery -> payment -> execution funnel
+// -----------------------------------------------------------------------------------------------
+
+export interface CapabilityFunnelRow {
+  presented: number;
+  preview: number;
+  challenges402: number;
+  paid: number;
+  executed: number;
+  revenueUsd: number;
+  previewTo402Conversion: number | null;
+  paymentConversionAfter402: number | null;
+  paymentToExecutionConversion: number | null;
+  presentedIsSurfaceImpression: true;
+}
+
+const ratio = (numerator: number, denominator: number): number | null => denominator ? Math.round((numerator / denominator) * 10000) / 100 : null;
+
+export function summarizeCapabilityFunnel(events: readonly AnalyticsEvent[]): Record<string, CapabilityFunnelRow> {
+  const rows: Record<string, CapabilityFunnelRow> = {};
+  const get = (name: string) => rows[name] ??= {
+    presented: 0, preview: 0, challenges402: 0, paid: 0, executed: 0, revenueUsd: 0,
+    previewTo402Conversion: null, paymentConversionAfter402: null, paymentToExecutionConversion: null,
+    presentedIsSurfaceImpression: true
+  };
+  for (const event of events) {
+    if (event.category === "discovery" && event.eventType === "surface_requested") {
+      for (const name of event.presentedCapabilities ?? []) get(name).presented++;
+    }
+    if (event.category === "preview" && event.toolName) {
+      if (event.eventType === "preview_requested") get(event.toolName).preview++;
+      // paid_capability_started is an attempt/conversion signal, not proof of payment completion.
+    }
+    if (event.category === "x402" && event.toolName) {
+      if (event.eventType === "challenge") get(event.toolName).challenges402++;
+      if (event.eventType === "settlement_success") {
+        const row = get(event.toolName); row.paid++;
+        if (event.amount !== null && event.currency === "USD") row.revenueUsd += event.amount;
+      }
+    }
+    if (event.category === "l402" && event.toolName && event.eventType === "settlement_success") get(event.toolName).paid++;
+    if (event.category === "tool" && event.toolName) {
+      const row = get(event.toolName);
+      if (event.success === true) row.executed++;
+      if (event.success === true && ["api_credits", "subscription", "mpp", "mpp-session"].includes(event.channel ?? "")) row.paid++;
+    }
+  }
+  for (const row of Object.values(rows)) {
+    row.previewTo402Conversion = ratio(row.challenges402, row.preview);
+    row.paymentConversionAfter402 = ratio(row.paid, row.challenges402);
+    row.paymentToExecutionConversion = ratio(row.executed, row.paid);
+  }
+  return rows;
+}

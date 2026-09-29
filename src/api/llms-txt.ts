@@ -1,4 +1,4 @@
-import { capabilities } from "../domain/capabilities.js";
+import { discoveryCapabilities } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
 import { prices } from "../billing/catalog.js";
 import { x402BasePath, x402DocsPath } from "../billing/x402.js";
@@ -25,7 +25,7 @@ export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network">
   const x402DocsUrl = baseUrl ? new URL(x402DocsPath, baseUrl).toString() : x402DocsPath;
   const mppCharge = Boolean(config.mpp?.enabled && config.mpp.modes.includes("charge"));
   const mppSession = Boolean(config.mpp?.enabled && config.mpp.modes.includes("session"));
-  const toolLines = capabilities.map(c => {
+  const toolLines = discoveryCapabilities.map(c => {
     const price = prices[c.name].toFixed(2);
     const lines = [
       `## ${c.name}`,

@@ -9,6 +9,7 @@ import type { RequestClientContext } from "./context.js";
 export const DISCOVERY_PATHS = [
   "/agent.json",
   "/.well-known/agent.json",
+  "/.well-known/ai-plugin.json",
   "/llms.txt",
   "/api/v1/capabilities",
   "/api/v1/tools",
@@ -36,11 +37,22 @@ function fireAndForget(repository: AnalyticsRepository, event: Parameters<Analyt
 /** GET-only discovery surfaces (see DISCOVERY_PATHS) — always success:true/durationMs:null,
  *  since a plain discovery hit either reaches this middleware (200, by construction — these
  *  routes never 4xx/5xx for a GET with no body) or the request never got this far. */
-export function recordDiscoveryHit(repository: AnalyticsRepository, req: Request, path: string): void {
+export function recordDiscoveryHit(repository: AnalyticsRepository, req: Request, path: string, presentedCapabilities?: readonly string[]): void {
   const client = extractClientContext(req);
   fireAndForget(repository, {
     category: "discovery", eventType: "hit", path, toolName: null, channel: null, success: true, durationMs: null,
-    amount: null, currency: null, txHash: null, dataSource: null, ...client
+    amount: null, currency: null, txHash: null, dataSource: null,
+    presentedCapabilities: presentedCapabilities ? [...presentedCapabilities] : null, ...client
+  });
+}
+
+/** Records a surface impression only: the response contained these capabilities. It does not
+ * claim that an agent read, selected, or understood each capability. */
+export function recordDiscoverySurface(repository: AnalyticsRepository, req: Request, path: string, presentedCapabilities: readonly string[]): void {
+  const client = extractClientContext(req);
+  fireAndForget(repository, {
+    category: "discovery", eventType: "surface_requested", path, toolName: null, channel: null, success: true, durationMs: null,
+    amount: null, currency: null, txHash: null, dataSource: null, presentedCapabilities: [...presentedCapabilities], ...client
   });
 }
 

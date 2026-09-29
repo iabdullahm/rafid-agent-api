@@ -9,7 +9,8 @@ import type { Config } from "../config/env.js";
 import type { AnalyticsRepository, DataSource } from "../analytics/types.js";
 import { mcpClientContext } from "../analytics/context.js";
 import { extractClientContext } from "../analytics/attribution.js";
-import { mapMcpMethod, recordMcpEvent, recordToolInvocation, recordDiscoveryHit, currentMcpClientContext } from "../analytics/recorder.js";
+import { mapMcpMethod, recordMcpEvent, recordToolInvocation, recordDiscoverySurface, currentMcpClientContext } from "../analytics/recorder.js";
+import { discoveryCapabilities } from "../domain/capabilities.js";
 import type { PaymentDiscoveryConfig } from "../billing/paymentMethods.js";
 
 /** Public path for the remote (Streamable HTTP) MCP transport. Mounted only when
@@ -108,7 +109,7 @@ export function createRemoteMcpHandler(
     // DISCOVERY_PATHS) — one row per HTTP request reaching this transport at all, independent of
     // and in addition to the more granular MCP-category method breakdown (initialize/tools_list/
     // tools_call) recorded below.
-    recordDiscoveryHit(analyticsRepository, req, mcpRemotePath);
+    recordDiscoverySurface(analyticsRepository, req, mcpRemotePath, discoveryCapabilities.map(c => c.name));
     const method = mapMcpMethod((req.body as { method?: unknown } | undefined)?.method);
     if (method === "initialize" || method === "tools_list") {
       recordMcpEvent(analyticsRepository, { eventType: method, client });

@@ -84,6 +84,8 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
         ADD COLUMN IF NOT EXISTS client_type text,
         ADD COLUMN IF NOT EXISTS traffic_class text`
     )).then(() => this.pool.query(
+      `ALTER TABLE rafid_analytics_events ADD COLUMN IF NOT EXISTS presented_capabilities jsonb`
+    )).then(() => this.pool.query(
       // One request can emit several analytics rows across categories (a "tool" invocation row
       // plus an "x402"/"l402" funnel row for the same physical HTTP request) that the audit layer
       // must join efficiently — this index makes that join a fast lookup rather than a table scan.
@@ -98,8 +100,8 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
         category, event_type, path, tool_name, channel, success, duration_ms, amount, currency, tx_hash,
         data_source, client_hash, user_agent, referer, client_name, request_fingerprint, payment_rail,
         preview_seen, conversion_latency_ms, provider, request_id, payment_guidance_version, payment_docs_url,
-        challenge_parseable, source, utm_medium, campaign, utm_content, referrer_host, client_type, traffic_class, created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)`,
+        challenge_parseable, source, utm_medium, campaign, utm_content, referrer_host, client_type, traffic_class, presented_capabilities, created_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33)`,
       [
         event.category, event.eventType, event.path, event.toolName, event.channel, event.success, event.durationMs,
         event.amount, event.currency, event.txHash, event.dataSource, event.clientHash, event.userAgent,
@@ -108,6 +110,7 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
         event.paymentGuidanceVersion ?? null, event.paymentDocsUrl ?? null, event.challengeParseable ?? null,
         event.source ?? null, event.utmMedium ?? null, event.campaign ?? null, event.utmContent ?? null,
         event.referrerHost ?? null, event.clientType ?? null, event.trafficClass ?? null,
+        event.presentedCapabilities ?? null,
         event.createdAt ?? new Date().toISOString()
       ]
     );
@@ -119,7 +122,7 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
       `SELECT category, event_type, path, tool_name, channel, success, duration_ms, amount, currency, tx_hash,
               data_source, client_hash, user_agent, referer, client_name, request_fingerprint, payment_rail,
               preview_seen, conversion_latency_ms, provider, request_id, payment_guidance_version, payment_docs_url,
-              challenge_parseable, source, utm_medium, campaign, utm_content, referrer_host, client_type, traffic_class, created_at
+              challenge_parseable, source, utm_medium, campaign, utm_content, referrer_host, client_type, traffic_class, presented_capabilities, created_at
        FROM rafid_analytics_events WHERE created_at >= $1 ORDER BY created_at DESC LIMIT $2`,
       [since.toISOString(), MAX_QUERY_EVENTS]
     );
@@ -133,7 +136,8 @@ export class PostgresAnalyticsRepository implements AnalyticsRepository {
       provider: r.provider, requestId: r.request_id, paymentGuidanceVersion: r.payment_guidance_version,
       paymentDocsUrl: r.payment_docs_url, challengeParseable: r.challenge_parseable,
       source: r.source, utmMedium: r.utm_medium, campaign: r.campaign, utmContent: r.utm_content,
-      referrerHost: r.referrer_host, clientType: r.client_type, trafficClass: r.traffic_class,
+        referrerHost: r.referrer_host, clientType: r.client_type, trafficClass: r.traffic_class,
+      presentedCapabilities: Array.isArray(r.presented_capabilities) ? r.presented_capabilities : null,
       createdAt: (r.created_at as Date).toISOString()
     }));
   }

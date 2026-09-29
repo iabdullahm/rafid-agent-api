@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { Router, type Request, type RequestHandler, type Response } from "express";
 import { createRateLimiter } from "../../middleware/rateLimit.js";
-import { capabilities } from "../../domain/capabilities.js";
+import { capabilities, discoveryCapabilities } from "../../domain/capabilities.js";
 import { classifyDataSource } from "../../analytics/dataSource.js";
 import type { CapabilityName } from "../catalog.js";
 import { describeMppConfig, type MppConfig } from "./config.js";
@@ -78,7 +78,7 @@ export function buildMppInfo(config: MppConfig, priceUsd: (tool: CapabilityName)
       callTool: "POST " + mppBasePath + "/sessions/{sessionId}/tools/{tool}",
       closeSession: "POST " + mppBasePath + "/sessions/{sessionId}/close"
     },
-    tools: capabilities.map(c => ({ name: c.name, price: priceUsd(c.name), currency: "USD", chargeEndpoint: `${mppBasePath}/charge/${c.name}` }))
+    tools: discoveryCapabilities.map(c => ({ name: c.name, price: priceUsd(c.name), currency: "USD", chargeEndpoint: `${mppBasePath}/charge/${c.name}` }))
   };
 }
 

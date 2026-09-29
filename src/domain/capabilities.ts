@@ -1570,3 +1570,37 @@ export const capabilities = [
 ];
 
 export type CapabilityName = (typeof capabilities)[number]["name"];
+
+/** Stable taxonomy ordering for agent-facing catalogs. */
+const DISCOVERY_CATEGORY_ORDER = [
+  "risk_intelligence", "finance_risk", "document_intelligence", "automotive", "logistics",
+  "property", "website_services", "recruitment", "supplier", "trading", "voice",
+  "video_generation", "book_business", "other"
+] as const;
+
+export function capabilityCategory(capability: { path: string; category?: string }): string {
+  if (capability.category) return capability.category;
+  if (capability.path.startsWith("/property/") || capability.path.startsWith("/oman/property/")) return "property";
+  if (capability.path.startsWith("/maintenance/")) return "property";
+  if (capability.path.startsWith("/intelligence/") || capability.path.startsWith("/business/")) return "risk_intelligence";
+  if (capability.path.startsWith("/finance/")) return "finance_risk";
+  if (capability.path.startsWith("/documents/")) return "document_intelligence";
+  if (capability.path.startsWith("/automotive/")) return "automotive";
+  if (capability.path.startsWith("/logistics/")) return "logistics";
+  if (capability.path.startsWith("/websites/")) return "website_services";
+  if (capability.path.startsWith("/recruitment/")) return "recruitment";
+  if (capability.path.startsWith("/procurement/")) return "supplier";
+  if (capability.path.startsWith("/trading/")) return "trading";
+  if (capability.path.startsWith("/voice/")) return "voice";
+  if (capability.path.startsWith("/video/")) return "video_generation";
+  return "other";
+}
+
+/** Every capability is retained once; only presentation order changes. */
+export const discoveryCapabilities = [...capabilities].sort((a, b) => {
+  const aCategory = capabilityCategory(a);
+  const bCategory = capabilityCategory(b);
+  const aRank = DISCOVERY_CATEGORY_ORDER.indexOf(aCategory as typeof DISCOVERY_CATEGORY_ORDER[number]);
+  const bRank = DISCOVERY_CATEGORY_ORDER.indexOf(bCategory as typeof DISCOVERY_CATEGORY_ORDER[number]);
+  return (aRank - bRank) || aCategory.localeCompare(bCategory) || a.name.localeCompare(b.name);
+});

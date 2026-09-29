@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { capabilities } from "../domain/capabilities.js";
+import { capabilities, discoveryCapabilities } from "../domain/capabilities.js";
 import { publicError } from "../utils/errors.js";
 import type { Logger } from "../utils/logging.js";
 import { classifyDataSource } from "../analytics/dataSource.js";
@@ -21,7 +21,7 @@ export interface McpServerOptions {
 }
 export function createMcpServer(logger: Logger = () => {}, options: McpServerOptions = {}) {
   const server = new McpServer({ name: "rafid-agent-api", version: "0.1.0" });
-  for (const c of capabilities) {
+  for (const c of discoveryCapabilities) {
     server.registerTool(c.name, {
       // Both sentences come straight from the shared capability registry (no prose written
       // here): `description` is the factual "what it computes", `whenToUse` is the

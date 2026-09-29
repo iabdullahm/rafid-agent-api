@@ -41,7 +41,7 @@ import { getAnalyticsDatabaseUrl, getAnalyticsInternalApiKey } from "../analytic
 import { createAnalyticsRoutes } from "./analyticsRoutes.js";
 import { classifyDataSource } from "../analytics/dataSource.js";
 import { extractClientContext } from "../analytics/attribution.js";
-import { recordDiscoveryHit, recordFundingEvent, recordToolInvocation, recordToolInvocationAwaited, recordX402Event, recordX402EventAwaited, classifyX402Outcome, decodeX402SettlementHeader } from "../analytics/recorder.js";
+import { recordDiscoverySurface, recordDiscoveryHit, recordFundingEvent, recordToolInvocation, recordToolInvocationAwaited, recordX402Event, recordX402EventAwaited, classifyX402Outcome, decodeX402SettlementHeader } from "../analytics/recorder.js";
 import { getWebsiteDownloadArtifact } from "../website-download/service.js";
 import type { RevenueLedger } from "../revenue/types.js";
 import { MemoryRevenueLedger } from "../revenue/memoryLedger.js";
@@ -322,6 +322,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     ...(config.mpp.enabled ? { mpp: mppBasePath } : {}),
     endpoints: capabilities.map(c => "/api/v1" + c.path)
   };
+  const presentedCapabilities = capabilities.map(c => c.name);
   // Section I: browsers get a landing page; machine/agent clients that ask for JSON (the
   // pre-existing behavior) keep getting the discovery payload unchanged.
   app.get("/", discoveryLimiter, (req, res) => {
@@ -329,12 +330,12 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     res.type("html").send(landingHtml(config));
   });
   for (const path of ["/health", "/api/v1/health"]) app.get(path, (_req, res) => send(res, { ok: true }));
-  // Internal analytics DISCOVERY tracking: exactly the 7 surfaces the spec names (see
+  // Internal analytics DISCOVERY tracking: the named discovery surfaces (see
   // analytics/recorder.ts's DISCOVERY_PATHS) — "/mcp" is recorded separately, inside
   // mcp/remote.ts's handler, since it lives on its own route family below. Deliberately NOT
   // added to every discovery-ish endpoint (e.g. /api/v1/agent, /api/v1/pricing, /.well-known/
   // ai-plugin.json, /api/v1/mcp/status) — only the ones actually named.
-  app.get("/openapi.json", (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/openapi.json"); res.json(openapiDoc); });
+  app.get("/openapi.json", (req, res) => { recordDiscoverySurface(analyticsRepository, req, "/openapi.json", presentedCapabilities); res.json(openapiDoc); });
   app.get("/docs", (_req, res) => {
     res.setHeader("Content-Security-Policy", swaggerContentSecurityPolicy);
     res.type("html").send(swaggerHtml);
@@ -344,7 +345,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   app.get(agentBasePath, discoveryLimiter, (req, res) => send(res, buildAgentInfo(config, getPublicBaseUrl(req))));
   app.get(pricingBasePath, discoveryLimiter, (_req, res) => send(res, buildPricingInfo(config)));
   app.get(subscriptionPlansPath, discoveryLimiter, (_req, res) => send(res, buildSubscriptionPlans(config)));
-  app.get(toolsBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, toolsBasePath); send(res, buildToolCatalog()); });
+  app.get(toolsBasePath, discoveryLimiter, (req, res) => { recordDiscoverySurface(analyticsRepository, req, toolsBasePath, presentedCapabilities); send(res, buildToolCatalog()); });
   // Machine-first capability registry (Section 8/13): the same data /agent.json's `tools`
   // field carries, exposed on its own path so a caller that only wants tool metadata doesn't
   // have to fetch the full manifest.
@@ -352,13 +353,13 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // how to authenticate. Always mounted, like /api/v1/x402 — even when billing is disabled it
   // still truthfully lists whichever of x402 / L402 / MPP are live.
   app.get(paymentMethodsPath, discoveryLimiter, (_req, res) => send(res, buildPaymentMethods(config)));
-  app.get(capabilitiesBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, capabilitiesBasePath); send(res, buildCapabilitiesRegistry(config, getPublicBaseUrl(req))); });
+  app.get(capabilitiesBasePath, discoveryLimiter, (req, res) => { recordDiscoverySurface(analyticsRepository, req, capabilitiesBasePath, presentedCapabilities); send(res, buildCapabilitiesRegistry(config, getPublicBaseUrl(req))); });
   // Top-level agent discovery manifests. Unauthenticated, GET-only, and — like every other
   // discovery endpoint here — read straight from the shared capability registry.
-  app.get("/agent.json", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/agent.json"); res.json(buildAgentManifest(config, getPublicBaseUrl(req))); });
-  app.get("/.well-known/ai-plugin.json", discoveryLimiter, (req, res) => res.json(buildAiPluginManifest(config, getOrigin(req))));
-  app.get("/.well-known/agent.json", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/.well-known/agent.json"); res.json(buildAgentCard(config, getOrigin(req))); });
-  app.get("/llms.txt", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/llms.txt"); res.type("text/plain").send(buildLlmsTxt(config, `${req.protocol}://${req.get("host")}`)); });
+  app.get("/agent.json", discoveryLimiter, (req, res) => { recordDiscoverySurface(analyticsRepository, req, "/agent.json", presentedCapabilities); res.json(buildAgentManifest(config, getPublicBaseUrl(req))); });
+  app.get("/.well-known/ai-plugin.json", discoveryLimiter, (req, res) => { recordDiscoverySurface(analyticsRepository, req, "/.well-known/ai-plugin.json", presentedCapabilities); res.json(buildAiPluginManifest(config, getOrigin(req))); });
+  app.get("/.well-known/agent.json", discoveryLimiter, (req, res) => { recordDiscoverySurface(analyticsRepository, req, "/.well-known/agent.json", presentedCapabilities); res.json(buildAgentCard(config, getOrigin(req))); });
+  app.get("/llms.txt", discoveryLimiter, (req, res) => { recordDiscoverySurface(analyticsRepository, req, "/llms.txt", presentedCapabilities); res.type("text/plain").send(buildLlmsTxt(config, `${req.protocol}://${req.get("host")}`)); });
   // GET /api/v1/mcp/status — always mounted (independent of MCP_REMOTE_ENABLED, like
   // /api/v1/x402/status is independent of X402_ENABLED), so a caller can check whether the
   // remote transport is live without guessing from a manifest.

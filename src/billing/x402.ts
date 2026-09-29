@@ -7,7 +7,7 @@ import { getDefaultAsset } from "@x402/evm";
 import { paymentMiddleware } from "@x402/express";
 import { declareDiscoveryExtension, bazaarResourceServerExtension } from "@x402/extensions/bazaar";
 import { createFacilitatorConfig } from "@coinbase/x402";
-import { capabilities } from "../domain/capabilities.js";
+import { capabilities, discoveryCapabilities } from "../domain/capabilities.js";
 import type { BillingService } from "./service.js";
 import type { Config } from "../config/env.js";
 
@@ -277,7 +277,7 @@ export function buildX402Info(config: X402Config, billing: BillingService) {
     asset: config.x402Enabled ? "USDC" : null,
     docs: x402DocsPath,
     executionFlow: ["POST without payment", "parse PAYMENT-REQUIRED", "pay exact requirement", "retry same request with X-PAYMENT"],
-    tools: capabilities.map(c => ({ name: c.name, endpoint: x402BasePath + c.path, price: billing.getToolPrice(c.name) }))
+    tools: discoveryCapabilities.map(c => ({ name: c.name, endpoint: x402BasePath + c.path, price: billing.getToolPrice(c.name) }))
   };
 }
 

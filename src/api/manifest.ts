@@ -1,4 +1,4 @@
-import { capabilities, CURRENCY } from "../domain/capabilities.js";
+import { discoveryCapabilities, CURRENCY } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
 import { buildAccountBillingSummary, buildCapabilitiesRegistry, buildPaymentsSummary } from "./agent.js";
 import { accountPaymentMethodIds, paymentMethodsPath, railAvailability } from "../billing/unified/discovery.js";
@@ -109,22 +109,14 @@ export function buildAiPluginManifest(config: PluginManifestConfig, origin: stri
     name_for_model: "rafid_intelligence_network",
     description_for_human: PLATFORM_DESCRIPTION,
     description_for_model:
-      "Calculates property investment metrics (rental yield, income, simple payback), compares multiple " +
-      "properties by net yield, estimates an annual maintenance reserve, and (analyze_oman_property) analyzes " +
-      "a Muscat residential property — prefer this tool for Al Mouj Muscat valuation questions (sale price " +
-      "positioning, historical contracted-price context, recent comparable sales, price per sqm) — against " +
-      "local rental/sale comparables with normalization, outlier removal, confidence scoring and provenance. " +
-      "All monetary property inputs and outputs are in OMR. Call GET /api/v1/capabilities first for exact " +
-      "input/output JSON Schemas, pricing, priorityContexts, evidenceTypes and usage guidance per tool. " +
-      "Authenticate with an X-API-Key header, or call the unauthenticated /api/v1/x402/... twin of any route " +
-      "and pay per call on-chain via the x402 protocol (see GET /api/v1/x402 for current terms). " +
-      (config.billing?.enabled ? "Agents without a wallet can instead send Authorization: Bearer raf_live_<key> and pay from prepaid API credits or a subscription allowance. " : "") +
-      "GET " + paymentMethodsPath + " lists every enabled payment method. These are " +
-      "calculations over the numbers/comparables supplied or looked up, not an inspection. Depending on " +
-      "deployment configuration, Oman comparable data is either a curated MVP benchmark dataset or real " +
-      "partner-supplied records (e.g. Al Mouj Muscat contracted-unit-price sales) — each response's own " +
-      "provenance states which; a web-search asking price and this tool's partner-fed sale data are different " +
-      "evidence types and should never be blended without labeling each. Not investment advice.",
+      "Rafid exposes a categorized catalog of paid structured capabilities across risk intelligence, finance, " +
+      "documents, automotive, logistics, property, websites, procurement, recruitment, trading, voice, video and " +
+      "business planning. Do not infer the right tool from list position: call GET /api/v1/capabilities for the " +
+      "complete catalog, category, intent phrases, exact schemas, examples, preview availability and price. " +
+      "Use the capability whose intent and required input match the user's request; use its free preview when " +
+      "available before paying. Tool results preserve their own limitations, provenance and unavailable states. " +
+      "Payment methods are documented at " + paymentMethodsPath + "." +
+      (config.billing?.enabled ? " When account billing is enabled, agents without a wallet can use Authorization: Bearer raf_live_<key> and pay from prepaid API credits or a subscription allowance." : ""),
     auth: { type: "none" },
     api: { type: "openapi", url: origin + "/openapi.json" },
     logo_url: config.logoUrl,
@@ -153,7 +145,7 @@ export function buildAgentCard(config: Pick<Config, "x402Enabled"> & Partial<Pic
     paymentMethods: paymentMethodsPath,
     defaultInputModes: ["application/json"],
     defaultOutputModes: ["application/json"],
-    skills: capabilities.map(c => ({
+    skills: discoveryCapabilities.map(c => ({
       id: c.name,
       name: c.name,
       description: c.description,

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { capabilities } from "../domain/capabilities.js";
+import { capabilities, capabilityCategory, discoveryCapabilities } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
 import { prices } from "../billing/catalog.js";
 import { x402BasePath, x402DocsPath, X402_PAYMENT_GUIDANCE_VERSION } from "../billing/x402.js";
@@ -147,7 +147,7 @@ export function buildAgentInfo(config: PaymentDiscoveryConfig, baseUrl?: string)
     paymentMethods: paymentMethodsPath,
     subscriptionPlans: subscriptionPlansPath,
     ...(railAvailability(config).billing ? { billing: buildAccountBillingSummary(config) } : {}),
-    endpoints: capabilities.map(c => "/api/v1" + c.path),
+    endpoints: discoveryCapabilities.map(c => "/api/v1" + c.path),
     roadmap: plannedCapabilities
   };
 }
@@ -181,7 +181,7 @@ export function buildSubscriptionPlans(config: PaymentDiscoveryConfig) {
  *  (summary rather than full output schema) for backward compatibility; GET /api/v1/capabilities
  *  below is the fuller, machine-first successor. */
 export function buildToolCatalog() {
-  return capabilities.map(c => ({
+  return discoveryCapabilities.map(c => ({
     ...(() => { const contract = discoveryContract(c); return { estimated_latency_ms: contract.estimatedLatencyMs, requires: contract.requires, returns: contract.returns }; })(),
     name: c.name,
     description: c.description,
@@ -207,12 +207,13 @@ export function buildCapabilitiesRegistry(config: PaymentDiscoveryConfig, baseUr
   const absolute = (path: string) => baseUrl ? new URL(path, baseUrl).toString() : path;
   const paymentMethods = paymentMethodsFor(config);
   const mppCharge = paymentMethods.includes("mpp-charge");
-  return capabilities.map(c => ({
+  return discoveryCapabilities.map(c => ({
     ...(() => { const contract = discoveryContract(c); return { estimated_latency_ms: contract.estimatedLatencyMs, requires: contract.requires, returns: contract.returns }; })(),
     name: c.name,
     description: c.description,
     // Optional capability category (e.g. "risk_intelligence"); null when a capability defines none.
-    category: (c as { category?: string }).category ?? null,
+    category: capabilityCategory(c),
+    intents: c.useCases,
     whenToUse: c.whenToUse,
     useCases: c.useCases,
     price: c.price,

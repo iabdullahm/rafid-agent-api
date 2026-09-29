@@ -45,7 +45,7 @@ export type FundingEventType =
   | "usdc_topup_created" | "usdc_topup_confirmed" | "usdc_topup_failed" | "credits_funded";
 
 /** Discovery: always "hit" — which surface was hit is carried in `path`. */
-export type DiscoveryEventType = "hit";
+export type DiscoveryEventType = "hit" | "surface_requested";
 
 /** MCP: the three JSON-RPC methods this layer distinguishes, matching the spec's literal list
  *  (initialize, tools/list, tools/call) with underscores instead of slashes for a stable SQL/JS
@@ -129,6 +129,8 @@ export interface AnalyticsEvent {
   /** Discovery only — one of the exact surfaces this layer tracks (see recorder.ts's
    *  DISCOVERY_PATHS). Never a full URL, never a query string. */
   path: string | null;
+  /** Discovery surface response contents, not an assertion that an agent inspected every item. */
+  presentedCapabilities?: string[] | null;
   /** mcp tools_call and tool invocations only — a CapabilityName from the shared registry. */
   toolName: string | null;
   /** Tool invocations only — see AnalyticsChannel's doc comment. */

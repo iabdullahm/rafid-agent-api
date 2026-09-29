@@ -55,11 +55,10 @@ test("analytics/discovery: hits on exactly the tracked surfaces are counted, per
   for (const path of trackedGetPaths.filter(p => p !== "/agent.json")) assert.equal((await fetch(base + path)).status, 200);
   await fetch(base + "/agent.json"); // hit twice, to prove per-path counting isn't just presence/absence
 
-  // Untracked discovery-ish endpoints (spec names 7 exact surfaces, not every discovery-adjacent
-  // route) must never be recorded as a discovery hit.
+  // Discovery-adjacent endpoints outside the tracked surfaces must never be recorded as a
+  // discovery hit.
   await fetch(base + "/api/v1/agent");
   await fetch(base + "/api/v1/pricing");
-  await fetch(base + "/.well-known/ai-plugin.json");
   await fetch(base + "/api/v1/mcp/status");
 
   const discoveryEvents = analyticsRepository.all().filter(e => e.category === "discovery");

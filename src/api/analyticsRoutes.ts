@@ -1,7 +1,7 @@
 import express, { type Router } from "express";
 import { requireInternalAuth } from "../middleware/partnerAuth.js";
 import type { AnalyticsRepository } from "../analytics/types.js";
-import { WINDOW_MS, summarize, summarizeDiscovery, summarizeTools, summarizeX402 } from "../analytics/aggregate.js";
+import { WINDOW_MS, summarize, summarizeCapabilityFunnel, summarizeDiscovery, summarizeTools, summarizeX402 } from "../analytics/aggregate.js";
 
 /**
  * Internal analytics API — GET-only, internal-key-protected, never registered in
@@ -51,6 +51,13 @@ export function createAnalyticsRoutes(options: AnalyticsRoutesOptions): Router {
 
   router.get("/api/v1/internal/analytics/x402", internalAuth, async (_req, res, next) => {
     try { send(res, summarizeX402(await fetchEvents(), new Date())); } catch (error) { next(error); }
+  });
+
+  router.get("/api/v1/internal/analytics/funnel", internalAuth, async (_req, res, next) => {
+    try {
+      const events = await fetchEvents();
+      send(res, { rows: summarizeCapabilityFunnel(events), presentedMeaning: "Surface response contained the capability; this does not prove an agent inspected or selected it." });
+    } catch (error) { next(error); }
   });
 
   return router;
