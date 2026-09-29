@@ -128,51 +128,63 @@ export function createRemoteMcpHandler(
     if (method === "tools_call") {
       const params = (req.body as { params?: { name?: unknown; arguments?: unknown } } | undefined)?.params;
       const toolName = typeof params?.name === "string" ? params.name : null;
-      const capability = toolName ? capabilities.find(c => c.name === toolName) : undefined;
-      if (capability) {
-        const parsed = capability.input.safeParse(params?.arguments ?? {});
-        if (!parsed.success) {
-          recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: capability.name, success: false, durationMs: 0, client });
-          recordToolInvocation(analyticsRepository, { toolName: capability.name, channel: "mcp-remote", success: false, durationMs: 0, dataSource: null, client });
-          const id = (req.body as { id?: string | number | null } | undefined)?.id ?? null;
-          res.status(200).json({
-            jsonrpc: "2.0",
-            id,
-            result: {
-              isError: true,
-              content: [{
-                type: "text",
-                text: JSON.stringify({
-                  success: false,
-                  error: {
-                    code: "INVALID_INPUT",
-                    message: "Tool arguments do not match the capability input schema."
-                  }
-                })
-              }]
+      const id = (req.body as { id?: string | number | null } | undefined)?.id ?? null;
+
+      if (!toolName) {
+        res.status(200).json({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32602, message: "Invalid params: tools/call requires a tool name." }
+        });
+        return;
+      }
+
+      const capability = capabilities.find(c => c.name === toolName);
+      if (!capability) {
+        res.status(200).json({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32601, message: `Unknown tool: ${toolName}` }
+        });
+        return;
+      }
+
+      // Validate against the canonical registry schema before any billing or execution.
+      // This keeps every MCP tool in sync with REST/OpenAPI and guarantees invalid input
+      // can never trigger a charge or a payment handoff.
+      const parsed = capability.input.safeParse(params?.arguments ?? {});
+      if (!parsed.success) {
+        recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: capability.name, success: false, durationMs: 0, client });
+        recordToolInvocation(analyticsRepository, { toolName: capability.name, channel: "mcp-remote", success: false, durationMs: 0, dataSource: null, client });
+        res.status(200).json({
+          jsonrpc: "2.0",
+          id,
+          error: {
+            code: -32602,
+            message: `Invalid arguments for ${capability.name}.`,
+            data: { code: "INVALID_INPUT" }
+          }
+        });
+        return;
+      }
+
+      const priceUsd = billingService.getToolPrice(capability.name as CapabilityName);
+      if (priceUsd > 0 && !options.paidConversionEnabled) {
+        res.status(402).json({
+          jsonrpc: "2.0",
+          id,
+          error: {
+            code: -32002,
+            message: `Payment required to call ${capability.name}.`,
+            data: {
+              tool: capability.name,
+              price: priceUsd.toFixed(2),
+              currency: "USD",
+              paymentEndpoint: "/mcp/credits"
             }
-          });
-          return;
-        }
-        const priceUsd = billingService.getToolPrice(capability.name as CapabilityName);
-        if (priceUsd > 0 && !options.paidConversionEnabled) {
-          const id = (req.body as { id?: string | number | null } | undefined)?.id ?? null;
-          res.status(402).json({
-            jsonrpc: "2.0",
-            id,
-            error: {
-              code: -32002,
-              message: `Payment required to call ${capability.name}.`,
-              data: {
-                tool: capability.name,
-                price: priceUsd.toFixed(2),
-                currency: "USD",
-                paymentEndpoint: "/mcp/credits"
-              }
-            }
-          });
-          return;
-        }
+          }
+        });
+        return;
       }
     }
     void mcpClientContext.run(client, () =>
