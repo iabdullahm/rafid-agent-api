@@ -430,7 +430,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     // free /mcp endpoint is untouched. See billing/mpp/mcp.ts.
     if (config.mpp.mcpEnabled && config.mcpRemoteEnabled) {
       app.post(mppMcpPath, mcpLimiter, express.json({ limit: maxCapabilityBodyLimit() }),
-        createMppMcpHandler({ service: mppService, delegate: createRemoteMcpHandler(billingService, logger, analyticsRepository) }));
+        createMppMcpHandler({ service: mppService, delegate: createRemoteMcpHandler(billingService, logger, analyticsRepository, { paidConversionEnabled: false }) }));
     }
   } else {
     app.use(createMppDisabledRoutes());
@@ -449,7 +449,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     // through untouched.
     // The MCP endpoint carries every tool's arguments, so it accepts the largest per-tool body limit.
     app.use(mcpRemotePath, express.json({ limit: maxCapabilityBodyLimit() }));
-    app.all(mcpRemotePath, createRemoteMcpHandler(billingService, logger, analyticsRepository));
+    app.all(mcpRemotePath, createRemoteMcpHandler(billingService, logger, analyticsRepository, { paidConversionEnabled: config.x402Enabled, publicBaseUrl: "https://api.rafidsystem.com" }));
   }
   // Partner Data Feed layer (Section 3/4/9/11) — deliberately outside the `capabilities` registry
   // above, so it never appears in /agent.json, the tool catalog, remote MCP, or the x402 route
