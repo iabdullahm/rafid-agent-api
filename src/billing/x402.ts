@@ -227,7 +227,9 @@ export const MAX_DISCOVERY_DECLARATION_CHARS = 10_000;
  *  unaffected by the later steps. */
 export function discoveryDeclaration(c: (typeof capabilities)[number]): ReturnType<typeof declareDiscoveryExtension> {
   const inputSchema = z.toJSONSchema(c.input) as Record<string, unknown>;
-  const base = { bodyType: "json" as const, input: c.example as Record<string, unknown>, inputSchema };
+  const parsedExample = c.input.safeParse(c.example);
+  const discoveryInput = (parsedExample.success ? parsedExample.data : c.example) as Record<string, unknown>;
+  const base = { bodyType: "json" as const, input: discoveryInput, inputSchema };
   const outputSchema = z.toJSONSchema(c.output) as Record<string, unknown>;
   const compactInputSchema = stripDescriptions(inputSchema) as Record<string, unknown>;
   const candidates = [
@@ -247,7 +249,8 @@ export function discoveryDeclaration(c: (typeof capabilities)[number]): ReturnTy
 /** Keeps Bazaar declarations valid when a full JSON Schema cannot fit in a payment header. */
 function minimumDiscoveryInput(c: (typeof capabilities)[number]): Record<string, unknown> {
   if (c.name === "invoice_anomaly_check") return { invoice: { total: 0 } };
-  return c.example as Record<string, unknown>;
+  const parsed = c.input.safeParse(c.example);
+  return (parsed.success ? parsed.data : c.example) as Record<string, unknown>;
 }
 
 /** A JSON Schema without its `description` annotations (validation keywords unchanged). */
