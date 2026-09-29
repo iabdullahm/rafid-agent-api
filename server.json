@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.iabdullahm/rafid-agent-api",
   "title": "Rafid Agent Intelligence",
-  "description": "Agent-native decision intelligence via MCP for property, business risk, documents, finance and more.",
-  "version": "0.1.1",
+  "description": "Decision intelligence for AI agents: due diligence, risk, property, documents, finance and more.",
+  "version": "0.1.2",
   "websiteUrl": "https://api.rafidsystem.com",
   "repository": {
     "url": "https://github.com/iabdullahm/rafid-agent-api",
