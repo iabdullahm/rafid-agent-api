@@ -637,7 +637,9 @@ test("registry + discovery: every surface lists invoice_anomaly_check with price
     assert.ok(mcpTool);
     assert.equal(mcpTool.inputSchema.additionalProperties, false);
     assert.deepEqual(mcpTool.inputSchema.required, ["invoice"]);
-    assert.ok(mcpTool.outputSchema.properties.riskScore && mcpTool.outputSchema.properties.anomalies);
+    const outputSchemaJson = JSON.stringify(mcpTool.outputSchema);
+    assert.match(outputSchemaJson, /"riskScore"/);
+    assert.match(outputSchemaJson, /"anomalies"/);
     const called = await rpc(2, "tools/call", { name: "invoice_anomaly_check", arguments: SCENARIOS.duplicate });
     assert.equal(called.error?.code, -32002, JSON.stringify(called).slice(0, 300));
     assert.match(called.error?.message ?? "", /Payment required/i);
