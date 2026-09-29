@@ -631,6 +631,76 @@
       ]
     },
     {
+      "name": "social_video_generate",
+      "description": "Generate a complete short-form social video from a topic or supplied script, including narration, visual materials, subtitles and final video composition.",
+      "whenToUse": "Use when an agent needs a publish-ready TikTok, Reel, Short or generic social video from a topic or script.",
+      "useCases": [
+        "social video",
+        "TikTok video",
+        "Instagram Reel",
+        "YouTube Short",
+        "short-form video"
+      ],
+      "price": 1.5,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": true,
+      "endpoint": "/api/v1/video/social-generate",
+      "x402Endpoint": "/api/v1/x402/video/social-generate",
+      "mcpToolName": "social_video_generate",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "news_video_generate",
+      "description": "Turn supplied factual news content into a publish-ready short-form news video without independently researching or fabricating current events.",
+      "whenToUse": "Use when an agent already has a verified headline, summary, facts and source URLs and needs a short news video.",
+      "useCases": [
+        "news video",
+        "factual news video",
+        "vertical news",
+        "news short"
+      ],
+      "price": 1.5,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": true,
+      "endpoint": "/api/v1/video/news-generate",
+      "x402Endpoint": "/api/v1/x402/video/news-generate",
+      "mcpToolName": "news_video_generate",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
+      "name": "product_promo_video",
+      "description": "Generate a promotional short video from structured product information, features, call to action and optional website.",
+      "whenToUse": "Use when an agent needs a publish-ready product or service promotion from structured marketing input.",
+      "useCases": [
+        "product promo video",
+        "marketing video",
+        "product advertisement",
+        "service promotion"
+      ],
+      "price": 2,
+      "currency": "USD",
+      "paymentProtocol": "x402",
+      "idempotent": true,
+      "sideEffects": true,
+      "endpoint": "/api/v1/video/product-promo",
+      "x402Endpoint": "/api/v1/x402/video/product-promo",
+      "mcpToolName": "product_promo_video",
+      "priorityContexts": [],
+      "evidenceTypes": [],
+      "limitations": [],
+      "sampleQueries": []
+    },
+    {
       "name": "company_due_diligence",
       "description": "Perform company due diligence for onboarding, procurement, partnership, investment or customer-risk decisions: resolve the entity, evaluate registration, website identity, sanctions, adverse news, legal, financial and reputation signals, then return a deterministic risk assessment with evidence and a machine-actionable next action.",
       "whenToUse": "Use when an autonomous agent must decide whether to continue doing business with a company and what verification or escalation should happen next.",
@@ -2096,6 +2166,9 @@
       "oman_supplier_check": 0.5,
       "company_reputation_check": 0.4,
       "business_risk_score": 0.5,
+      "social_video_generate": 1.5,
+      "news_video_generate": 1.5,
+      "product_promo_video": 2,
       "company_due_diligence": 1.5,
       "document_facts_extract": 0.25,
       "invoice_anomaly_check": 0.25,
@@ -2230,6 +2303,6 @@
     ],
     "note": "Coverage is Muscat governorate only, and only its supported areas. Al Mouj Muscat is the deployment's strongest single-area coverage today because it is the only area with real partner-fed (sourceType partner_feed) sale records; other supported areas may only have demo/manual_benchmark data on a given deployment. This is not nationwide Oman coverage."
   },
-  "generatedAt": "2026-09-29T03:02:17.325Z",
+  "generatedAt": "2026-09-29T04:05:46.826Z",
   "generatedBy": "scripts/generateDistributionManifest.ts (derived from src/domain/capabilities.ts — never hand-edit this file)"
 }
