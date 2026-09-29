@@ -99,8 +99,9 @@ export async function previewCompanyDueDiligencePack(input: unknown) {
       ...preview.preview,
       signals: {
         ...(preview.preview?.signals ?? {}),
-        includedCapabilities: ["company_due_diligence", "business_risk_score", "company_reputation_check"],
-        fullBundleIncludes: ["decisionSummary", "dueDiligence", "businessRisk", "reputation"]
+        includedCapabilities: "company_due_diligence,business_risk_score,company_reputation_check",
+        includedCapabilityCount: 3,
+        fullBundleIncludes: "decisionSummary,dueDiligence,businessRisk,reputation"
       }
     }
   };
