@@ -31,6 +31,7 @@ import {
   type ToolAuditRow, type CommercialFunnel, type AuditAnomaly
 } from "../../audit/aggregate.js";
 import type { CallAuditRecord, FinalStatus, ReasonCode } from "../../audit/types.js";
+import { buildPaymentJourneyFunnel, buildPaymentJourneyRows, type PaymentJourneyFunnel, type PaymentJourneyRow } from "../../analytics/paymentJourneyReporting.js";
 
 /**
  * Internal dashboard BFF (backend-for-frontend) business logic (spec sections 2-9, 11, 14).
@@ -819,7 +820,7 @@ function describeActivityEvent(e: AnalyticsEvent): string {
     return `MCP tool call${e.toolName ? `: ${e.toolName}` : ""}`;
   }
   if (e.category === "x402") {
-    if (e.eventType === "challenge") return `402 payment challenge issued${e.toolName ? ` for ${e.toolName}` : ""}`;
+    if (e.eventType === "challenge" || e.eventType === "payment_challenge") return `402 payment challenge issued${e.toolName ? ` for ${e.toolName}` : ""}`;
     if (e.eventType === "payment_verified") return `Payment verified${e.toolName ? ` for ${e.toolName}` : ""}`;
     if (e.eventType === "payment_failed") return `Payment verification failed${e.toolName ? ` for ${e.toolName}` : ""}`;
     if (e.eventType === "settlement_success") return `Settlement succeeded${e.toolName ? ` for ${e.toolName}` : ""}`;
@@ -1289,6 +1290,10 @@ export interface DashboardData {
   /** "REVENUE CONVERSION AUDIT" section (spec section 11) — see RevenueConversionAuditSection's
    *  own doc comment. Augments this dashboard; never replaces any section above. */
   revenueConversionAudit: RevenueConversionAuditSection;
+  /** Correlated discovery -> challenge -> payment -> retry -> execution rows, derived only from
+   * existing analytics events. Rows without an explicit journey id remain intentionally absent. */
+  paymentJourneys: PaymentJourneyRow[];
+  paymentJourneyFunnel: PaymentJourneyFunnel;
 }
 
 export interface DashboardServiceOptions {
@@ -1468,6 +1473,8 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
   for (const name of Object.keys(prices)) catalogPriceByTool[name] = opts.billingService.getToolPrice(name as CapabilityName);
   const anomalies = buildReconciliation({ settlements, x402ToolExecutionCounts, catalogPriceByTool });
   const paidCalls = Object.values(x402ToolExecutionCounts).reduce((a, b) => a + b, 0);
+  const paymentJourneys = buildPaymentJourneyRows(events);
+  const paymentJourneyFunnel = buildPaymentJourneyFunnel(paymentJourneys);
 
   const systemStatus = await gatherSystemStatus({
     config: opts.config, analyticsRepository: opts.analyticsRepository, revenueLedger: opts.revenueLedger,
@@ -1534,6 +1541,7 @@ export async function buildDashboardData(opts: DashboardServiceOptions, period: 
     revenueByAttribution: buildRevenueByAttribution(settlements, events), toolConversion,
     capabilityOverview, x402Funnel, previewFunnel, unifiedBillingRevenue, revenueOverview, collectionFunding, externalPaymentsTable, usage,
     transactions, reconciliation: { anomalyCount: anomalies.length, anomalies }, systemStatus,
-    agents, activityFeed, systemHealth, sparklines, revenueConversionAudit
+    agents, activityFeed, systemHealth, sparklines, revenueConversionAudit,
+    paymentJourneys, paymentJourneyFunnel
   };
 }

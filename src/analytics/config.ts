@@ -19,11 +19,13 @@ export function getAnalyticsInternalApiKey(env: NodeJS.ProcessEnv = process.env)
 }
 
 /** ANALYTICS_DATABASE_URL lets the analytics layer point at a different database than the
- *  customer/billing store, the property market-data layer, or the business-data layer. Falls
- *  back to DATABASE_URL when unset, since most deployments use one database for everything —
+ *  customer/billing store, the property market-data layer, or the business-data layer. Vercel's
+ *  Neon integration may expose the pooled URL as POSTGRES_URL when a custom prefix is used
+ *  (for example ANALYTICS_DATABASE_POSTGRES_URL), so that provider-native name is accepted too.
+ *  Falls back to DATABASE_URL when unset, since most deployments use one database for everything —
  *  same pattern as getOmanBusinessDatabaseUrl(). When neither is set, analytics still records
  *  (to an in-process MemoryAnalyticsRepository — see api/app.ts) rather than being disabled;
  *  only durability across restarts/redeploys requires a real database. */
 export function getAnalyticsDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  return env.ANALYTICS_DATABASE_URL || env.DATABASE_URL || undefined;
+  return env.ANALYTICS_DATABASE_URL || env.ANALYTICS_DATABASE_POSTGRES_URL || env.DATABASE_URL || env.POSTGRES_URL || undefined;
 }

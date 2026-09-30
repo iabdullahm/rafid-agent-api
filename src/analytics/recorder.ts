@@ -1,5 +1,5 @@
 import type { Request } from "express";
-import type { AnalyticsRepository, AnalyticsEventType, AnalyticsChannel, DataSource, FundingEventType, McpEventType, X402EventType } from "./types.js";
+import type { AnalyticsRepository, AnalyticsEvent, AnalyticsEventType, AnalyticsChannel, DataSource, FundingEventType, McpEventType, X402EventType } from "./types.js";
 import { extractClientContext } from "./attribution.js";
 import type { RequestClientContext } from "./context.js";
 
@@ -18,6 +18,8 @@ export const DISCOVERY_PATHS = [
 ] as const;
 
 const emptyContext: RequestClientContext = { clientHash: null, userAgent: null, referer: null, clientName: null, source: null, utmMedium: null, campaign: null, utmContent: null, referrerHost: null, clientType: "unknown", trafficClass: "unknown" };
+
+type JourneyEventFields = Partial<Pick<AnalyticsEvent, "paymentJourneyId" | "paymentAttemptId" | "parentRequestId" | "challengeRequestId" | "paidRetryRequestId" | "paymentStatus" | "paymentMode" | "isInternalTest" | "testMarkerHash" | "challengeIssuedAt" | "paymentAttemptedAt" | "paymentVerifiedAt" | "facilitatorVerifiedAt" | "chainSettledAt" | "settlementRecordedAt" | "paidRetryReceivedAt" | "executionStartedAt" | "executionCompletedAt" | "settlementObservationLagMs">>;
 
 /** Every record*() below is intentionally fire-and-forget and never throws into its caller —
  *  analytics recording must never slow down, fail, or otherwise affect the real request it is
@@ -54,6 +56,21 @@ export function recordDiscoverySurface(repository: AnalyticsRepository, req: Req
     category: "discovery", eventType: "surface_requested", path, toolName: null, channel: null, success: true, durationMs: null,
     amount: null, currency: null, txHash: null, dataSource: null, presentedCapabilities: [...presentedCapabilities], ...client
   });
+}
+
+/** Durable counterpart for HTTP discovery handlers. Vercel may freeze a function immediately
+ * after the response is sent, so the discovery surfaces that feed the internal dashboard must
+ * await their INSERT before returning the response. */
+export async function recordDiscoverySurfaceAwaited(repository: AnalyticsRepository, req: Request, path: string, presentedCapabilities: readonly string[]): Promise<void> {
+  const client = extractClientContext(req);
+  try {
+    await repository.record({
+      category: "discovery", eventType: "surface_requested", path, toolName: null, channel: null, success: true, durationMs: null,
+      amount: null, currency: null, txHash: null, dataSource: null, presentedCapabilities: [...presentedCapabilities], ...client
+    });
+  } catch {
+    // Discovery must remain publicly available if analytics storage is temporarily unavailable.
+  }
 }
 
 /** Maps a JSON-RPC method name (as sent to POST /mcp) to the McpEventType vocabulary this layer
@@ -151,24 +168,26 @@ export function decodeX402SettlementHeader(headerValue: string | string[] | unde
  *  on the event name, so this can never silently misclassify a future renamed event type. */
 const X402_SUCCESS_BY_EVENT_TYPE: Record<X402EventType, boolean | null> = {
   challenge: null,
+  payment_challenge: null,
   payment_verified: true,
   payment_failed: false,
   settlement_success: true,
-  settlement_failure: false
+  settlement_failure: false,
+  paid_retry_received: true
 };
 
 export function recordX402Event(
   repository: AnalyticsRepository,
   req: Request,
-  args: { eventType: X402EventType; toolName: string | null; amount: number | null; currency: string | null; txHash: string | null; requestId?: string | null; paymentGuidanceVersion?: string | null; paymentDocsUrl?: string | null; challengeParseable?: boolean | null }
+  args: { eventType: X402EventType; toolName: string | null; amount: number | null; currency: string | null; txHash: string | null; requestId?: string | null; paymentGuidanceVersion?: string | null; paymentDocsUrl?: string | null; challengeParseable?: boolean | null; client?: RequestClientContext; journey?: JourneyEventFields }
 ): void {
-  const client = extractClientContext(req);
+  const client = args.client ?? extractClientContext(req);
   fireAndForget(repository, {
     category: "x402", eventType: args.eventType, path: null, toolName: args.toolName, channel: null,
     success: X402_SUCCESS_BY_EVENT_TYPE[args.eventType],
     durationMs: null, amount: args.amount, currency: args.currency, txHash: args.txHash, dataSource: null,
     requestId: args.requestId ?? null, paymentGuidanceVersion: args.paymentGuidanceVersion ?? null,
-    paymentDocsUrl: args.paymentDocsUrl ?? null, challengeParseable: args.challengeParseable ?? null, ...client
+    paymentDocsUrl: args.paymentDocsUrl ?? null, challengeParseable: args.challengeParseable ?? null, ...client, ...args.journey
   });
 }
 
@@ -178,15 +197,15 @@ export function recordX402Event(
 export async function recordX402EventAwaited(
   repository: AnalyticsRepository,
   req: Request,
-  args: { eventType: X402EventType; toolName: string | null; amount: number | null; currency: string | null; txHash: string | null; requestId?: string | null; paymentGuidanceVersion?: string | null; paymentDocsUrl?: string | null; challengeParseable?: boolean | null }
+  args: { eventType: X402EventType; toolName: string | null; amount: number | null; currency: string | null; txHash: string | null; requestId?: string | null; paymentGuidanceVersion?: string | null; paymentDocsUrl?: string | null; challengeParseable?: boolean | null; client?: RequestClientContext; journey?: JourneyEventFields }
 ): Promise<void> {
-  const client = extractClientContext(req);
+  const client = args.client ?? extractClientContext(req);
   await repository.record({
     category: "x402", eventType: args.eventType, path: null, toolName: args.toolName, channel: null,
     success: X402_SUCCESS_BY_EVENT_TYPE[args.eventType], durationMs: null, amount: args.amount,
     currency: args.currency, txHash: args.txHash, dataSource: null, requestId: args.requestId ?? null,
     paymentGuidanceVersion: args.paymentGuidanceVersion ?? null, paymentDocsUrl: args.paymentDocsUrl ?? null,
-    challengeParseable: args.challengeParseable ?? null, ...client
+    challengeParseable: args.challengeParseable ?? null, ...client, ...args.journey
   });
 }
 
@@ -197,14 +216,14 @@ export async function recordX402EventAwaited(
 export function recordL402Event(
   repository: AnalyticsRepository,
   req: Request,
-  args: { eventType: Extract<X402EventType, "challenge" | "payment_failed" | "settlement_success">; toolName: string; amount: number | null; txHash: string | null; requestId?: string | null }
+  args: { eventType: Extract<X402EventType, "challenge" | "payment_failed" | "settlement_success">; toolName: string; amount: number | null; txHash: string | null; requestId?: string | null; client?: RequestClientContext; journey?: JourneyEventFields }
 ): void {
-  const client = extractClientContext(req);
+  const client = args.client ?? extractClientContext(req);
   fireAndForget(repository, {
     category: "l402", eventType: args.eventType, path: null, toolName: args.toolName, channel: null,
     success: X402_SUCCESS_BY_EVENT_TYPE[args.eventType],
     durationMs: null, amount: args.amount, currency: args.amount === null ? null : "USD", txHash: args.txHash, dataSource: null,
-    requestId: args.requestId ?? null, ...client
+    requestId: args.requestId ?? null, ...client, ...args.journey
   });
 }
 
@@ -231,23 +250,23 @@ export function recordFundingEvent(repository: AnalyticsRepository, args: { even
 
 export function recordToolInvocation(
   repository: AnalyticsRepository,
-  args: { toolName: string; channel: AnalyticsChannel; success: boolean; durationMs: number; dataSource: DataSource | null; client: RequestClientContext; requestId?: string | null }
+  args: { toolName: string; channel: AnalyticsChannel; success: boolean; durationMs: number; dataSource: DataSource | null; client: RequestClientContext; requestId?: string | null; validationErrorCode?: string | null; validationFailureKind?: "missing_required_field" | "invalid_enum" | "ambiguous_entity" | "other" | null; journey?: JourneyEventFields; eventType?: "invocation" | "execution_started" | "execution_completed" }
 ): void {
   fireAndForget(repository, {
-    category: "tool", eventType: "invocation" as AnalyticsEventType, path: null, toolName: args.toolName, channel: args.channel,
+    category: "tool", eventType: (args.eventType ?? "invocation") as AnalyticsEventType, path: null, toolName: args.toolName, channel: args.channel,
     success: args.success, durationMs: args.durationMs, amount: null, currency: null, txHash: null,
-    dataSource: args.dataSource, requestId: args.requestId ?? null, ...args.client
+    dataSource: args.dataSource, requestId: args.requestId ?? null, validationErrorCode: args.validationErrorCode ?? null, validationFailureKind: args.validationFailureKind ?? null, ...args.client, ...args.journey
   });
 }
 
 /** Durable counterpart used by the paid x402 handler after the capability has completed. */
 export async function recordToolInvocationAwaited(
   repository: AnalyticsRepository,
-  args: { toolName: string; channel: AnalyticsChannel; success: boolean; durationMs: number; dataSource: DataSource | null; client: RequestClientContext; requestId?: string | null }
+  args: { toolName: string; channel: AnalyticsChannel; success: boolean; durationMs: number; dataSource: DataSource | null; client: RequestClientContext; requestId?: string | null; validationErrorCode?: string | null; validationFailureKind?: "missing_required_field" | "invalid_enum" | "ambiguous_entity" | "other" | null; journey?: JourneyEventFields; eventType?: "invocation" | "execution_started" | "execution_completed" }
 ): Promise<void> {
   await repository.record({
-    category: "tool", eventType: "invocation" as AnalyticsEventType, path: null, toolName: args.toolName,
+    category: "tool", eventType: (args.eventType ?? "invocation") as AnalyticsEventType, path: null, toolName: args.toolName,
     channel: args.channel, success: args.success, durationMs: args.durationMs, amount: null, currency: null,
-    txHash: null, dataSource: args.dataSource, requestId: args.requestId ?? null, ...args.client
+    txHash: null, dataSource: args.dataSource, requestId: args.requestId ?? null, validationErrorCode: args.validationErrorCode ?? null, validationFailureKind: args.validationFailureKind ?? null, ...args.client, ...args.journey
   });
 }

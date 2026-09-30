@@ -220,6 +220,13 @@ body[data-dashboard-view="system"] .dashboard-section[data-views~="system"] { di
 /* ---------------------------------------------------------------- Tables -------------------- */
 table { width:100%; border-collapse:collapse; font-size:12.5px; }
 .table-wrap { overflow-x:auto; }
+.journey-funnel { display:grid; grid-template-columns:repeat(6,1fr); gap:8px; margin:0 0 16px; }
+.journey-stage { background:var(--panel2); border:1px solid var(--border-soft); border-radius:8px; padding:10px; min-width:0; }
+.journey-stage-value { font-size:18px; font-weight:700; font-variant-numeric:tabular-nums; }
+.journey-stage-label { color:var(--muted); font-size:10.5px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.journey-stage-conv { color:var(--cyan); font-size:10.5px; margin-top:5px; }
+@media (max-width: 900px) { .journey-funnel { grid-template-columns:repeat(3,1fr); } }
+@media (max-width: 520px) { .journey-funnel { grid-template-columns:repeat(2,1fr); } }
 th { text-align:left; color:var(--muted); font-weight:600; font-size:10.5px; text-transform:uppercase; letter-spacing:0.03em; padding:8px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
 td { padding:8px 10px; border-bottom:1px solid var(--border-soft); vertical-align:top; }
 td.right, th.right { text-align:right; }
@@ -362,6 +369,8 @@ svg.trend-chart { width:100%; height:220px; display:block; }
 .refresh-controls { display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
 .refresh-controls button { border:1px solid var(--border); background:var(--panel2); color:var(--muted); border-radius:7px; padding:5px 9px; cursor:pointer; font-size:11px; }
 .refresh-controls button:hover { color:var(--text); border-color:var(--accent); }
+.dashboard-live-status { color:var(--muted-dim); font-size:10.5px; white-space:nowrap; }
+.dashboard-live-status.is-error { color:var(--yellow); }
 .freshness-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; }
 .freshness-item { background:var(--panel2); border:1px solid var(--border); border-radius:9px; padding:11px 12px; }
 .freshness-item .label { color:var(--muted); font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; }
@@ -422,7 +431,8 @@ const CLIENT_SCRIPT = `
     // Revenue Conversion Audit finalStatus values (src/audit/types.ts's FinalStatus).
     converted: "chip-green", free_success: "chip-green", not_converted: "chip-gray",
     failed_before_payment: "chip-red", payment_failed: "chip-red", reconciliation_issue: "chip-red",
-    unknown: "chip-gray"
+    unknown: "chip-gray", issued: "chip-blue", attempted: "chip-blue", verified: "chip-green", received: "chip-green",
+    succeeded: "chip-green", abandoned: "chip-amber", settled: "chip-green", retried: "chip-green", executed: "chip-green"
   };
   var chip = function (label) {
     if (label === null || label === undefined || label === "") return '<span class="chip chip-gray">\u2014</span>';
@@ -1159,6 +1169,51 @@ const CLIENT_SCRIPT = `
     knownSettlementKeys = nextKeys;
   }
 
+  function renderPaymentJourneys(data) {
+    var el = document.getElementById("payment-journeys");
+    if (!el) return;
+    var rows = (data.paymentJourneys || []).slice(0, document.body.getAttribute("data-dashboard-view") === "overview" ? 10 : 100);
+    var funnel = data.paymentJourneyFunnel || {};
+    var f = '<div class="journey-funnel">' + [
+      ["Requests", funnel.requests], ["402 Challenges", funnel.challenges], ["Payment Attempts", funnel.paymentAttempts],
+      ["Settlements", funnel.settlements], ["Retries", funnel.retries], ["Executions", funnel.executions]
+    ].map(function (item, i, list) { var pct = i === 0 || !list[i - 1][1] ? "—" : Math.round(item[1] / list[i - 1][1] * 1000) / 10 + "%"; return '<div class="journey-stage"><div class="journey-stage-value">' + fmtNum(item[1] || 0) + '</div><div class="journey-stage-label">' + item[0] + '</div><div class="journey-stage-conv">' + pct + '</div></div>'; }).join("") + '</div>';
+    if (!rows.length) { el.innerHTML = f + '<p class="empty">No correlated payment journeys recorded for this period.</p>'; return; }
+    var columns = [
+      { header: "Journey", render: function (r) { return '<code class="hash" title="' + esc(r.paymentJourneyId) + '">' + esc(r.paymentJourneyId.slice(0, 8) + "…") + '</code>'; } },
+      { header: "Started", render: function (r) { return fmtDate(r.startedAt); } },
+      { header: "Capability", render: function (r) { return esc(r.capability || "—"); } },
+      { header: "Source", render: function (r) { return esc(r.source); } },
+      { header: "Price", right: true, render: function (r) { return r.price === null ? "—" : fmtAmount(r.price) + " " + esc(r.currency || "USD"); } },
+      { header: "Challenge", render: function (r) { return r.challenge.at ? chip("issued") : "—"; } },
+      { header: "Payment", render: function (r) { return r.payment ? chip(r.payment.status || "attempted") : chip("abandoned"); } },
+      { header: "Settlement", render: function (r) { return r.settlement ? chip(r.settlement.status || "failed") : "—"; } },
+      { header: "Retry", render: function (r) { return r.retry ? chip("received") : "—"; } },
+      { header: "Execution", render: function (r) { return r.execution ? chip(r.execution.status || "failed") : "—"; } },
+      { header: "Status", render: function (r) { return chip(r.status); } },
+      { header: "Revenue", right: true, render: function (r) { return r.revenue === null ? "—" : fmtAmount(r.revenue) + " " + esc(r.currency || "USD"); } }
+    ];
+    el.innerHTML = f + table(columns, rows, "No correlated payment journeys recorded for this period.", function (r) { return ' class="clickable" data-journey="' + esc(r.paymentJourneyId) + '"'; });
+    el.querySelectorAll("tr[data-journey]").forEach(function (tr) { tr.addEventListener("click", function () { openJourneyDrawer(tr.getAttribute("data-journey")); }); });
+  }
+
+  function openJourneyDrawer(id) {
+    var row = (lastDashboardData && lastDashboardData.paymentJourneys || []).filter(function (r) { return r.paymentJourneyId === id; })[0];
+    if (!row) return;
+    document.getElementById("drawer-title").textContent = "Journey " + row.paymentJourneyId.slice(0, 12) + "…";
+    document.getElementById("drawer-body").innerHTML = '<dl class="fieldlist">' +
+      '<dt>Capability</dt><dd>' + esc(row.capability || "—") + '</dd>' +
+      '<dt>Source</dt><dd>' + esc(row.source) + '</dd>' +
+      '<dt>Payment rail</dt><dd>' + esc(row.paymentRail || "—") + '</dd>' +
+      '<dt>Challenge request</dt><dd><code>' + esc(row.challenge.requestId || "—") + '</code></dd>' +
+      '<dt>Payment attempt</dt><dd><code>' + esc(row.payment && row.payment.attemptId || "—") + '</code></dd>' +
+      '<dt>Settlement</dt><dd>' + esc(row.settlement && row.settlement.status || "not observed") + '</dd>' +
+      '<dt>Retry request</dt><dd><code>' + esc(row.retry && row.retry.requestId || "—") + '</code></dd>' +
+      '<dt>Execution</dt><dd>' + esc(row.execution && row.execution.status || "not observed") + '</dd>' +
+      '<dt>Duration</dt><dd>' + fmtMs(row.durationMs) + '</dd></dl>';
+    document.getElementById("drawer").classList.add("open"); document.getElementById("drawer-backdrop").classList.add("open");
+  }
+
   // =============================================================================================
   // Reconciliation — animated scan / check state
   // =============================================================================================
@@ -1394,6 +1449,7 @@ const CLIENT_SCRIPT = `
     renderPreviewFunnel(data);
     renderUsage(data);
     renderToolConversion(data);
+    renderPaymentJourneys(data);
     renderAnalysisPreview(data);
     renderTransactions(data);
     renderReconciliation(data);
@@ -1410,12 +1466,21 @@ const CLIENT_SCRIPT = `
     var el = document.getElementById("dashboard-error");
     el.textContent = message;
     el.style.display = "block";
+    var status = document.getElementById("dashboard-live-status");
+    if (status) { status.textContent = "Live refresh failed"; status.classList.add("is-error"); }
+  }
+
+  function markDashboardRefreshed(at) {
+    var status = document.getElementById("dashboard-live-status");
+    if (!status) return;
+    status.textContent = "Updated " + fmtRelative(at || new Date().toISOString());
+    status.classList.remove("is-error");
   }
 
   var currentPeriod = null;
   function loadPeriod(period, silent) {
     currentPeriod = period;
-    return fetch("/internal/dashboard/data?period=" + encodeURIComponent(period), { credentials: "same-origin", headers: { Accept: "application/json" } })
+    return fetch("/internal/dashboard/data?period=" + encodeURIComponent(period), { cache: "no-store", credentials: "same-origin", headers: { Accept: "application/json", "Cache-Control": "no-cache" } })
       .then(function (res) {
         if (res.status === 401) { window.location.href = "/internal/dashboard/login"; return null; }
         if (!res.ok) { throw new Error("Dashboard data request failed (HTTP " + res.status + ")."); }
@@ -1425,6 +1490,7 @@ const CLIENT_SCRIPT = `
         if (!body) return;
         if (!body.success) { throw new Error((body.error && body.error.message) || "Dashboard data request failed."); }
         renderDashboard(body.data);
+        markDashboardRefreshed(body.data && body.data.generatedAt);
       })
       .catch(function (err) {
         if (!silent) showError("Unable to load dashboard data right now (" + (err && err.message ? err.message : "unknown error") + "). Showing the last successfully loaded data, if any.");
@@ -1444,7 +1510,7 @@ const CLIENT_SCRIPT = `
 
   document.addEventListener("DOMContentLoaded", function () {
     var initial = window.__DASHBOARD_INITIAL__;
-    if (initial) { currentPeriod = initial.period; renderDashboard(initial); }
+    if (initial) { currentPeriod = initial.period; renderDashboard(initial); markDashboardRefreshed(initial.generatedAt); }
     document.querySelectorAll(".period-bar button").forEach(function (btn) {
       btn.addEventListener("click", function () { loadPeriod(btn.getAttribute("data-period")); });
     });
@@ -1569,7 +1635,7 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
 
       <div class="global-toolbar">
         <div class="toolbar-left"><span class="chip chip-blue">Production</span><div class="period-bar" style="margin:0">${periodButtons}</div></div>
-        <div class="toolbar-right"><input class="search-input global-search" id="global-search" type="search" placeholder="Search capabilities, agents, IDs…" aria-label="Global search"><button type="button" id="refresh-dashboard">Refresh</button></div>
+        <div class="toolbar-right"><input class="search-input global-search" id="global-search" type="search" placeholder="Search capabilities, agents, IDs…" aria-label="Global search"><span class="dashboard-live-status" id="dashboard-live-status" aria-live="polite">Live refresh starting…</span><button type="button" id="refresh-dashboard">Refresh</button></div>
       </div>
       <div class="refresh-controls" style="margin:-8px 0 12px;display:none">
         <button type="button" id="refresh-dashboard-legacy">Refresh</button>
@@ -1718,6 +1784,11 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
         <p class="panel-desc">Real per-capability call counts and latency from this period, paired with a generic reference pipeline / formula &mdash; no per-call result numbers are stored, so none are invented here.</p>
         <div id="analysis-preview-tabs" class="tab-row"></div>
         <div id="analysis-preview-body"></div>
+      </div>
+
+      <div class="panel dashboard-section" data-views="payments overview" id="payment-journey-explorer">
+        <div class="panel-head"><h2>Payment Journey Explorer</h2><span class="panel-desc" style="margin:0">Discovery → 402 → payment → settlement → retry → execution</span></div>
+        <div id="payment-journeys"></div>
       </div>
 
       <div class="panel dashboard-section" data-views="payments overview" id="latest-settlements">
