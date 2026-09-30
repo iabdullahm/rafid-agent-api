@@ -95,8 +95,17 @@ test("remote MCP registry parity with stdio: both are built by the exact same cr
     assert.equal(previewTool!.additionalProperties, false);
     assert.match(previewTool!.description, /preview/i);
     const remoteTools = allRemoteTools.filter(t => t.name !== "preview_capability");
-    const expected = capabilities.map(c => ({ name: c.name, description: `${c.description} ${c.whenToUse}`, additionalProperties: false })).sort((a, b) => a.name.localeCompare(b.name));
-    assert.deepEqual(remoteTools, expected);
+    assert.deepEqual(remoteTools.map(t => ({ name: t.name, additionalProperties: t.additionalProperties })), capabilities.map(c => ({ name: c.name, additionalProperties: false })).sort((a, b) => a.name.localeCompare(b.name)));
+    for (const c of capabilities) {
+      const tool = remoteTools.find(t => t.name === c.name);
+      assert.ok(tool, `expected a remote MCP tool entry for ${c.name}`);
+      // createMcpServer intentionally enriches the registry description with selection guidance,
+      // schema/payment context and preview availability. Assert the registry-owned text and the
+      // stable additions without duplicating the factory's complete prose in this test.
+      assert.ok(tool.description.startsWith(`${c.description} When: ${c.whenToUse}`));
+      assert.match(tool.description, /Input is a strict JSON object/);
+      assert.match(tool.description, new RegExp(`Price: \\$${c.price.toFixed(2)} ${c.currency} per call\\.`));
+    }
   });
 });
 

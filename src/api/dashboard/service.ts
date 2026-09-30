@@ -633,7 +633,7 @@ export const AGENT_GROUPS: readonly AgentGroupDef[] = [
   { id: "research", name: "Research Agent", toolNames: ["research_company", "find_companies"] },
   { id: "property", name: "Property Agent", toolNames: ["analyze_property", "compare_properties", "estimate_maintenance", "analyze_oman_property", "property_investment_report", "portfolio_screen"] },
   { id: "supplier", name: "Supplier Intelligence Agent", toolNames: ["search_oman_company", "get_oman_company_profile", "analyze_oman_company", "due_diligence_oman_company", "oman_supplier_check", "supplier_due_diligence_report", "procurement_vendor_shortlist"] },
-  { id: "risk", name: "Risk Agent", toolNames: ["analyze_company_risk", "company_reputation_check", "business_risk_score", "company_due_diligence", "company_due_diligence_pack", "company_risk_report", "company_risk_batch", "invoice_anomaly_check"] },
+  { id: "risk", name: "Risk Agent", toolNames: ["analyze_company_risk", "company_reputation_check", "business_risk_score", "company_due_diligence", "company_risk_report", "company_risk_batch", "invoice_anomaly_check"] },
   { id: "document", name: "Document Intelligence Agent", toolNames: ["document_facts_extract"] },
   { id: "valuation", name: "Vehicle Valuation Agent", toolNames: ["vehicle_value_estimate"] },
   { id: "logistics", name: "Logistics Agent", toolNames: ["shipping_cost_estimate"] },

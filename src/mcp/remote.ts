@@ -139,8 +139,12 @@ export function createRemoteMcpHandler(
         return;
       }
 
-      const capability = capabilities.find(c => c.name === toolName);
-      if (!capability) {
+      // preview_capability is the one generic MCP tool registered by createMcpServer()
+      // alongside the registry-backed capabilities. It has its own schema and execution
+      // callback in mcp/server.ts, so it must reach the SDK instead of being rejected by this
+      // capability-only preflight as an unknown tool.
+      const capability = toolName === "preview_capability" ? null : capabilities.find(c => c.name === toolName);
+      if (toolName !== "preview_capability" && !capability) {
         res.status(200).json({
           jsonrpc: "2.0",
           id,
@@ -148,6 +152,8 @@ export function createRemoteMcpHandler(
         });
         return;
       }
+
+      if (capability) {
 
       // Validate against the canonical registry schema before any billing or execution.
       // This keeps every MCP tool in sync with REST/OpenAPI and guarantees invalid input
@@ -168,23 +174,24 @@ export function createRemoteMcpHandler(
         return;
       }
 
-      const priceUsd = billingService.getToolPrice(capability.name as CapabilityName);
-      if (priceUsd > 0 && !options.paidConversionEnabled) {
-        res.status(402).json({
-          jsonrpc: "2.0",
-          id,
-          error: {
-            code: -32002,
-            message: `Payment required to call ${capability.name}.`,
-            data: {
-              tool: capability.name,
-              price: priceUsd.toFixed(2),
-              currency: "USD",
-              paymentEndpoint: "/mcp/credits"
+        const priceUsd = billingService.getToolPrice(capability.name as CapabilityName);
+        if (priceUsd > 0 && !options.paidConversionEnabled) {
+          res.status(402).json({
+            jsonrpc: "2.0",
+            id,
+            error: {
+              code: -32002,
+              message: `Payment required to call ${capability.name}.`,
+              data: {
+                tool: capability.name,
+                price: priceUsd.toFixed(2),
+                currency: "USD",
+                paymentEndpoint: "/mcp/credits"
+              }
             }
-          }
-        });
-        return;
+          });
+          return;
+        }
       }
     }
     void mcpClientContext.run(client, () =>
