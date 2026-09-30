@@ -51,7 +51,9 @@ test("public discovery routes expose tool pages and never expose internal analyt
   const search = await (await fetch(`${base}/api/v1/discovery/search?q=check%20a%20supplier%20before%20onboarding`)).json() as { data: { matches: Array<{ capability: string }> } };
   assert.ok(search.data.matches.some(match => match.capability === "company_due_diligence"));
   assert.equal((await fetch(`${base}/api/v1/discovery/intents/company_due_diligence`)).status, 200);
-  assert.equal((await fetch(`${base}/tools/company_due_diligence`)).status, 200);
+  const toolPage = await (await fetch(`${base}/tools/company_due_diligence`)).text();
+  assert.match(toolPage, /application\/ld\+json/);
+  assert.match(toolPage, /SoftwareApplication/);
   assert.equal((await fetch(`${base}/robots.txt`)).status, 200);
   assert.equal((await fetch(`${base}/sitemap.xml`)).status, 200);
   const [robots, sitemap, manifest, llms] = await Promise.all([
@@ -63,4 +65,6 @@ test("public discovery routes expose tool pages and never expose internal analyt
   for (const publicText of [robots, sitemap, manifest, llms, renderToolPage("company_due_diligence", config)!]) {
     assert.ok(!publicText.includes("/api/v1/internal/analytics"));
   }
+  assert.match(sitemap, /\/api\/v1\/discovery\/intents\/company_due_diligence/);
+  assert.match(sitemap, /<changefreq>weekly<\/changefreq>/);
 });

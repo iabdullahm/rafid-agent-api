@@ -159,8 +159,14 @@ const escapeHtml = (value: unknown) => String(value ?? "")
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
   .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 
-function pageShell(title: string, description: string, canonical: string, body: string) {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><link rel="canonical" href="${escapeHtml(canonical)}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"></head><body><main>${body}</main></body></html>`;
+function jsonLd(value: unknown): string {
+  // Keep JSON-LD safe inside an HTML script element even when registry text contains markup-like
+  // characters. The data still parses as JSON and remains derived from the canonical registry.
+  return JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e").replace(/&/g, "\\u0026");
+}
+
+function pageShell(title: string, description: string, canonical: string, body: string, headExtra = "") {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><meta name="description" content="${escapeHtml(description)}"><meta name="robots" content="index,follow"><link rel="canonical" href="${escapeHtml(canonical)}"><meta property="og:type" content="website"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta name="twitter:card" content="summary"><meta name="twitter:title" content="${escapeHtml(title)}"><meta name="twitter:description" content="${escapeHtml(description)}">${headExtra}</head><body><main>${body}</main></body></html>`;
 }
 
 export function renderToolIndex(config: DiscoveryConfig, baseUrl?: string, filters: { q?: string; category?: string; intent?: string } = {}) {
@@ -175,7 +181,22 @@ export function renderToolIndex(config: DiscoveryConfig, baseUrl?: string, filte
     return `<article><h2><a href="${publicToolsPath}/${encodeURIComponent(c.name)}">${escapeHtml(c.name)}</a></h2><p>${escapeHtml(c.description)}</p><p><strong>${escapeHtml(CATEGORY_LABELS[category] ?? category)}</strong> · $${c.price.toFixed(2)} ${escapeHtml(c.currency)} · ${selection.toolRole} · ${c.preview ? "preview" : "no preview"} · MCP</p></article>`;
   }).join("\n");
   const canonical = absolute(baseUrl, publicToolsPath);
-  return pageShell(`${PLATFORM_NAME} tools`, `Browse ${capabilities.length} structured capabilities by category and intent.`, canonical, `<h1>${escapeHtml(PLATFORM_NAME)} tools</h1><p>${escapeHtml(PLATFORM_DESCRIPTION)}</p><form method="get" action="${publicToolsPath}"><label>Search <input name="q" value="${escapeHtml(q)}"></label><button>Search</button></form><p>Capabilities: ${rows.length} of ${capabilities.length}</p><nav>${categoryLinks}</nav>${cards || "<p>No matching capabilities.</p>"}`);
+  const description = `Browse ${capabilities.length} structured capabilities by category, intent and use case.`;
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: `${PLATFORM_NAME} tools`,
+    description,
+    url: canonical,
+    isPartOf: { "@type": "WebSite", name: PLATFORM_NAME, url: baseUrl ?? canonical },
+    mainEntity: {
+      "@type": "ItemList",
+      numberOfItems: rows.length,
+      itemListElement: rows.map((c, index) => ({ "@type": "ListItem", position: index + 1, name: c.name, url: absolute(baseUrl, `${publicToolsPath}/${c.name}`) }))
+    },
+    potentialAction: { "@type": "SearchAction", target: `${canonical}?q={search_term_string}`, "query-input": "required name=search_term_string" }
+  };
+  return pageShell(`${PLATFORM_NAME} tools`, description, canonical, `<h1>${escapeHtml(PLATFORM_NAME)} tools</h1><p>${escapeHtml(PLATFORM_DESCRIPTION)}</p><form method="get" action="${publicToolsPath}"><label>Search <input name="q" value="${escapeHtml(q)}"></label><button>Search</button></form><p>Capabilities: ${rows.length} of ${capabilities.length}</p><nav>${categoryLinks}</nav>${cards || "<p>No matching capabilities.</p>"}`, `<script type="application/ld+json">${jsonLd(structuredData)}</script>`);
 }
 
 export function renderToolPage(name: string, config: DiscoveryConfig, baseUrl?: string) {
@@ -190,17 +211,25 @@ export function renderToolPage(name: string, config: DiscoveryConfig, baseUrl?: 
   const preview = c.preview ? absolute(baseUrl, `${previewBasePath}/${c.name}`) : null;
   const exampleOutput = JSON.stringify(c.exampleOutput, null, 2);
   const relatedHtml = related.length ? `<h2>Related tools</h2><ul>${related.map(name => `<li><a href="${publicToolsPath}/${encodeURIComponent(name)}">${escapeHtml(name)}</a></li>`).join("")}</ul>` : "";
+  const canonical = absolute(baseUrl, `${publicToolsPath}/${c.name}`);
+  const keywords = [...new Set([c.name, ...c.useCases, ...selection.recommendedFor, CATEGORY_LABELS[category] ?? category])];
+  const structuredData = [
+    { "@context": "https://schema.org", "@type": "SoftwareApplication", name: c.name, description: c.description, url: canonical, applicationCategory: CATEGORY_LABELS[category] ?? category, operatingSystem: "Web API", featureList: c.useCases, provider: { "@type": "Organization", name: PLATFORM_NAME, url: baseUrl ?? canonical }, offers: { "@type": "Offer", price: c.price.toFixed(2), priceCurrency: c.currency, url: canonical } },
+    { "@context": "https://schema.org", "@type": "BreadcrumbList", itemListElement: [{ "@type": "ListItem", position: 1, name: `${PLATFORM_NAME} tools`, item: absolute(baseUrl, publicToolsPath) }, { "@type": "ListItem", position: 2, name: c.name, item: canonical }] },
+    { "@context": "https://schema.org", "@type": "FAQPage", mainEntity: [{ "@type": "Question", name: "When should an agent use this tool?", acceptedAnswer: { "@type": "Answer", text: c.whenToUse } }, { "@type": "Question", name: "How is this tool accessed?", acceptedAnswer: { "@type": "Answer", text: `Use the REST endpoint ${endpoint}, the MCP tool ${c.name}, or the x402 endpoint ${x402}.` } }, { "@type": "Question", name: "What does it cost?", acceptedAnswer: { "@type": "Answer", text: `The registry price is ${c.price.toFixed(2)} ${c.currency} per call.` } }] }
+  ];
   const body = `<h1>${escapeHtml(c.name)}</h1><p>${escapeHtml(c.description)}</p><h2>When to use</h2><p>${escapeHtml(c.whenToUse)}</p><h2>Selection guidance</h2><p>Role: ${escapeHtml(selection.toolRole)}. ${escapeHtml(selection.recommendedFor.join("; "))}</p>${selection.notFor.length ? `<p>Not for: ${escapeHtml(selection.notFor.join("; "))}</p>` : ""}<h2>Use cases</h2><ul>${c.useCases.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul><h2>Access</h2><ul><li>REST: <code>POST ${escapeHtml(endpoint)}</code></li><li>x402: <code>POST ${escapeHtml(x402)}</code></li><li>MCP tool: <code>${escapeHtml(c.name)}</code></li>${preview ? `<li>Free preview: <code>POST ${escapeHtml(preview)}</code></li>` : ""}</ul><p>Price: <strong>$${c.price.toFixed(2)} ${escapeHtml(c.currency)}</strong> per call. Payment options are deployment-configured; inspect /api/v1/payment-methods. Prices and payment semantics are unchanged from the canonical registry.</p>${relatedHtml}<h2>Example input</h2><pre>${escapeHtml(JSON.stringify(c.example, null, 2))}</pre><h2>Example output</h2><pre>${escapeHtml(exampleOutput)}</pre><h2>Input schema</h2><pre>${escapeHtml(JSON.stringify(z.toJSONSchema(c.input), null, 2))}</pre><h2>Output schema</h2><pre>${escapeHtml(JSON.stringify(z.toJSONSchema(c.output), null, 2))}</pre><p>Category: ${escapeHtml(CATEGORY_LABELS[category] ?? category)} · hierarchy: ${escapeHtml(hierarchy.role)} · idempotent: ${c.idempotent ? "yes" : "no"} · side effects: ${c.sideEffects ? "yes" : "no"}</p>`;
-  return pageShell(`${c.name} · ${PLATFORM_NAME}`, c.description, absolute(baseUrl, `${publicToolsPath}/${c.name}`), body);
+  return pageShell(`${c.name} · ${PLATFORM_NAME}`, c.description, canonical, body, `<meta name="keywords" content="${escapeHtml(keywords.join(", "))}"><script type="application/ld+json">${jsonLd(structuredData)}</script>`);
 }
 
 export function buildRobotsTxt(baseUrl?: string) {
-  return `User-agent: *\nAllow: /agent.json\nAllow: /.well-known/agent.json\nAllow: /.well-known/ai-plugin.json\nAllow: /llms.txt\nAllow: /openapi.json\nAllow: /api/v1/capabilities\nAllow: /api/v1/discovery\nAllow: /tools/\nDisallow: /api/v1/internal/\nDisallow: /internal/\nSitemap: ${absolute(baseUrl, "/sitemap.xml")}\n`;
+  return `User-agent: *\nAllow: /agent.json\nAllow: /.well-known/agent.json\nAllow: /.well-known/ai-plugin.json\nAllow: /llms.txt\nAllow: /openapi.json\nAllow: /api/v1/capabilities\nAllow: /api/v1/discovery\nAllow: /api/v1/discovery/intents/\nAllow: /api/v1/mcp/status\nAllow: /tools/\nDisallow: /api/v1/internal/\nDisallow: /internal/\nSitemap: ${absolute(baseUrl, "/sitemap.xml")}\n`;
 }
 
 export function buildSitemapXml(baseUrl?: string) {
-  const paths = ["/agent.json", "/.well-known/agent.json", "/.well-known/ai-plugin.json", "/llms.txt", "/openapi.json", "/api/v1/capabilities", discoveryBasePath, discoveryIntentsPath, publicToolsPath, ...capabilities.map(c => `${publicToolsPath}/${c.name}`)];
-  const urls = paths.map(path => `<url><loc>${escapeHtml(absolute(baseUrl, path))}</loc></url>`).join("");
+  const intentPaths = buildIntentIndex().map(item => `${discoveryIntentsPath}/${item.intent}`);
+  const paths = ["/agent.json", "/.well-known/agent.json", "/.well-known/ai-plugin.json", "/llms.txt", "/openapi.json", "/api/v1/capabilities", "/api/v1/mcp/status", discoveryBasePath, discoverySearchPath, discoveryIntentsPath, ...intentPaths, publicToolsPath, ...capabilities.map(c => `${publicToolsPath}/${c.name}`)];
+  const urls = paths.map(path => `<url><loc>${escapeHtml(absolute(baseUrl, path))}</loc><changefreq>${path.startsWith("/tools/") ? "weekly" : "daily"}</changefreq><priority>${path.startsWith("/tools/") ? "0.8" : "0.6"}</priority></url>`).join("");
   return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls}</urlset>`;
 }
 
