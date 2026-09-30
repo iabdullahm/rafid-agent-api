@@ -27,5 +27,10 @@ export function getAnalyticsInternalApiKey(env: NodeJS.ProcessEnv = process.env)
  *  (to an in-process MemoryAnalyticsRepository — see api/app.ts) rather than being disabled;
  *  only durability across restarts/redeploys requires a real database. */
 export function getAnalyticsDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  return env.ANALYTICS_DATABASE_URL || env.ANALYTICS_DATABASE_POSTGRES_URL || env.DATABASE_URL || env.POSTGRES_URL || undefined;
+  // Keep the existing shared store as the default when DATABASE_URL is present. A provider
+  // integration with a custom prefix can create ANALYTICS_DATABASE_POSTGRES_URL pointing at a
+  // newly-created/empty database; silently switching the dashboard to that store makes all
+  // previously recorded activity disappear. Use a separate analytics database only when the
+  // operator explicitly sets ANALYTICS_DATABASE_URL.
+  return env.ANALYTICS_DATABASE_URL || env.DATABASE_URL || env.ANALYTICS_DATABASE_POSTGRES_URL || env.POSTGRES_URL || undefined;
 }
