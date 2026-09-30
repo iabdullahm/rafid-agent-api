@@ -80,6 +80,8 @@ test("POST /api/v1/preview/:capability — 200 for a capability with preview sup
       assert.equal(body.data.capability, "company_reputation_check");
       assert.ok(["available", "limited"].includes(body.data.status));
       assert.equal(body.data.inputRecognized, true);
+      assert.equal(body.data.leakageClass, "SAFE");
+      assert.deepEqual(body.data.fullResult.nextAction, { type: "pay_and_retry", protocol: "x402", method: "POST", url: "/api/v1/risk/company-reputation-check", retrySameBody: true });
       assert.ok(body.meta.requestId);
     }
   });
@@ -95,7 +97,7 @@ test("POST /api/v1/preview/:capability — a capability with NO preview returns 
     assert.equal(body.success, true);
     assert.deepEqual(body.data, {
       capability: noPreview.name, status: "unavailable", inputRecognized: false, preview: {},
-      fullResult: { capability: noPreview.name, price: { amount: noPreview.price.toFixed(2), currency: noPreview.currency }, endpoint: "/api/v1" + noPreview.path }
+      fullResult: { capability: noPreview.name, price: { amount: noPreview.price.toFixed(2), currency: noPreview.currency }, nextAction: { type: "pay_and_retry", protocol: noPreview.paymentProtocol, method: "POST", url: "/api/v1" + noPreview.path, retrySameBody: true }, endpoint: "/api/v1" + noPreview.path }
     });
   });
 });
@@ -164,6 +166,7 @@ test("pricing: every previewable capability's fullResult.price matches the capab
       assert.deepEqual(body.data.fullResult, {
         capability: c.name,
         price: { amount: c.price.toFixed(2), currency: c.currency },
+        nextAction: { type: "pay_and_retry", protocol: c.paymentProtocol, method: "POST", url: "/api/v1" + c.path, retrySameBody: true },
         endpoint: "/api/v1" + c.path
       });
     }

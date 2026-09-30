@@ -1,0 +1,54 @@
+[
+  {
+    "id": "automotive",
+    "count": 1
+  },
+  {
+    "id": "book_business",
+    "count": 25
+  },
+  {
+    "id": "document_intelligence",
+    "count": 1
+  },
+  {
+    "id": "finance_risk",
+    "count": 1
+  },
+  {
+    "id": "logistics",
+    "count": 1
+  },
+  {
+    "id": "property",
+    "count": 6
+  },
+  {
+    "id": "recruitment",
+    "count": 6
+  },
+  {
+    "id": "risk_intelligence",
+    "count": 12
+  },
+  {
+    "id": "supplier",
+    "count": 3
+  },
+  {
+    "id": "trading",
+    "count": 4
+  },
+  {
+    "id": "video_generation",
+    "count": 3
+  },
+  {
+    "id": "voice",
+    "count": 3
+  },
+  {
+    "id": "website_services",
+    "count": 3
+  }
+]

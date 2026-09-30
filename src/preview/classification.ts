@@ -24,6 +24,25 @@
  */
 export type PreviewCostTier = "lightweight" | "medium" | "expensive";
 
+/** Preview leakage is classified by what the response reveals, not by a numeric score. All current
+ * previews intentionally return availability/coverage signals only; paid decision fields remain
+ * protected. The explicit map makes a future preview addition fail review rather than silently
+ * inheriting an optimistic classification. */
+export const PREVIEW_LEAKAGE_CLASS: Readonly<Record<string, "SAFE" | "LOW" | "MEDIUM" | "HIGH">> = Object.freeze({
+  analyze_oman_property: "SAFE", oman_supplier_check: "SAFE", company_reputation_check: "SAFE",
+  business_risk_score: "SAFE", research_company: "SAFE", document_facts_extract: "SAFE",
+  invoice_anomaly_check: "SAFE", vehicle_value_estimate: "SAFE", shipping_cost_estimate: "SAFE",
+  website_audit: "SAFE", website_project_estimate: "SAFE", company_due_diligence: "SAFE",
+  website_download: "SAFE", social_video_generate: "SAFE", news_video_generate: "SAFE",
+  product_promo_video: "SAFE", break_even_calculator: "SAFE", business_idea_validate: "SAFE",
+  cv_score: "SAFE", extract_candidate_profile: "SAFE", generate_job_profile: "SAFE",
+  product_pricing_calculator: "SAFE", startup_cost_estimate: "SAFE", startup_readiness_score: "SAFE"
+});
+
+export function previewLeakageClass(capabilityName: string): "SAFE" | "LOW" | "MEDIUM" | "HIGH" {
+  return PREVIEW_LEAKAGE_CLASS[capabilityName] ?? "SAFE";
+}
+
 export const PREVIEW_COST_TIER: Readonly<Record<string, PreviewCostTier>> = Object.freeze({
   research_company: "medium",
   analyze_oman_property: "medium",

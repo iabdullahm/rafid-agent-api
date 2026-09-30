@@ -1282,3 +1282,9 @@ When `X402_ENABLED=true`, `@x402/express`, `@x402/core` and `@x402/evm` gate a s
 6. **Rafid Agent Intelligence, Phase 2/3:** Phase 1 (`research_company`, `find_companies`, `analyze_company_risk` — see "Rafid Agent Intelligence" above) is implemented, tested and inert-by-default. Still needed: Phase 2 (`research_web`, `deep_research`) and Phase 3 (`extract_document`, `analyze_document`, architecture prep only) from the same expansion spec; this README's REST API table above still does not list the four pre-existing Oman business capabilities (`search_oman_company`, `get_oman_company_profile`, `analyze_oman_company`, `due_diligence_oman_company`) either — a pre-existing documentation gap, not introduced by this phase, worth closing in the same pass as Phase 2.
 
 See [implementation review](docs/implementation-review.md) for the initial findings, exact scope and verification.
+
+## Production-readiness checks
+
+The canonical capability catalog drives REST, MCP, OpenAPI, A2A, discovery and public tool pages. Regenerate the registry-derived [capability coverage matrix](docs/capability-coverage-matrix.md) with `npm.cmd run audit:capabilities`, then run `npm.cmd run audit:production` to probe the deployed discovery surfaces and make one unpaid x402 request. The production probe never signs, pays, retries with payment, or touches a wallet; set `RAFID_PRODUCTION_BASE_URL` to test a different deployment and add `--strict` when unreachable endpoints should fail CI.
+
+For an agent integration, begin with `GET /api/v1/discovery` or `/agent.json`, select a capability from the returned registry-derived metadata, send the documented REST request, and treat HTTP 402 as the payment challenge boundary. Only a payment-aware client should retry after independently completing the advertised rail; never infer successful revenue from a challenge, preview, or HTTP 200 alone.

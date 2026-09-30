@@ -15,11 +15,11 @@ import type { L402PaidContext } from "./gate.js";
  *  - facilitator: the Lightning backend that issued the invoice ("lnd" or "voltage")
  *  - dedupe key: tx:<network>:<payment hash>, so one token can never be counted twice
  */
-export function buildL402SettlementRecord(args: { ctx: L402PaidContext; requestId: string; network: string; payTo: string; facilitator?: string }): RevenueSettlementInput {
+export function buildL402SettlementRecord(args: { ctx: L402PaidContext; requestId: string; network: string; payTo: string; facilitator?: string; paymentJourneyId?: string | null; paymentAttemptId?: string | null; challengeRequestId?: string | null }): RevenueSettlementInput {
   const now = new Date().toISOString();
   const network = `lightning:${args.network}`;
   return {
-    requestId: args.requestId, toolName: args.ctx.toolName, capabilityName: args.ctx.toolName,
+    requestId: args.requestId, paymentJourneyId: args.paymentJourneyId ?? null, paymentAttemptId: args.paymentAttemptId ?? null, challengeRequestId: args.challengeRequestId ?? null, toolName: args.ctx.toolName, capabilityName: args.ctx.toolName,
     amountAtomic: String(args.ctx.amountSats),
     amountDecimal: args.ctx.amountSats / 100_000_000,
     amountSource: "verified_requirement",

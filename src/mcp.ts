@@ -9,4 +9,9 @@ const config = loadConfig(process.env, { requireApiKeys: false });
 // API and billed to that key's account (API credits / subscription). See mcp/hosted.ts.
 const apiKey = process.env.RAFID_API_KEY?.trim();
 const execute = apiKey ? createHostedExecutor({ apiKey, baseUrl: process.env.RAFID_API_URL, paymentMethod: process.env.RAFID_PAYMENT_METHOD }) : undefined;
-serveStdio(() => createMcpServer(createLogger(config.logLevel), { execute, previewConfig: config }));
+// Build the single stdio server before the transport starts. Constructing all 69 registry tools
+// (including their schemas) is intentionally done once during process startup, rather than on
+// the first initialize request; creating it inside the factory made the first MCP response race
+// ordinary client timeouts on Windows/serverless development environments.
+const server = createMcpServer(createLogger(config.logLevel), { execute, previewConfig: config });
+serveStdio(() => server);

@@ -31,6 +31,14 @@ export interface RequestClientContext {
   referrerHost?: string | null;
   clientType?: "browser" | "curl" | "sdk" | "mcp-client" | "unknown";
   trafficClass?: "production_external" | "internal_test" | "unknown";
+  normalizedClient?: string | null;
+  attributionConfidence?: "high" | "medium" | "low" | "unknown";
+  trafficType?: "mcp_agent" | "rest_agent" | "browser_or_human" | "crawler" | "sdk_client" | "payment_test" | "internal_test" | "unknown";
+  interactionType?: "discovery" | "mcp" | "preview" | "capability" | "payment" | "browser_navigation" | "unknown";
+  mcpClient?: string | null;
+  sdk?: string | null;
+  isInternalTest?: boolean;
+  testMarkerHash?: string | null;
 }
 
 export const mcpClientContext = new AsyncLocalStorage<RequestClientContext>();

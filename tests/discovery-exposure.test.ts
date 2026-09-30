@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { capabilities, capabilityCategory, discoveryCapabilities } from "../src/domain/capabilities.js";
+import { capabilities, capabilityCategory, discoveryCapabilities, toolSelectionMetadata, TOOL_SELECTION_HIERARCHY } from "../src/domain/capabilities.js";
 import { buildAgentManifest, buildAgentCard } from "../src/api/manifest.js";
 import { buildCapabilitiesRegistry, buildToolCatalog } from "../src/api/agent.js";
 import { buildLlmsTxt } from "../src/api/llms-txt.js";
@@ -54,4 +54,13 @@ test("funnel distinguishes surface presentation from capability interaction", ()
   const row = summarizeCapabilityFunnel(events).company_due_diligence;
   assert.deepEqual(row && { presented: row.presented, preview: row.preview, challenges402: row.challenges402, paid: row.paid, executed: row.executed, revenueUsd: row.revenueUsd, presentedIsSurfaceImpression: row.presentedIsSurfaceImpression }, { presented: 1, preview: 1, challenges402: 1, paid: 1, executed: 1, revenueUsd: 1.5, presentedIsSurfaceImpression: true });
   assert.equal(summarizeCapabilityFunnel(events).analyze_property?.executed, 0);
+});
+
+test("selection metadata exposes a category hierarchy without hiding secondary tools", () => {
+  assert.equal(TOOL_SELECTION_HIERARCHY.risk_intelligence.primary, "company_due_diligence");
+  const due = toolSelectionMetadata(capabilities.find(c => c.name === "company_due_diligence")!);
+  assert.equal(due.toolRole, "primary");
+  assert.ok(due.preferOver.includes("business_risk_score"));
+  assert.ok(due.selectionExamples[0]?.use.length === 3);
+  assert.equal(discoveryCapabilities.length, capabilities.length);
 });

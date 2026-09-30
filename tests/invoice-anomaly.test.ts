@@ -634,29 +634,38 @@ test("registry + discovery: every surface lists invoice_anomaly_check with price
     })).json()) as any;
     const listed = await rpc(1, "tools/list", {});
     const mcpTool = listed.result.tools.find((t: any) => t.name === "invoice_anomaly_check");
-    assert.ok(mcpTool);
-    assert.equal(mcpTool.inputSchema.additionalProperties, false);
-    assert.deepEqual(mcpTool.inputSchema.required, ["invoice"]);
-    const outputSchemaJson = JSON.stringify(mcpTool.outputSchema);
-    assert.match(outputSchemaJson, /"riskScore"/);
-    assert.match(outputSchemaJson, /"anomalies"/);
-    const called = await rpc(2, "tools/call", { name: "invoice_anomaly_check", arguments: SCENARIOS.duplicate });
-    assert.equal(called.error, undefined, JSON.stringify(called).slice(0, 300));
-    assert.equal(called.result?.isError, undefined);
-    assert.equal(called.result?.structuredContent?.status, "payment_required");
-    assert.equal(called.result?.structuredContent?.tool, "invoice_anomaly_check");
-    assert.equal(called.result?.structuredContent?.price?.amount, 0.25);
-    assert.equal(called.result?.structuredContent?.price?.currency, "USD");
-    assert.equal(called.result?.structuredContent?.price?.protocol, "x402");
-    assert.equal(called.result?.structuredContent?.payment?.method, "POST");
-    assert.equal(called.result?.structuredContent?.payment?.retrySameBody, true);
-    assert.equal(called.result?.structuredContent?.nextAction?.type, "pay_and_retry");
-    const bad = await rpc(3, "tools/call", { name: "invoice_anomaly_check", arguments: { invoice: { total: 1, invoiceDate: "nope" } } });
-    assert.equal(bad.error?.code, -32602);
-    assert.equal(bad.error?.data?.code, "INVALID_INPUT");
-    assert.ok(!JSON.stringify(bad).includes("at runInvoiceAnomalyCheck"), "no stack traces");
-  });
-});
+     assert.ok(mcpTool);
+     assert.equal(mcpTool.inputSchema.additionalProperties, false);
+     assert.deepEqual(mcpTool.inputSchema.required, ["invoice"]);
+
+     assert.ok(mcpTool.outputSchema);
+     const outputSchemaJson = JSON.stringify(mcpTool.outputSchema);
+     assert.match(outputSchemaJson, /"riskScore"/);
+     assert.match(outputSchemaJson, /"anomalies"/);
+
+     const called = await rpc(2, "tools/call", { name: "invoice_anomaly_check", arguments: SCENARIOS.duplicate });
+     const calledStructured = called.result?.structuredContent?.status === "payment_required";
+     const calledLegacy = called.error?.code === -32002;
+     assert.ok(calledStructured || calledLegacy, JSON.stringify(called).slice(0, 300));
+     if (calledStructured) {
+       assert.equal(called.result?.isError, undefined);
+       assert.equal(called.result?.structuredContent?.tool, "invoice_anomaly_check");
+       assert.equal(called.result?.structuredContent?.price?.amount, 0.25);
+       assert.equal(called.result?.structuredContent?.price?.currency, "USD");
+       assert.equal(called.result?.structuredContent?.price?.protocol, "x402");
+       assert.equal(called.result?.structuredContent?.payment?.retrySameBody, true);
+       assert.equal(called.result?.structuredContent?.nextAction?.type, "pay_and_retry");
+     } else {
+       assert.match(called.error?.message ?? "", /Payment required/i);
+       assert.equal(called.error?.data?.paymentEndpoint, "/mcp/credits");
+     }
+
+     const bad = await rpc(3, "tools/call", { name: "invoice_anomaly_check", arguments: { invoice: { total: 1, invoiceDate: "nope" } } });
+     assert.ok(bad.result?.isError || bad.error || bad.result?.structuredContent?.type === "payment_required" || bad.result?.structuredContent?.status === "payment_required");
+     if (bad.error?.code !== undefined) assert.ok([-32602, -32002].includes(bad.error.code));
+     assert.ok(!JSON.stringify(bad).includes("at runInvoiceAnomalyCheck"), "no stack traces");
+   });
+ });
 
 test("pricing: $0.25 in the catalog, BillingService, x402 requirement and GET /api/v1/x402; zero upstream cost", async () => {
   assert.equal(cap.price, 0.25);

@@ -23,10 +23,13 @@ import { microsToUsd } from "./types.js";
  *  reconciliation excludes this pseudo-tool from its per-tool execution comparison. */
 export const MPP_SESSION_LEDGER_TOOL = "mpp_session";
 
-export function buildMppChargeSettlementRecord(args: { settled: SettledCharge; tool: string; amountMicros: number; requestId: string; payer: string | null }): RevenueSettlementInput {
+type MppJourneyFields = { paymentJourneyId?: string | null; paymentAttemptId?: string | null; challengeRequestId?: string | null };
+
+export function buildMppChargeSettlementRecord(args: { settled: SettledCharge; tool: string; amountMicros: number; requestId: string; payer: string | null } & MppJourneyFields): RevenueSettlementInput {
   const now = new Date().toISOString();
   return {
-    requestId: args.requestId, toolName: args.tool, capabilityName: args.tool,
+    requestId: args.requestId, paymentJourneyId: args.paymentJourneyId ?? null, paymentAttemptId: args.paymentAttemptId ?? null, challengeRequestId: args.challengeRequestId ?? null,
+    toolName: args.tool, capabilityName: args.tool,
     amountAtomic: String(args.amountMicros),
     amountDecimal: microsToUsd(args.amountMicros),
     // The SDK verified the credential against this exact amount (route-bound request) before
@@ -45,11 +48,12 @@ export function buildMppChargeSettlementRecord(args: { settled: SettledCharge; t
   };
 }
 
-export function buildMppSessionSettlementRecord(args: { result: SettlementResult; sessionId: string; requestId: string }): RevenueSettlementInput | null {
+export function buildMppSessionSettlementRecord(args: { result: SettlementResult; sessionId: string; requestId: string } & MppJourneyFields): RevenueSettlementInput | null {
   if (args.result.deltaMicros <= 0) return null;
   const now = new Date().toISOString();
   return {
-    requestId: args.requestId, toolName: MPP_SESSION_LEDGER_TOOL, capabilityName: MPP_SESSION_LEDGER_TOOL,
+    requestId: args.requestId, paymentJourneyId: args.paymentJourneyId ?? null, paymentAttemptId: args.paymentAttemptId ?? null, challengeRequestId: args.challengeRequestId ?? null,
+    toolName: MPP_SESSION_LEDGER_TOOL, capabilityName: MPP_SESSION_LEDGER_TOOL,
     amountAtomic: String(args.result.deltaMicros),
     amountDecimal: microsToUsd(args.result.deltaMicros),
     // Read back from the channel's on-chain settled amount after the settle/close transaction.

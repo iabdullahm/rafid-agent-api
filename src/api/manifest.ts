@@ -1,4 +1,4 @@
-import { discoveryCapabilities, CURRENCY } from "../domain/capabilities.js";
+import { capabilities, discoveryCapabilities, CURRENCY, capabilityCategory, toolSelectionMetadata } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
 import { buildAccountBillingSummary, buildCapabilitiesRegistry, buildPaymentsSummary } from "./agent.js";
 import { accountPaymentMethodIds, paymentMethodsPath, railAvailability } from "../billing/unified/discovery.js";
@@ -15,6 +15,15 @@ type PluginManifestConfig = Pick<Config, "logoUrl" | "contactEmail" | "legalInfo
 
 const PRODUCT_NAME = PLATFORM_NAME;
 const PRODUCT_DESCRIPTION = PLATFORM_DESCRIPTION;
+
+function categorySummary() {
+  const counts = new Map<string, number>();
+  for (const c of capabilities) {
+    const category = capabilityCategory(c);
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([id, count]) => ({ id, count }));
+}
 
 /** Shared by every manifest below, so "mcp"/"x402"/"rest" and their roles are described
  *  identically everywhere rather than redrifting per document. Remote MCP is only ever
@@ -81,6 +90,14 @@ export function buildAgentManifest(config: ManifestConfig, baseUrl?: string) {
     payments: buildPaymentsSummary(config),
     paymentMethods: paymentMethodsPath,
     paymentDocumentation: absolute(x402DocsPath),
+    discovery: {
+      index: "/api/v1/discovery",
+      search: "/api/v1/discovery/search?q=...",
+      intents: "/api/v1/discovery/intents",
+      publicTools: "/tools",
+      categories: categorySummary(),
+      methodology: "Deterministic lexical matching over registry metadata; not semantic AI ranking and not price ranking."
+    },
     ...(railAvailability(config).billing ? { billing: buildAccountBillingSummary(config) } : {}),
     currency: CURRENCY,
     tools: buildCapabilitiesRegistry(config, baseUrl),
@@ -150,6 +167,7 @@ export function buildAgentCard(config: Pick<Config, "x402Enabled"> & Partial<Pic
       name: c.name,
       description: c.description,
       tags: [...c.useCases],
+      selection: toolSelectionMetadata(c),
       examples: [JSON.stringify(c.example)],
       inputModes: ["application/json"],
       outputModes: ["application/json"],

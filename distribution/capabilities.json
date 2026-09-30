@@ -1,0 +1,2449 @@
+[
+  {
+    "id": "analyze_property",
+    "name": "analyze_property",
+    "category": "property",
+    "description": "Calculate gross/net rental yield, income, operating costs and simple payback in OMR. Calculations only.",
+    "whenToUse": "Use when an agent needs financial metrics (yield, income, payback) for a single property.",
+    "useCases": [
+      "property investment analysis",
+      "rental yield check",
+      "single-property evaluation",
+      "buy vs. hold financial screening"
+    ],
+    "recommendedFor": [
+      "simple single-property yield, income and payback arithmetic"
+    ],
+    "notFor": [
+      "live Oman market comparables",
+      "multi-property portfolio screening",
+      "company risk"
+    ],
+    "preferOver": [],
+    "selectionExamples": [
+      {
+        "use": [
+          "Calculate gross and net yield for this property.",
+          "What is the simple payback?"
+        ],
+        "doNotUse": [
+          "Find Muscat comparables.",
+          "Screen the property seller."
+        ]
+      }
+    ],
+    "price": 0.01,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/property/analyze",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/property/analyze",
+    "mcpTool": "analyze_property",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "compare_properties",
+    "name": "compare_properties",
+    "category": "property",
+    "description": "Compare 2–20 uniquely named properties in OMR using the same metrics; order by rounded net yield, preserving input order for ties.",
+    "whenToUse": "Use when an agent must rank or choose between 2-20 candidate properties by net yield.",
+    "useCases": [
+      "property comparison",
+      "ranking multiple properties",
+      "portfolio shortlisting",
+      "choosing between investment options"
+    ],
+    "recommendedFor": [
+      "Use when an agent must rank or choose between 2-20 candidate properties by net yield."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.03,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/property/compare",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/property/compare",
+    "mcpTool": "compare_properties",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "estimate_maintenance",
+    "name": "estimate_maintenance",
+    "category": "property",
+    "description": "Estimate an annual maintenance reserve in OMR from value, age and unit count with explicit optional assumptions. Uncalibrated heuristic, not a survey.",
+    "whenToUse": "Use when an agent needs an annual maintenance reserve estimate for a property, not an actual inspection.",
+    "useCases": [
+      "maintenance budgeting",
+      "annual reserve estimation",
+      "facility cost planning",
+      "pre-purchase cost forecasting"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs an annual maintenance reserve estimate for a property, not an actual inspection."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.02,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/maintenance/estimate",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/maintenance/estimate",
+    "mcpTool": "estimate_maintenance",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "analyze_oman_property",
+    "name": "analyze_oman_property",
+    "category": "property",
+    "description": "Analyze an Oman residential property using local rental comparables, market context and investment metrics, including partner-supplied historical and recent Al Mouj Muscat property sales records with provenance and freshness metadata when coverage is available.",
+    "whenToUse": "Use when an agent needs Oman-specific rental, yield, sale price positioning or operating-cost analysis, especially for an Al Mouj Muscat property.",
+    "useCases": [
+      "Oman rental investment analysis",
+      "Muscat property market comparison",
+      "Al Mouj Muscat sale price positioning",
+      "rental yield with local comparables",
+      "Oman price-per-sqm benchmarking"
+    ],
+    "recommendedFor": [
+      "Oman-specific property analysis with local comparables",
+      "Al Mouj or Muscat rental and sale positioning"
+    ],
+    "notFor": [
+      "a property outside the supported Oman market",
+      "a simple yield calculation with supplied numbers"
+    ],
+    "preferOver": [
+      "analyze_property",
+      "compare_properties"
+    ],
+    "selectionExamples": [
+      {
+        "use": [
+          "Analyze this Al Mouj investment.",
+          "Compare this Muscat property's rent and sale position."
+        ],
+        "doNotUse": [
+          "Calculate yield from these numbers only.",
+          "Estimate website costs."
+        ]
+      }
+    ],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/oman/property/analyze",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/oman/property/analyze",
+    "mcpTool": "analyze_oman_property",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "search_oman_company",
+    "name": "search_oman_company",
+    "category": "risk_intelligence",
+    "description": "Search structured Oman business records by name, registration number, governorate, wilayat and/or industry, returning candidate companies ranked by deterministic identity-match confidence.",
+    "whenToUse": "Use before company analysis or due diligence when the exact company identity is uncertain, or to find candidate Oman companies matching a name or registration number.",
+    "useCases": [
+      "find a company in Oman",
+      "resolve a company name to a companyId",
+      "look up a business by registration number",
+      "shortlist companies by industry or governorate"
+    ],
+    "recommendedFor": [
+      "Use before company analysis or due diligence when the exact company identity is uncertain, or to find candidate Oman companies matching a name or registration number."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.05,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/business/search",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/business/search",
+    "mcpTool": "search_oman_company",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "get_oman_company_profile",
+    "name": "get_oman_company_profile",
+    "category": "risk_intelligence",
+    "description": "Return a structured profile for one Oman company by companyId — identity, registration, location and contact fields, digital-presence detection and full source provenance.",
+    "whenToUse": "Use after search_oman_company resolves a companyId, to retrieve the company's structured profile before deciding whether deeper analysis or due diligence is warranted.",
+    "useCases": [
+      "get company details",
+      "look up a company's registration and contact information",
+      "check what sources back a company record"
+    ],
+    "recommendedFor": [
+      "Use after search_oman_company resolves a companyId, to retrieve the company's structured profile before deciding whether deeper analysis or due diligence is warranted."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/business/profile",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/business/profile",
+    "mcpTool": "get_oman_company_profile",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "analyze_oman_company",
+    "name": "analyze_oman_company",
+    "category": "risk_intelligence",
+    "description": "Generate deterministic commercial-intelligence signals, risk flags and positive signals for one Oman company by companyId, for a stated evaluation purpose.",
+    "whenToUse": "Use when an agent needs to assess whether an Oman company looks like a serious, established operating business — as a supplier, customer, partner or investment target.",
+    "useCases": [
+      "assess a company before doing business with it",
+      "supplier risk screening",
+      "partner or investor evaluation",
+      "commercial intelligence on an Oman business"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs to assess whether an Oman company looks like a serious, established operating business — as a supplier, customer, partner or investment target."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.75,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/business/analyze",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/business/analyze",
+    "mcpTool": "analyze_oman_company",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "due_diligence_oman_company",
+    "name": "due_diligence_oman_company",
+    "category": "risk_intelligence",
+    "description": "Perform structured commercial due diligence on one Oman company by companyId ahead of a stated transaction, returning identity verification, risk assessment, a prioritized due-diligence checklist and known information gaps.",
+    "whenToUse": "Use before awarding a contract, entering a partnership, extending credit or investing, when a structured, source-backed due-diligence pass is needed ahead of the decision.",
+    "useCases": [
+      "pre-contract supplier due diligence",
+      "partnership due diligence",
+      "investment due diligence",
+      "customer credit risk screening"
+    ],
+    "recommendedFor": [
+      "Use before awarding a contract, entering a partnership, extending credit or investing, when a structured, source-backed due-diligence pass is needed ahead of the decision."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 2,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/business/due-diligence",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/business/due-diligence",
+    "mcpTool": "due_diligence_oman_company",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "research_company",
+    "name": "research_company",
+    "category": "risk_intelligence",
+    "description": "Research a company from public web sources: overview, products, leadership, funding, competitors, technology signals, recent developments and risk flags, with cited sources and a confidence score.",
+    "whenToUse": "Use when an agent needs a structured research brief on a named company — for sales/investment/partnership research, competitive analysis, or general company background — beyond what a structured company registry alone provides.",
+    "useCases": [
+      "company background research",
+      "sales prospect research",
+      "investment/competitor research",
+      "build a company profile from public web sources"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs a structured research brief on a named company — for sales/investment/partnership research, competitive analysis, or general company background — beyond what a structured company registry alone provides."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.15,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/intelligence/research-company",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/intelligence/research-company",
+    "mcpTool": "research_company",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "find_companies",
+    "name": "find_companies",
+    "category": "risk_intelligence",
+    "description": "Discover companies from public web sources matching an industry, location, size and/or keyword criteria, returning cited candidate companies (never fabricated) with a stated confidence score.",
+    "whenToUse": "Use when an agent needs to discover a list of candidate companies matching criteria (industry, location, size, keywords) rather than analyze one already-known company.",
+    "useCases": [
+      "find companies in an industry or location",
+      "build a prospect/lead list",
+      "market landscape scan",
+      "shortlist potential partners or suppliers by criteria"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs to discover a list of candidate companies matching criteria (industry, location, size, keywords) rather than analyze one already-known company."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.05,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/intelligence/find-companies",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/intelligence/find-companies",
+    "mcpTool": "find_companies",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "analyze_company_risk",
+    "name": "analyze_company_risk",
+    "category": "risk_intelligence",
+    "description": "Gather evidence-tiered risk signals for a company across corporate identity, domain, website, sanctions-list name-matching, adverse news, reputation and legal/regulatory signals — never a safe/unsafe verdict.",
+    "whenToUse": "Use when an agent needs risk evidence to weigh before a transaction, partnership, or onboarding decision — not a substitute for compliance/legal sign-off.",
+    "useCases": [
+      "pre-transaction risk screening",
+      "vendor/partner risk check",
+      "sanctions name-matching indicator",
+      "adverse media / reputation check"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs risk evidence to weigh before a transaction, partnership, or onboarding decision — not a substitute for compliance/legal sign-off."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.35,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/intelligence/analyze-company-risk",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/intelligence/analyze-company-risk",
+    "mcpTool": "analyze_company_risk",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "oman_supplier_check",
+    "name": "oman_supplier_check",
+    "category": "supplier",
+    "description": "Screen an Oman supplier for procurement using company identity, business activity, website, contact consistency, address signals, public-risk indicators and sanctions screening.",
+    "whenToUse": "Use before adding an Oman supplier to an RFQ, vendor shortlist, procurement process or supplier onboarding workflow.",
+    "useCases": [
+      "pre-RFQ supplier screening",
+      "vendor shortlist check",
+      "supplier onboarding screening",
+      "check whether a supplier's activity matches the required product or service",
+      "detect identity or contact inconsistencies before procurement contact"
+    ],
+    "recommendedFor": [
+      "screening an Oman supplier before an RFQ or onboarding",
+      "identity, activity and contact consistency checks"
+    ],
+    "notFor": [
+      "global company screening",
+      "a final procurement approval",
+      "finding suppliers from scratch"
+    ],
+    "preferOver": [
+      "supplier_due_diligence_report"
+    ],
+    "selectionExamples": [
+      {
+        "use": [
+          "Should we add this Oman supplier to the RFQ?",
+          "Does this supplier's activity match CCTV installation?"
+        ],
+        "doNotUse": [
+          "Find suppliers in Oman.",
+          "Check a UK company's reputation."
+        ]
+      }
+    ],
+    "price": 0.5,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/procurement/oman-supplier-check",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/procurement/oman-supplier-check",
+    "mcpTool": "oman_supplier_check",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "company_reputation_check",
+    "name": "company_reputation_check",
+    "category": "risk_intelligence",
+    "description": "Investigate the public reputation and commercial risk signals of a company in any country — identity consistency against official registries, sanctions-list name screening, adverse media (with legal stage: allegation vs. outcome), customer reputation, online presence, business stability and domain signals — returning evidence-linked scores with a separate confidence score.",
+    "whenToUse": "Use this capability when an AI agent needs to assess a company's public reputation, credibility, adverse-media exposure, sanctions signals, customer reputation, online presence, identity consistency and other publicly observable commercial risk indicators before entering a business relationship.",
+    "useCases": [
+      "check a company before signing a contract",
+      "vendor / SaaS vendor onboarding",
+      "check a counterparty before sending payment",
+      "partner or investment pre-screening",
+      "marketplace seller approval",
+      "contractor or supplier selection (any country)",
+      "negative news / adverse media check",
+      "sanctions name screening of a company"
+    ],
+    "recommendedFor": [
+      "public reputation and adverse-media screening",
+      "sanctions name screening",
+      "global company credibility checks"
+    ],
+    "notFor": [
+      "a deterministic business risk decision",
+      "finding companies",
+      "invoice arithmetic"
+    ],
+    "preferOver": [],
+    "selectionExamples": [
+      {
+        "use": [
+          "Check this company for negative news.",
+          "Screen this counterparty's public reputation."
+        ],
+        "doNotUse": [
+          "Should we approve payment automatically?",
+          "Calculate invoice tax."
+        ]
+      }
+    ],
+    "price": 0.4,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/risk/company-reputation-check",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/risk/company-reputation-check",
+    "mcpTool": "company_reputation_check",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "business_risk_score",
+    "name": "business_risk_score",
+    "category": "risk_intelligence",
+    "description": "Assess the risk of doing business with a company in any country using corporate, financial, compliance, reputation, operational and digital evidence. Returns a 0–100 risk score (100 = highest detected risk), a separate 0–1 confidence, per-category component scores, evidence-backed risk flags and positive signals, sanctions/restricted-party screening with match strength, and machine-readable due-diligence guidance (proceed / proceed_with_monitoring / enhanced_due_diligence / manual_review / avoid_automated_transaction).",
+    "whenToUse": "Use before onboarding a supplier or vendor, paying a new business, entering a B2B transaction, approving a marketplace seller, extending credit or insurance, or recommending a company — whenever an autonomous agent needs structured, evidence-backed business due diligence it cannot reliably generate from its own model knowledge.",
+    "useCases": [
+      "Before onboarding a supplier or vendor",
+      "Before paying a new business",
+      "Before entering a B2B transaction",
+      "Before recommending a company to a user",
+      "Before approving a marketplace seller",
+      "When evaluating company compliance or reputation risk",
+      "When an autonomous agent needs structured business due diligence",
+      "lending / credit pre-screening",
+      "insurance underwriting pre-check"
+    ],
+    "recommendedFor": [
+      "structured risk score and action for a company",
+      "automated transaction guardrails",
+      "supplier or vendor risk screening"
+    ],
+    "notFor": [
+      "public reputation only",
+      "finding companies",
+      "stock or market-price lookup"
+    ],
+    "preferOver": [
+      "company_reputation_check"
+    ],
+    "selectionExamples": [
+      {
+        "use": [
+          "Can we safely transact with this business?",
+          "Score this vendor before onboarding."
+        ],
+        "doNotUse": [
+          "Find local suppliers.",
+          "Extract fields from this contract."
+        ]
+      }
+    ],
+    "price": 0.5,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/risk/business-risk-score",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/risk/business-risk-score",
+    "mcpTool": "business_risk_score",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "social_video_generate",
+    "name": "social_video_generate",
+    "category": "video_generation",
+    "description": "Generate a complete short-form social video from a topic or supplied script, including narration, visual materials, subtitles and final video composition.",
+    "whenToUse": "Use when an agent needs a publish-ready TikTok, Reel, Short or generic social video from a topic or script.",
+    "useCases": [
+      "social video",
+      "TikTok video",
+      "Instagram Reel",
+      "YouTube Short",
+      "short-form video"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs a publish-ready TikTok, Reel, Short or generic social video from a topic or script."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 1.5,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/video/social-generate",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/video/social-generate",
+    "mcpTool": "social_video_generate",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": true
+  },
+  {
+    "id": "news_video_generate",
+    "name": "news_video_generate",
+    "category": "video_generation",
+    "description": "Turn supplied factual news content into a publish-ready short-form news video without independently researching or fabricating current events.",
+    "whenToUse": "Use when an agent already has a verified headline, summary, facts and source URLs and needs a short news video.",
+    "useCases": [
+      "news video",
+      "factual news video",
+      "vertical news",
+      "news short"
+    ],
+    "recommendedFor": [
+      "Use when an agent already has a verified headline, summary, facts and source URLs and needs a short news video."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 1.5,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/video/news-generate",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/video/news-generate",
+    "mcpTool": "news_video_generate",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": true
+  },
+  {
+    "id": "product_promo_video",
+    "name": "product_promo_video",
+    "category": "video_generation",
+    "description": "Generate a promotional short video from structured product information, features, call to action and optional website.",
+    "whenToUse": "Use when an agent needs a publish-ready product or service promotion from structured marketing input.",
+    "useCases": [
+      "product promo video",
+      "marketing video",
+      "product advertisement",
+      "service promotion"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs a publish-ready product or service promotion from structured marketing input."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 2,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/video/product-promo",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/video/product-promo",
+    "mcpTool": "product_promo_video",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": true
+  },
+  {
+    "id": "company_due_diligence",
+    "name": "company_due_diligence",
+    "category": "risk_intelligence",
+    "description": "Perform company due diligence for onboarding, procurement, partnership, investment or customer-risk decisions: resolve the entity, evaluate registration, website identity, sanctions, adverse news, legal, financial and reputation signals, then return a deterministic risk assessment with evidence and a machine-actionable next action.",
+    "whenToUse": "Use when an autonomous agent must decide whether to continue doing business with a company and what verification or escalation should happen next.",
+    "useCases": [
+      "supplier onboarding",
+      "vendor review",
+      "procurement",
+      "partnership screening",
+      "investment screening",
+      "marketplace onboarding",
+      "customer risk"
+    ],
+    "recommendedFor": [
+      "before onboarding a supplier",
+      "before signing a commercial agreement",
+      "before paying an unfamiliar company"
+    ],
+    "notFor": [
+      "simple company search",
+      "stock price lookup",
+      "basic website lookup"
+    ],
+    "preferOver": [
+      "business_risk_score",
+      "company_reputation_check",
+      "research_company"
+    ],
+    "selectionExamples": [
+      {
+        "use": [
+          "Should I onboard Acme LLC as a supplier?",
+          "Check this company before we pay their first invoice.",
+          "Run due diligence on example.com."
+        ],
+        "doNotUse": [
+          "Find companies in Oman.",
+          "What is Microsoft's stock price?"
+        ]
+      }
+    ],
+    "price": 1.5,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/risk/company-due-diligence",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/risk/company-due-diligence",
+    "mcpTool": "company_due_diligence",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "document_facts_extract",
+    "name": "document_facts_extract",
+    "category": "document_intelligence",
+    "description": "Extract structured, evidence-backed facts, entities, dates, amounts, obligations, deadlines and risk indicators from business documents (contracts, invoices, purchase orders, quotations, tenders/RFPs, leases, policies, financial reports, legal documents, CVs, company profiles) from any country. Every fact carries a 0–1 extraction confidence and source evidence (verbatim excerpt, character offsets, section, and the page when the document has real pages); dates, amounts, currencies, percentages and durations are normalized only when unambiguous. Accepts an https documentUrl (PDF with a text layer, DOCX, HTML, text) or extracted text, up to 25 pages.",
+    "whenToUse": "Use when an agent needs reliable machine-readable facts from a contract, invoice, tender, lease, purchase order, policy, financial report or other business document instead of a general summary.",
+    "useCases": [
+      "Read this supplier contract and tell me its expiry date, payment terms and termination notice period",
+      "Extract invoice number, due date, totals and bank details before paying an invoice",
+      "Check an invoice's subtotal + tax against its total",
+      "List a tender's submission deadline, eligibility requirements, mandatory documents and evaluation criteria",
+      "Extract rent, deposit, lease dates and notice period from a lease",
+      "Find auto-renewal, penalty and liability clauses in an agreement",
+      "Turn a purchase order into line items, quantities and delivery deadline",
+      "Answer targeted questions about a document with evidence (requestedFacts)",
+      "Contract review pre-screening",
+      "Accounts-payable automation",
+      "Procurement / tender screening"
+    ],
+    "recommendedFor": [
+      "evidence-backed extraction from a supplied document",
+      "contract, invoice or tender fact capture"
+    ],
+    "notFor": [
+      "general company due diligence without a document",
+      "legal advice",
+      "unprovided document research"
+    ],
+    "preferOver": [],
+    "selectionExamples": [
+      {
+        "use": [
+          "Extract the expiry date from this contract.",
+          "List the tender deadline and mandatory documents."
+        ],
+        "doNotUse": [
+          "Investigate this company online.",
+          "Decide whether to pay the supplier."
+        ]
+      }
+    ],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/documents/facts-extract",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/documents/facts-extract",
+    "mcpTool": "document_facts_extract",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "invoice_anomaly_check",
+    "name": "invoice_anomaly_check",
+    "category": "finance_risk",
+    "description": "Detect duplicate, inconsistent, unusual or potentially fraudulent invoices before payment using arithmetic, supplier-history, purchase-order and payment-detail checks. Returns a 0–100 risk score, a risk level, an advisory decision (continue / review / hold) and machine-readable anomalies (e.g. DUPLICATE_INVOICE, POSSIBLE_DUPLICATE, BANK_ACCOUNT_CHANGED, PO_AMOUNT_EXCEEDED, SPLIT_INVOICE_PATTERN, SUBTOTAL_MISMATCH), each with severity, confidence and structured evidence. Works on a single invoice (standalone) or with optional historical invoices, supplier profile, purchase order, contract, approval threshold and payment history (context-aware). Deterministic, decimal-safe, any country and currency.",
+    "whenToUse": "Use before approving, paying, booking, reconciling or auditing an invoice, especially when an agent needs to determine whether the invoice requires human review.",
+    "useCases": [
+      "Check this invoice before I pay it",
+      "Is this invoice a duplicate of one we already received or paid?",
+      "Did the supplier's bank account change?",
+      "Does the invoice exceed the purchase order or contract?",
+      "Are these invoices split to stay under the approval limit?",
+      "Verify invoice arithmetic (quantity × unit price, subtotal, tax, total)",
+      "Accounts-payable automation guardrail",
+      "Pre-payment fraud prevention (invoice redirection / BEC)",
+      "Three-way-match pre-check (invoice vs purchase order)",
+      "Audit sampling and reconciliation",
+      "finance",
+      "accounts-payable",
+      "procurement"
+    ],
+    "recommendedFor": [
+      "invoice review before payment",
+      "duplicate and arithmetic checks",
+      "PO, contract and supplier-history comparison"
+    ],
+    "notFor": [
+      "company-level due diligence",
+      "extracting arbitrary document facts",
+      "carrier shipping quotes"
+    ],
+    "preferOver": [],
+    "selectionExamples": [
+      {
+        "use": [
+          "Check this invoice before paying it.",
+          "Is this invoice a duplicate?",
+          "Does it exceed the purchase order?"
+        ],
+        "doNotUse": [
+          "Screen the supplier's sanctions status.",
+          "Estimate a vehicle value."
+        ]
+      }
+    ],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/finance/invoice-anomaly-check",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/finance/invoice-anomaly-check",
+    "mcpTool": "invoice_anomaly_check",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "vehicle_value_estimate",
+    "name": "vehicle_value_estimate",
+    "category": "automotive",
+    "description": "Estimate the fair market value of a vehicle using make, model, year, trim, mileage, condition, ownership history, location and available market comparables. Returns a valuation range, private-sale estimate, dealer buy/retail estimates, depreciation, transparent valuation adjustments, confidence and risk flags.",
+    "whenToUse": "Use this capability when an AI agent needs to estimate the current market value of a passenger vehicle, determine whether an asking price is reasonable, estimate private-sale or dealer values, assess depreciation, or evaluate a vehicle using local or regional market comparables.",
+    "useCases": [
+      "Estimate the current market value of a used vehicle",
+      "Is this asking price above, below or near market?",
+      "Estimate private-sale value",
+      "Estimate dealer acquisition / trade-in value",
+      "Estimate dealer retail value",
+      "Assess depreciation",
+      "Compare a vehicle with similar market listings",
+      "Vehicle purchase decision support",
+      "Auto-finance and loan-to-value checks",
+      "Insurance valuation workflows",
+      "Fleet and leasing residual checks",
+      "Dealership software",
+      "Vehicle marketplaces and auction platforms",
+      "automotive"
+    ],
+    "recommendedFor": [
+      "fair-market vehicle valuation",
+      "asking-price and trade-in checks",
+      "fleet or insurance valuation"
+    ],
+    "notFor": [
+      "vehicle inspection",
+      "vehicle history verification",
+      "shipping cost estimation"
+    ],
+    "preferOver": [],
+    "selectionExamples": [
+      {
+        "use": [
+          "Is this 2022 Land Cruiser fairly priced?",
+          "Estimate the trade-in value of this car."
+        ],
+        "doNotUse": [
+          "Check whether the vehicle was in an accident.",
+          "Calculate freight cost."
+        ]
+      }
+    ],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/automotive/vehicle-value-estimate",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/automotive/vehicle-value-estimate",
+    "mcpTool": "vehicle_value_estimate",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "website_download",
+    "name": "website_download",
+    "category": "website_services",
+    "description": "Download and mirror a publicly accessible website, including HTML pages and required frontend assets, and return a machine-readable manifest and optional downloadable archive.",
+    "whenToUse": "Use when an agent needs an offline mirror of a public website and its frontend assets.",
+    "useCases": [
+      "download website",
+      "mirror website",
+      "offline website archive",
+      "save public website"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs an offline mirror of a public website and its frontend assets."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.75,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/websites/download",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/websites/download",
+    "mcpTool": "website_download",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": false,
+    "sideEffects": true
+  },
+  {
+    "id": "extract_candidate_profile",
+    "name": "extract_candidate_profile",
+    "category": "recruitment",
+    "description": "Normalize an English, Arabic or mixed-language CV into a machine-readable candidate profile using only stated professional evidence; protected personal attributes are ignored.",
+    "whenToUse": "Use before scoring or matching a CV when an agent needs reusable structured candidate evidence.",
+    "useCases": [
+      "CV parsing",
+      "resume extraction",
+      "candidate profile",
+      "ATS normalization"
+    ],
+    "recommendedFor": [
+      "Use before scoring or matching a CV when an agent needs reusable structured candidate evidence."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.1,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/recruitment/extract-candidate-profile",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/extract-candidate-profile",
+    "mcpTool": "extract_candidate_profile",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "generate_job_profile",
+    "name": "generate_job_profile",
+    "category": "recruitment",
+    "description": "Normalize a job description into required and preferred professional requirements with transparent weights totaling 100.",
+    "whenToUse": "Use before candidate matching or shortlisting when an agent needs a structured job requirement profile.",
+    "useCases": [
+      "job description parsing",
+      "job requirements",
+      "ATS job profile"
+    ],
+    "recommendedFor": [
+      "Use before candidate matching or shortlisting when an agent needs a structured job requirement profile."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.1,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/recruitment/generate-job-profile",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/generate-job-profile",
+    "mcpTool": "generate_job_profile",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "cv_score",
+    "name": "cv_score",
+    "category": "recruitment",
+    "description": "Score the completeness, clarity and ATS-readability of a CV on a transparent 0–100 scale; this is not job matching.",
+    "whenToUse": "Use when an agent needs general CV quality feedback independent of a specific job.",
+    "useCases": [
+      "CV quality score",
+      "resume review",
+      "ATS readability"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs general CV quality feedback independent of a specific job."
+    ],
+    "notFor": [],
+    "preferOver": [
+      "cv_job_match",
+      "extract_candidate_profile"
+    ],
+    "selectionExamples": [],
+    "price": 0.2,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/recruitment/cv-score",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/cv-score",
+    "mcpTool": "cv_score",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "cv_job_match",
+    "name": "cv_job_match",
+    "category": "recruitment",
+    "description": "Compare a candidate profile or CV with a job profile or description using normalized skills, experience evidence and transparent weighted scoring.",
+    "whenToUse": "Use when an agent needs evidence-based candidate-to-job matching for one candidate.",
+    "useCases": [
+      "CV job match",
+      "candidate fit",
+      "skill gap analysis"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs evidence-based candidate-to-job matching for one candidate."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/recruitment/cv-job-match",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/cv-job-match",
+    "mcpTool": "cv_job_match",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "cv_improve",
+    "name": "cv_improve",
+    "category": "recruitment",
+    "description": "Produce evidence-grounded CV improvement recommendations, optional job-specific guidance and ATS actions without inventing candidate facts.",
+    "whenToUse": "Use when a candidate or recruitment agent needs actionable CV improvement guidance.",
+    "useCases": [
+      "CV improvement",
+      "resume rewrite guidance",
+      "ATS optimization"
+    ],
+    "recommendedFor": [
+      "Use when a candidate or recruitment agent needs actionable CV improvement guidance."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/recruitment/cv-improve",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/cv-improve",
+    "mcpTool": "cv_improve",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "candidate_shortlist_score",
+    "name": "candidate_shortlist_score",
+    "category": "recruitment",
+    "description": "Score up to 100 supplied candidate profiles against one job profile with auditable matched requirements, gaps and confidence; no hiring decision is emitted.",
+    "whenToUse": "Use after extracting multiple candidate profiles when an agent needs transparent batch comparison against one job.",
+    "useCases": [
+      "candidate shortlist",
+      "batch CV ranking",
+      "recruitment screening"
+    ],
+    "recommendedFor": [
+      "Use after extracting multiple candidate profiles when an agent needs transparent batch comparison against one job."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.1,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/recruitment/candidate-shortlist-score",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/candidate-shortlist-score",
+    "mcpTool": "candidate_shortlist_score",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "strategy_performance_analysis",
+    "name": "strategy_performance_analysis",
+    "category": "trading",
+    "description": "Calculate historical trade-level strategy performance metrics from supplied records, including P&L, win/loss statistics and supported drawdown metrics; this is historical analysis, not a forecast.",
+    "whenToUse": "Use when an agent needs deterministic historical performance analysis for a supplied trading strategy or trade set.",
+    "useCases": [
+      "strategy performance",
+      "backtest results",
+      "trade statistics",
+      "drawdown analysis",
+      "profit factor",
+      "expectancy"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs deterministic historical performance analysis for a supplied trading strategy or trade set."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.35,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/trading/strategy-performance-analysis",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/trading/strategy-performance-analysis",
+    "mcpTool": "strategy_performance_analysis",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "trade_risk_score",
+    "name": "trade_risk_score",
+    "category": "trading",
+    "description": "Calculate a transparent deterministic 0–100 risk score for a proposed trade from entry, protection, sizing, account and portfolio context.",
+    "whenToUse": "Use before an agent recommends or executes a trade and needs an auditable risk score rather than an opaque model judgment.",
+    "useCases": [
+      "trade risk",
+      "position sizing",
+      "risk reward",
+      "pre-trade check",
+      "leverage check"
+    ],
+    "recommendedFor": [
+      "Use before an agent recommends or executes a trade and needs an auditable risk score rather than an opaque model judgment."
+    ],
+    "notFor": [],
+    "preferOver": [
+      "portfolio_exposure_check",
+      "trade_log_analysis"
+    ],
+    "selectionExamples": [],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/trading/trade-risk-score",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/trading/trade-risk-score",
+    "mcpTool": "trade_risk_score",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "portfolio_exposure_check",
+    "name": "portfolio_exposure_check",
+    "category": "trading",
+    "description": "Aggregate supplied open and proposed positions into gross, net, directional and concentration exposure with stop-risk and margin indicators.",
+    "whenToUse": "Use when an agent needs to assess portfolio concentration or directional exposure before adding or modifying a position.",
+    "useCases": [
+      "portfolio exposure",
+      "concentration check",
+      "gross exposure",
+      "net exposure",
+      "margin usage"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs to assess portfolio concentration or directional exposure before adding or modifying a position."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/trading/portfolio-exposure-check",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/trading/portfolio-exposure-check",
+    "mcpTool": "portfolio_exposure_check",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "trade_log_analysis",
+    "name": "trade_log_analysis",
+    "category": "trading",
+    "description": "Analyze supplied raw trade records for deterministic performance, execution quality, grouping, streaks, data-quality issues and risk patterns.",
+    "whenToUse": "Use when an agent needs structured statistics and findings from a trading log or execution history.",
+    "useCases": [
+      "trade log",
+      "execution history",
+      "trading behavior",
+      "fee analysis",
+      "overtrading"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs structured statistics and findings from a trading log or execution history."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.3,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/trading/trade-log-analysis",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/trading/trade-log-analysis",
+    "mcpTool": "trade_log_analysis",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "shipping_cost_estimate",
+    "name": "shipping_cost_estimate",
+    "category": "logistics",
+    "description": "Estimate domestic or international shipping cost, chargeable weight, transit time and common shipping surcharges using shipment dimensions, weight, origin, destination and service level. Estimates are not guaranteed carrier quotes; duties and taxes are excluded.",
+    "whenToUse": "Use when an agent needs to estimate delivery cost for a physical shipment before purchasing, selling, importing, exporting or selecting a shipping option.",
+    "useCases": [
+      "international shipping estimate",
+      "domestic shipping estimate",
+      "calculate volumetric weight",
+      "compare shipping options",
+      "ecommerce shipping",
+      "freight planning",
+      "procurement logistics",
+      "marketplace delivery cost"
+    ],
+    "recommendedFor": [
+      "route and shipment cost estimation",
+      "chargeable-weight planning",
+      "choosing a service level"
+    ],
+    "notFor": [
+      "customs or tax determination",
+      "a guaranteed carrier quote",
+      "vehicle valuation"
+    ],
+    "preferOver": [],
+    "selectionExamples": [
+      {
+        "use": [
+          "Estimate shipping from Muscat to Dubai.",
+          "Compare express and economy delivery."
+        ],
+        "doNotUse": [
+          "Calculate import duties.",
+          "Audit the supplier website."
+        ]
+      }
+    ],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/logistics/shipping-cost-estimate",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/logistics/shipping-cost-estimate",
+    "mcpTool": "shipping_cost_estimate",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "ai_call_agent",
+    "name": "ai_call_agent",
+    "category": "voice",
+    "description": "Initiate an authorized outbound AI telephone call and return a call identifier immediately; completion and duration arrive asynchronously.",
+    "whenToUse": "Use when an authorized agent must contact a customer by telephone for a lawful, consent-aware objective and retrieve a structured result later.",
+    "useCases": [
+      "outbound AI call",
+      "customer confirmation",
+      "telephone follow-up"
+    ],
+    "recommendedFor": [
+      "Use when an authorized agent must contact a customer by telephone for a lawful, consent-aware objective and retrieve a structured result later."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.3,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/voice/ai-call",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/voice/ai-call",
+    "mcpTool": "ai_call_agent",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": false,
+    "sideEffects": true
+  },
+  {
+    "id": "voice_lead_qualifier",
+    "name": "voice_lead_qualifier",
+    "category": "voice",
+    "description": "Place an asynchronous sales qualification call and score captured evidence against a configurable rubric.",
+    "whenToUse": "Use when an agent needs structured lead qualification from a lawful customer conversation rather than an ungrounded free-form model opinion.",
+    "useCases": [
+      "lead qualification",
+      "sales discovery call",
+      "qualification score"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs structured lead qualification from a lawful customer conversation rather than an ungrounded free-form model opinion."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.75,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/voice/lead-qualifier",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/voice/lead-qualifier",
+    "mcpTool": "voice_lead_qualifier",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": false,
+    "sideEffects": true
+  },
+  {
+    "id": "website_project_estimate",
+    "name": "website_project_estimate",
+    "category": "website_services",
+    "description": "Produce a deterministic website project estimate with cost, timeline, hours, effort breakdown, maintenance range, assumptions and risk flags. It is an estimate, not a fixed quotation.",
+    "whenToUse": "Use when an agent needs a transparent cost and delivery estimate for building or remediating a website.",
+    "useCases": [
+      "website quote",
+      "web project estimate",
+      "website rebuild cost",
+      "agency proposal",
+      "remediation estimate"
+    ],
+    "recommendedFor": [
+      "transparent website build or remediation estimates",
+      "scope, timeline and effort planning"
+    ],
+    "notFor": [
+      "measuring live website defects",
+      "a fixed quotation",
+      "company due diligence"
+    ],
+    "preferOver": [],
+    "selectionExamples": [
+      {
+        "use": [
+          "Estimate the cost to rebuild this website.",
+          "How long would this multilingual portal take?"
+        ],
+        "doNotUse": [
+          "Audit this live site's security headers.",
+          "Screen the company before payment."
+        ]
+      }
+    ],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/websites/project-estimate",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/websites/project-estimate",
+    "mcpTool": "website_project_estimate",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "website_audit",
+    "name": "website_audit",
+    "category": "website_services",
+    "description": "Perform a bounded, passive technical website inspection covering measurable SEO, performance, accessibility, security, UX and crawlability indicators; unavailable checks are reported honestly.",
+    "whenToUse": "Use when an agent needs evidence-backed website issues from a public HTTPS URL before estimating remediation or rebuild work.",
+    "useCases": [
+      "website audit",
+      "SEO audit",
+      "technical website review",
+      "accessibility checks",
+      "security headers",
+      "website remediation"
+    ],
+    "recommendedFor": [
+      "passive technical, SEO, accessibility and security checks for a public HTTPS site"
+    ],
+    "notFor": [
+      "estimating a build budget",
+      "penetration testing",
+      "company reputation screening"
+    ],
+    "preferOver": [
+      "website_project_estimate"
+    ],
+    "selectionExamples": [
+      {
+        "use": [
+          "Audit this website before we rebuild it.",
+          "Find measurable SEO and accessibility issues."
+        ],
+        "doNotUse": [
+          "Estimate the project cost.",
+          "Check the company sanctions status."
+        ]
+      }
+    ],
+    "price": 0.75,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/websites/audit",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/websites/audit",
+    "mcpTool": "website_audit",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "appointment_call_agent",
+    "name": "appointment_call_agent",
+    "category": "voice",
+    "description": "Place an asynchronous appointment call to propose, book, confirm, reschedule or cancel a slot through a calendar-provider abstraction.",
+    "whenToUse": "Use when an authorized agent must coordinate a customer appointment by telephone and return a machine-readable scheduling result.",
+    "useCases": [
+      "book appointment",
+      "confirm appointment",
+      "reschedule call",
+      "cancel appointment"
+    ],
+    "recommendedFor": [
+      "Use when an authorized agent must coordinate a customer appointment by telephone and return a machine-readable scheduling result."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.5,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/voice/appointment",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/voice/appointment",
+    "mcpTool": "appointment_call_agent",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": false,
+    "sideEffects": true
+  },
+  {
+    "id": "supplier_due_diligence_report",
+    "name": "supplier_due_diligence_report",
+    "category": "supplier",
+    "description": "Run an end-to-end Oman supplier screening workflow covering identity, activity, website, contact consistency, address, sanctions and public-risk evidence in one structured report.",
+    "whenToUse": "Use when a procurement agent needs one paid supplier due-diligence result instead of coordinating several screening steps.",
+    "useCases": [
+      "supplier due diligence",
+      "vendor screening report",
+      "procurement risk report",
+      "Oman supplier report"
+    ],
+    "recommendedFor": [
+      "Use when a procurement agent needs one paid supplier due-diligence result instead of coordinating several screening steps."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 1.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/procurement/supplier-due-diligence-report",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/procurement/supplier-due-diligence-report",
+    "mcpTool": "supplier_due_diligence_report",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "company_risk_report",
+    "name": "company_risk_report",
+    "category": "risk_intelligence",
+    "description": "Combine evidence-first public reputation analysis with structured business-risk scoring into one company risk report.",
+    "whenToUse": "Use when an agent needs a consolidated company risk report with both evidence and an explicit risk model.",
+    "useCases": [
+      "company risk report",
+      "business due diligence",
+      "reputation and risk",
+      "counterparty screening"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs a consolidated company risk report with both evidence and an explicit risk model."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 1.5,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/risk/company-risk-report",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/risk/company-risk-report",
+    "mcpTool": "company_risk_report",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "property_investment_report",
+    "name": "property_investment_report",
+    "category": "property",
+    "description": "Combine Oman property market comparables, price positioning and rental-yield calculations into one investment report.",
+    "whenToUse": "Use when an agent needs one structured investment analysis for a property rather than separate market and calculator calls.",
+    "useCases": [
+      "property investment report",
+      "real estate investment analysis",
+      "Oman property valuation",
+      "rental yield report"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs one structured investment analysis for a property rather than separate market and calculator calls."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.75,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/property/property-investment-report",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/property/property-investment-report",
+    "mcpTool": "property_investment_report",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "portfolio_screen",
+    "name": "portfolio_screen",
+    "category": "property",
+    "description": "Screen and rank a portfolio of 2–20 supplied properties using the shared rental-yield and income calculations.",
+    "whenToUse": "Use when an agent needs a first-pass ranking of multiple properties before deeper analysis.",
+    "useCases": [
+      "portfolio screening",
+      "property shortlist",
+      "compare investment properties",
+      "rental yield ranking"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs a first-pass ranking of multiple properties before deeper analysis."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.5,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/property/portfolio-screen",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/property/portfolio-screen",
+    "mcpTool": "portfolio_screen",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "procurement_vendor_shortlist",
+    "name": "procurement_vendor_shortlist",
+    "category": "supplier",
+    "description": "Screen and rank 2–50 Oman suppliers in one procurement workflow using identity, risk, sanctions and public-evidence signals.",
+    "whenToUse": "Use when a procurement agent needs a ranked vendor shortlist from several candidate suppliers.",
+    "useCases": [
+      "vendor shortlist",
+      "procurement shortlist",
+      "compare suppliers",
+      "supplier ranking"
+    ],
+    "recommendedFor": [
+      "Use when a procurement agent needs a ranked vendor shortlist from several candidate suppliers."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 2,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/procurement/vendor-shortlist",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/procurement/vendor-shortlist",
+    "mcpTool": "procurement_vendor_shortlist",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "company_risk_batch",
+    "name": "company_risk_batch",
+    "category": "risk_intelligence",
+    "description": "Assess 1–100 companies from structured rows or CSV in one bounded batch, preserving per-row risk results and provider failures.",
+    "whenToUse": "Use when an agent needs to screen many companies efficiently instead of making separate risk-report calls.",
+    "useCases": [
+      "batch company screening",
+      "100 company risk check",
+      "CSV company analysis",
+      "bulk due diligence"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs to screen many companies efficiently instead of making separate risk-report calls."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 8,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/risk/company-risk-batch",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/risk/company-risk-batch",
+    "mcpTool": "company_risk_batch",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "startup_readiness_score",
+    "name": "startup_readiness_score",
+    "category": "book_business",
+    "description": "Score the book's 15-question readiness assessment deterministically; does not predict business success.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for startup readiness score.",
+    "useCases": [
+      "startup readiness score",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for startup readiness score."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.05,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/startup-readiness-score",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/startup-readiness-score",
+    "mcpTool": "startup_readiness_score",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "business_idea_validate",
+    "name": "business_idea_validate",
+    "category": "book_business",
+    "description": "Evaluate problem, customer, solution and willingness-to-pay evidence; does not independently verify live demand.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for business idea validate.",
+    "useCases": [
+      "business idea validate",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for business idea validate."
+    ],
+    "notFor": [],
+    "preferOver": [
+      "business_risk_check",
+      "product_pricing_calculator"
+    ],
+    "selectionExamples": [],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/business-idea-validate",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-idea-validate",
+    "mcpTool": "business_idea_validate",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "business_idea_generator",
+    "name": "business_idea_generator",
+    "category": "book_business",
+    "description": "Generate candidate ideas from user-observed problems and constraints; does not claim market demand.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for business idea generator.",
+    "useCases": [
+      "business idea generator",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for business idea generator."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.2,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/business-idea-generator",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-idea-generator",
+    "mcpTool": "business_idea_generator",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "business_validation_plan",
+    "name": "business_validation_plan",
+    "category": "book_business",
+    "description": "Create the book's structured seven-day validation workflow; execution and evidence collection remain with the caller.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for business validation plan.",
+    "useCases": [
+      "business validation plan",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for business validation plan."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/business-validation-plan",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-validation-plan",
+    "mcpTool": "business_validation_plan",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "ideal_customer_profile",
+    "name": "ideal_customer_profile",
+    "category": "book_business",
+    "description": "Structure an ideal-customer profile from supplied observations; does not infer verified demographics.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for ideal customer profile.",
+    "useCases": [
+      "ideal customer profile",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for ideal customer profile."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.2,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/ideal-customer-profile",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/ideal-customer-profile",
+    "mcpTool": "ideal_customer_profile",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "competitor_analysis",
+    "name": "competitor_analysis",
+    "category": "book_business",
+    "description": "Compare 3-20 user-supplied competitors; does not discover or verify competitors without live evidence.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for competitor analysis.",
+    "useCases": [
+      "competitor analysis",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for competitor analysis."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.3,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/competitor-analysis",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/competitor-analysis",
+    "mcpTool": "competitor_analysis",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "business_model_builder",
+    "name": "business_model_builder",
+    "category": "book_business",
+    "description": "Build the book's ten-element one-page business map from supplied inputs.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for business model builder.",
+    "useCases": [
+      "business model builder",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for business model builder."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/business-model-builder",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-model-builder",
+    "mcpTool": "business_model_builder",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "startup_cost_estimate",
+    "name": "startup_cost_estimate",
+    "category": "book_business",
+    "description": "Calculate startup capital, runway and reserve in OMR using integer baisa internally.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for startup cost estimate.",
+    "useCases": [
+      "startup cost estimate",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for startup cost estimate."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.1,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/startup-cost-estimate",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/startup-cost-estimate",
+    "mcpTool": "startup_cost_estimate",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "product_pricing_calculator",
+    "name": "product_pricing_calculator",
+    "category": "book_business",
+    "description": "Calculate unit cost, price, margin and markup in OMR; does not validate market willingness to pay.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for product pricing calculator.",
+    "useCases": [
+      "product pricing calculator",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for product pricing calculator."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.1,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/product-pricing-calculator",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/product-pricing-calculator",
+    "mcpTool": "product_pricing_calculator",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "break_even_calculator",
+    "name": "break_even_calculator",
+    "category": "book_business",
+    "description": "Calculate break-even and target-profit units from supplied fixed and variable costs.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for break even calculator.",
+    "useCases": [
+      "break even calculator",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for break even calculator."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.1,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/break-even-calculator",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/break-even-calculator",
+    "mcpTool": "break_even_calculator",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": true,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "business_profitability_analysis",
+    "name": "business_profitability_analysis",
+    "category": "book_business",
+    "description": "Calculate revenue, gross profit, net profit and margins from monthly supplied data.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for business profitability analysis.",
+    "useCases": [
+      "business profitability analysis",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for business profitability analysis."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.15,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/business-profitability-analysis",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-profitability-analysis",
+    "mcpTool": "business_profitability_analysis",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "offer_builder",
+    "name": "offer_builder",
+    "category": "book_business",
+    "description": "Construct a commercial offer from supplied outcome, bundle and delivery terms; never invents scarcity.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for offer builder.",
+    "useCases": [
+      "offer builder",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for offer builder."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.2,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/offer-builder",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/offer-builder",
+    "mcpTool": "offer_builder",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "oman_go_to_market_plan",
+    "name": "oman_go_to_market_plan",
+    "category": "book_business",
+    "description": "Select supplied Oman-relevant channels for an ICP and create a 14-day action plan; live popularity is not checked.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for oman go to market plan.",
+    "useCases": [
+      "oman go to market plan",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for oman go to market plan."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.4,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/oman-go-to-market-plan",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/oman-go-to-market-plan",
+    "mcpTool": "oman_go_to_market_plan",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "content_plan_generator",
+    "name": "content_plan_generator",
+    "category": "book_business",
+    "description": "Generate a 14- or 30-day structured content calendar from an offer and selected channels.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for content plan generator.",
+    "useCases": [
+      "content plan generator",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for content plan generator."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.2,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/content-plan-generator",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/content-plan-generator",
+    "mcpTool": "content_plan_generator",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "first_10_customers_plan",
+    "name": "first_10_customers_plan",
+    "category": "book_business",
+    "description": "Create a non-spammy plan for 20 prospects and the first 10 paying customers.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for first 10 customers plan.",
+    "useCases": [
+      "first 10 customers plan",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for first 10 customers plan."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.25,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/first-10-customers-plan",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/first-10-customers-plan",
+    "mcpTool": "first_10_customers_plan",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "sales_response_builder",
+    "name": "sales_response_builder",
+    "category": "book_business",
+    "description": "Draft a customer-facing response for a supplied sales situation; does not send messages.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for sales response builder.",
+    "useCases": [
+      "sales response builder",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for sales response builder."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.1,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/sales-response-builder",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/sales-response-builder",
+    "mcpTool": "sales_response_builder",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "whatsapp_business_setup",
+    "name": "whatsapp_business_setup",
+    "category": "book_business",
+    "description": "Create Arabic/English WhatsApp Business profile, reply and order-message templates.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for whatsapp business setup.",
+    "useCases": [
+      "whatsapp business setup",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for whatsapp business setup."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.2,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/whatsapp-business-setup",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/whatsapp-business-setup",
+    "mcpTool": "whatsapp_business_setup",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "monthly_business_financial_report",
+    "name": "monthly_business_financial_report",
+    "category": "book_business",
+    "description": "Generate a monthly business financial report from supplied OMR figures; not accounting advice.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for monthly business financial report.",
+    "useCases": [
+      "monthly business financial report",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for monthly business financial report."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.15,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/monthly-business-financial-report",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/monthly-business-financial-report",
+    "mcpTool": "monthly_business_financial_report",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "oman_business_launch_plan",
+    "name": "oman_business_launch_plan",
+    "category": "book_business",
+    "description": "Generate the book's 30-day launch workflow with dependencies and status placeholders.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for oman business launch plan.",
+    "useCases": [
+      "oman business launch plan",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for oman business launch plan."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.4,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/oman-business-launch-plan",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/oman-business-launch-plan",
+    "mcpTool": "oman_business_launch_plan",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "business_90_day_growth_plan",
+    "name": "business_90_day_growth_plan",
+    "category": "book_business",
+    "description": "Generate the book's three-month post-launch goals, milestones, KPIs and review gates.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for business 90 day growth plan.",
+    "useCases": [
+      "business 90 day growth plan",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for business 90 day growth plan."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.4,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/business-90-day-growth-plan",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-90-day-growth-plan",
+    "mcpTool": "business_90_day_growth_plan",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "business_risk_check",
+    "name": "business_risk_check",
+    "category": "book_business",
+    "description": "Diagnose the book's common mistakes from supplied signals; no unsupported probabilities are assigned.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for business risk check.",
+    "useCases": [
+      "business risk check",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for business risk check."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.2,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/business-risk-check",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-risk-check",
+    "mcpTool": "business_risk_check",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "final_business_plan_builder",
+    "name": "final_business_plan_builder",
+    "category": "book_business",
+    "description": "Assemble the book's final project plan from supplied business and financial inputs.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for final business plan builder.",
+    "useCases": [
+      "final business plan builder",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for final business plan builder."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.5,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/final-business-plan-builder",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/final-business-plan-builder",
+    "mcpTool": "final_business_plan_builder",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "oman_business_launch_advisor",
+    "name": "oman_business_launch_advisor",
+    "category": "book_business",
+    "description": "Combine readiness, idea validation, finance and launch logic for an Oman-oriented founder workflow.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for oman business launch advisor.",
+    "useCases": [
+      "oman business launch advisor",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for oman business launch advisor."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.5,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/oman-business-launch-advisor",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/oman-business-launch-advisor",
+    "mcpTool": "oman_business_launch_advisor",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "oman_business_plan_generator",
+    "name": "oman_business_plan_generator",
+    "category": "book_business",
+    "description": "Generate a premium structured business plan from supplied assumptions; not legal, tax, accounting or investment advice.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for oman business plan generator.",
+    "useCases": [
+      "oman business plan generator",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for oman business plan generator."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 1,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/oman-business-plan-generator",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/oman-business-plan-generator",
+    "mcpTool": "oman_business_plan_generator",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  },
+  {
+    "id": "oman_small_business_guide",
+    "name": "oman_small_business_guide",
+    "category": "book_business",
+    "description": "Answer a question using book-grounded frameworks; current legal, tax and regulatory details require official verification.",
+    "whenToUse": "Use when an agent needs the Creative Techno book framework for oman small business guide.",
+    "useCases": [
+      "oman small business guide",
+      "small business planning",
+      "Oman entrepreneurship"
+    ],
+    "recommendedFor": [
+      "Use when an agent needs the Creative Techno book framework for oman small business guide."
+    ],
+    "notFor": [],
+    "preferOver": [],
+    "selectionExamples": [],
+    "price": 0.15,
+    "currency": "USD",
+    "paymentProtocols": [
+      "x402"
+    ],
+    "restEndpoint": "https://api.rafidsystem.com/api/v1/book/oman-small-business-guide",
+    "x402Endpoint": "https://api.rafidsystem.com/api/v1/x402/book/oman-small-business-guide",
+    "mcpTool": "oman_small_business_guide",
+    "mcpAvailable": true,
+    "a2aAvailable": true,
+    "previewAvailable": false,
+    "idempotent": true,
+    "sideEffects": false
+  }
+]

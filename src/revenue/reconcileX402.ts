@@ -60,13 +60,17 @@ export async function reconcileSettledX402(input: ReconcileX402Input): Promise<R
 
   const row: RevenueSettlement = {
     ...candidate,
+    chainSettledAt: verification.chainSettledAt ?? null,
+    settlementRecordedAt: now,
+    settlementObservationLagMs: verification.chainSettledAt ? Math.max(0, Date.parse(now) - Date.parse(verification.chainSettledAt)) : null,
     reconciliationSource: "onchain",
     reconciledAt: now,
     auditMetadata: {
       source: "onchain",
       tokenContract: BASE_MAINNET_USDC,
       verificationStatus: verification.status,
-      checks: JSON.stringify(verification.checks)
+      checks: JSON.stringify(verification.checks),
+      timestampDrift: verification.chainSettledAt ? `${Math.max(0, Date.parse(now) - Date.parse(verification.chainSettledAt))}ms` : "unavailable"
     }
   };
   await input.ledger.record(row);

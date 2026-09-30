@@ -111,7 +111,7 @@ export function verifyL402Token(args: { header: string | undefined; rootKey: Buf
 }
 
 function errorBody(res: Response, code: string, message: string, extra: Record<string, unknown> = {}) {
-  return { success: false, error: { code, message }, ...extra, meta: { requestId: res.locals.requestId } };
+  return { success: false, error: { code, message }, ...extra, paymentJourneyId: res.locals.paymentJourneyId ?? null, meta: { requestId: res.locals.requestId, paymentJourneyId: res.locals.paymentJourneyId ?? null } };
 }
 
 /** Per-tool middleware for POST /api/v1/l402/<tool>. On success it sets res.locals.l402 and calls

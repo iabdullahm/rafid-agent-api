@@ -116,6 +116,15 @@ export function createMppRoutes(deps: { service: MppService; limiter: RequestHan
   const { service } = deps;
 
   const finish = (res: Response, result: MppResult) => {
+    const journeyId = typeof res.locals.paymentJourneyId === "string" ? res.locals.paymentJourneyId : null;
+    const attemptId = typeof res.locals.paymentAttemptId === "string" ? res.locals.paymentAttemptId : null;
+    const challengeRequestId = typeof res.locals.challengeRequestId === "string" ? res.locals.challengeRequestId : null;
+    if (journeyId) {
+      res.setHeader("X-Rafid-Payment-Journey", journeyId);
+      if (attemptId) res.setHeader("X-Rafid-Payment-Attempt", attemptId);
+      if (challengeRequestId) res.setHeader("X-Rafid-Payment-Challenge-Request", challengeRequestId);
+      result.body = { ...result.body, paymentJourneyId: journeyId, meta: { ...(result.body.meta as Record<string, unknown> | undefined), paymentJourneyId: journeyId, challengeRequestId } };
+    }
     if (result.executed) {
       res.locals.toolName = result.executed.tool;
       res.locals.channel = result.executed.channel;
@@ -134,9 +143,9 @@ export function createMppRoutes(deps: { service: MppService; limiter: RequestHan
     try {
       const result = await service.sessionManagement({
         sessionId: withSessionId ? String(req.params.sessionId) : undefined,
-        authorization: paymentAuthorization(req), url: requestUrl(req), requestId: requestIdOf(res)
+        authorization: paymentAuthorization(req), url: requestUrl(req), requestId: requestIdOf(res), paymentJourneyId: res.locals.paymentJourneyId, paymentAttemptId: res.locals.paymentAttemptId, challengeRequestId: res.locals.challengeRequestId
       });
-      if (result) { sendMppResult(res, result); return; }
+      if (result) { finish(res, result); return; }
       next();
     } catch (error) { next(error); }
   };
@@ -145,19 +154,19 @@ export function createMppRoutes(deps: { service: MppService; limiter: RequestHan
   const createLimiter = deps.sessionCreateLimiter ?? createMppSessionCreateLimiter(service.config);
 
   router.post(mppRoutes.charge, deps.limiter, toolBody, handle((req, res) => service.charge({
-    tool: String(req.params.tool), body: req.body, authorization: paymentAuthorization(req), url: requestUrl(req), requestId: requestIdOf(res)
+    tool: String(req.params.tool), body: req.body, authorization: paymentAuthorization(req), url: requestUrl(req), requestId: requestIdOf(res), paymentJourneyId: res.locals.paymentJourneyId, paymentAttemptId: res.locals.paymentAttemptId, challengeRequestId: res.locals.challengeRequestId
   })));
   router.post(mppRoutes.sessions, deps.limiter, management(false), createLimiter, mppJsonBody(), handle((req, res) => service.createSession({
     body: req.body, authorization: paymentAuthorization(req), url: requestUrl(req), requestId: requestIdOf(res),
-    clientKey: mppClientKey(service.config.secretKey, req)
+    clientKey: mppClientKey(service.config.secretKey, req), paymentJourneyId: res.locals.paymentJourneyId, paymentAttemptId: res.locals.paymentAttemptId, challengeRequestId: res.locals.challengeRequestId
   })));
   router.get(mppRoutes.session, deps.limiter, handle((req, res) => service.getSession({ sessionId: String(req.params.sessionId), requestId: requestIdOf(res) })));
   router.post(mppRoutes.sessionTool, deps.limiter, management(true), toolBody, handle((req, res) => service.callTool({
     sessionId: String(req.params.sessionId), tool: String(req.params.tool), body: req.body,
-    authorization: paymentAuthorization(req), idempotencyKey: req.header("idempotency-key"), url: requestUrl(req), requestId: requestIdOf(res)
+    authorization: paymentAuthorization(req), idempotencyKey: req.header("idempotency-key"), url: requestUrl(req), requestId: requestIdOf(res), paymentJourneyId: res.locals.paymentJourneyId, paymentAttemptId: res.locals.paymentAttemptId, challengeRequestId: res.locals.challengeRequestId
   })));
   router.post(mppRoutes.sessionClose, deps.limiter, mppJsonBody({ optional: true }), handle((req, res) => service.closeSession({
-    sessionId: String(req.params.sessionId), authorization: paymentAuthorization(req), requestId: requestIdOf(res), url: requestUrl(req)
+    sessionId: String(req.params.sessionId), authorization: paymentAuthorization(req), requestId: requestIdOf(res), url: requestUrl(req), paymentJourneyId: res.locals.paymentJourneyId, paymentAttemptId: res.locals.paymentAttemptId, challengeRequestId: res.locals.challengeRequestId
   })));
   // Maintenance: expire overdue pending/active sessions, reconcile settlements, purge old unpaid
   // rows. Vercel Cron calls it with GET + "Authorization: Bearer $CRON_SECRET". Idempotent and

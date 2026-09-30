@@ -74,6 +74,23 @@ export class PostgresRevenueLedger implements RevenueLedger {
          ADD COLUMN IF NOT EXISTS reconciliation_source text,
          ADD COLUMN IF NOT EXISTS reconciled_at timestamptz,
          ADD COLUMN IF NOT EXISTS audit_metadata jsonb`
+    )).then(() => this.pool.query(
+      `ALTER TABLE rafid_x402_settlements
+         ADD COLUMN IF NOT EXISTS payment_journey_id text,
+         ADD COLUMN IF NOT EXISTS payment_attempt_id text,
+         ADD COLUMN IF NOT EXISTS challenge_request_id text,
+         ADD COLUMN IF NOT EXISTS chain_settled_at timestamptz,
+         ADD COLUMN IF NOT EXISTS settlement_recorded_at timestamptz,
+         ADD COLUMN IF NOT EXISTS settlement_observation_lag_ms double precision,
+         ADD COLUMN IF NOT EXISTS is_internal_test boolean,
+         ADD COLUMN IF NOT EXISTS test_marker_hash text,
+         ADD COLUMN IF NOT EXISTS normalized_client text,
+         ADD COLUMN IF NOT EXISTS attribution_confidence text,
+         ADD COLUMN IF NOT EXISTS traffic_type text`
+    )).then(() => this.pool.query(
+      `CREATE INDEX IF NOT EXISTS rafid_x402_settlements_payment_journey_idx ON rafid_x402_settlements (payment_journey_id) WHERE payment_journey_id IS NOT NULL`
+    )).then(() => this.pool.query(
+      `CREATE INDEX IF NOT EXISTS rafid_x402_settlements_payment_attempt_idx ON rafid_x402_settlements (payment_attempt_id) WHERE payment_attempt_id IS NOT NULL`
     )).then(() => undefined);
   }
 
@@ -84,15 +101,19 @@ export class PostgresRevenueLedger implements RevenueLedger {
         request_id, tool_name, capability_name, amount_atomic, amount_decimal, amount_source,
         currency, network, asset, payer_address, pay_to_address, transaction_hash, status,
         facilitator, error_reason, payment_verified_at, settled_at, dedupe_key,
-        reconciliation_source, reconciled_at, audit_metadata, created_at
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
+        reconciliation_source, reconciled_at, audit_metadata, payment_journey_id, payment_attempt_id, challenge_request_id,
+        chain_settled_at, settlement_recorded_at, settlement_observation_lag_ms, is_internal_test, test_marker_hash, normalized_client, attribution_confidence, traffic_type, created_at
+      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32)
       ON CONFLICT (dedupe_key) DO NOTHING`,
       [
         input.requestId, input.toolName, input.capabilityName, input.amountAtomic, input.amountDecimal,
         input.amountSource, input.currency, input.network, input.asset, input.payerAddress,
         input.payToAddress, input.transactionHash, input.status, input.facilitator, input.errorReason,
         input.paymentVerifiedAt, input.settledAt, input.dedupeKey, input.reconciliationSource ?? null,
-        input.reconciledAt ?? null, input.auditMetadata ?? null, input.createdAt ?? new Date().toISOString()
+        input.reconciledAt ?? null, input.auditMetadata ?? null, input.paymentJourneyId ?? null, input.paymentAttemptId ?? null, input.challengeRequestId ?? null,
+        input.chainSettledAt ?? null, input.settlementRecordedAt ?? null, input.settlementObservationLagMs ?? null, input.isInternalTest ?? null,
+        input.testMarkerHash ?? null, input.normalizedClient ?? null, input.attributionConfidence ?? null, input.trafficType ?? null,
+        input.createdAt ?? new Date().toISOString()
       ]
     );
   }
@@ -128,7 +149,8 @@ export class PostgresRevenueLedger implements RevenueLedger {
 
 function rowToSettlement(r: Record<string, unknown>): RevenueSettlement {
   return {
-    requestId: r.request_id as string, toolName: r.tool_name as string, capabilityName: r.capability_name as string,
+    requestId: r.request_id as string, paymentJourneyId: r.payment_journey_id as string | null, paymentAttemptId: r.payment_attempt_id as string | null, challengeRequestId: r.challenge_request_id as string | null,
+    toolName: r.tool_name as string, capabilityName: r.capability_name as string,
     amountAtomic: r.amount_atomic as string | null,
     amountDecimal: r.amount_decimal === null ? null : Number(r.amount_decimal),
     amountSource: r.amount_source as RevenueSettlement["amountSource"],
@@ -141,6 +163,12 @@ function rowToSettlement(r: Record<string, unknown>): RevenueSettlement {
     dedupeKey: r.dedupe_key as string, createdAt: (r.created_at as Date).toISOString()
     , reconciliationSource: r.reconciliation_source === "onchain" ? "onchain" : undefined,
     reconciledAt: r.reconciled_at === null ? undefined : (r.reconciled_at as Date).toISOString(),
-    auditMetadata: (r.audit_metadata as Record<string, string> | null) ?? undefined
+    auditMetadata: (r.audit_metadata as Record<string, string> | null) ?? undefined,
+    chainSettledAt: r.chain_settled_at === null ? undefined : (r.chain_settled_at as Date).toISOString(),
+    settlementRecordedAt: r.settlement_recorded_at === null ? undefined : (r.settlement_recorded_at as Date).toISOString(),
+    settlementObservationLagMs: r.settlement_observation_lag_ms === null ? undefined : Number(r.settlement_observation_lag_ms),
+    isInternalTest: r.is_internal_test as boolean | null, testMarkerHash: r.test_marker_hash as string | null,
+    normalizedClient: r.normalized_client as string | null, attributionConfidence: r.attribution_confidence as string | null,
+    trafficType: r.traffic_type as string | null
   };
 }

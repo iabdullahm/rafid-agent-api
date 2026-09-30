@@ -228,7 +228,7 @@ function summarizeX402Window(windowEvents: readonly AnalyticsEvent[]): X402Windo
   for (const event of x402Events) {
     const tool = event.toolName ?? "unknown";
     const bucket = (byTool[tool] ??= { challenges: 0, settlementSuccess: 0, settlementFailure: 0 });
-    if (event.eventType === "challenge") bucket.challenges++;
+    if (event.eventType === "challenge" || event.eventType === "payment_challenge") bucket.challenges++;
     if (event.eventType === "settlement_success") {
       bucket.settlementSuccess++;
       if (event.amount !== null && event.currency) settledAmountByCurrency[event.currency] = Math.round(((settledAmountByCurrency[event.currency] ?? 0) + event.amount) * 10000) / 10000;
@@ -240,7 +240,7 @@ function summarizeX402Window(windowEvents: readonly AnalyticsEvent[]): X402Windo
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     .slice(0, MAX_RECENT_SETTLEMENTS)
     .map(e => ({ toolName: e.toolName, amount: e.amount, currency: e.currency, txHash: e.txHash!, at: e.createdAt }));
-  const challenges = x402Events.filter(e => e.eventType === "challenge");
+  const challenges = x402Events.filter(e => e.eventType === "challenge" || e.eventType === "payment_challenge");
   const guidanceVersions: Record<string, number> = {};
   const clients: Record<string, number> = {};
   for (const event of challenges) {
@@ -288,6 +288,13 @@ export interface CapabilityFunnelRow {
   previewTo402Conversion: number | null;
   paymentConversionAfter402: number | null;
   paymentToExecutionConversion: number | null;
+  /** Canonical post-correlation metrics. Legacy rows without a journey stay separate. */
+  paidJourneys: number;
+  executedPaidJourneys: number;
+  totalExecutions: number;
+  paidRetryCount: number;
+  executionAttemptCount: number;
+  legacyUncorrelatedPaid: number;
   presentedIsSurfaceImpression: true;
 }
 
@@ -297,9 +304,15 @@ export function summarizeCapabilityFunnel(events: readonly AnalyticsEvent[]): Re
   const rows: Record<string, CapabilityFunnelRow> = {};
   const get = (name: string) => rows[name] ??= {
     presented: 0, preview: 0, challenges402: 0, paid: 0, executed: 0, revenueUsd: 0,
+    paidJourneys: 0, executedPaidJourneys: 0, totalExecutions: 0, paidRetryCount: 0, executionAttemptCount: 0, legacyUncorrelatedPaid: 0,
     previewTo402Conversion: null, paymentConversionAfter402: null, paymentToExecutionConversion: null,
     presentedIsSurfaceImpression: true
   };
+  const paidJourneySets = new Map<string, Set<string>>();
+  const executedJourneySets = new Map<string, Set<string>>();
+  const settlementKeys = new Map<string, Set<string>>();
+  const executionEventKeys = new Map<string, Set<string>>();
+  const getSet = (map: Map<string, Set<string>>, name: string) => map.get(name) ?? (() => { const set = new Set<string>(); map.set(name, set); return set; })();
   for (const event of events) {
     if (event.category === "discovery" && event.eventType === "surface_requested") {
       for (const name of event.presentedCapabilities ?? []) get(name).presented++;
@@ -309,23 +322,76 @@ export function summarizeCapabilityFunnel(events: readonly AnalyticsEvent[]): Re
       // paid_capability_started is an attempt/conversion signal, not proof of payment completion.
     }
     if (event.category === "x402" && event.toolName) {
-      if (event.eventType === "challenge") get(event.toolName).challenges402++;
+      if (event.eventType === "challenge" || event.eventType === "payment_challenge") get(event.toolName).challenges402++;
       if (event.eventType === "settlement_success") {
-        const row = get(event.toolName); row.paid++;
-        if (event.amount !== null && event.currency === "USD") row.revenueUsd += event.amount;
+        const row = get(event.toolName);
+        const key = event.paymentJourneyId ?? event.txHash ?? `legacy:${event.createdAt}`;
+        if (!getSet(settlementKeys, event.toolName).has(key)) {
+          getSet(settlementKeys, event.toolName).add(key); row.paid++;
+          if (event.paymentJourneyId) getSet(paidJourneySets, event.toolName).add(event.paymentJourneyId);
+          else row.legacyUncorrelatedPaid++;
+          if (event.amount !== null && event.currency === "USD") row.revenueUsd += event.amount;
+        }
+      }
+      if (event.eventType === "paid_retry_received" && event.toolName) {
+        get(event.toolName).paidRetryCount++;
       }
     }
     if (event.category === "l402" && event.toolName && event.eventType === "settlement_success") get(event.toolName).paid++;
     if (event.category === "tool" && event.toolName) {
       const row = get(event.toolName);
-      if (event.success === true) row.executed++;
+      const isExecution = event.eventType === "invocation" || event.eventType === "execution_completed";
+      if (event.success === true && isExecution) {
+        const executionKey = event.paymentJourneyId ? `${event.paymentJourneyId}:${event.requestId ?? event.createdAt}` : `legacy:${event.createdAt}:${event.requestId ?? "none"}`;
+        if (!getSet(executionEventKeys, event.toolName).has(executionKey)) {
+          getSet(executionEventKeys, event.toolName).add(executionKey);
+          row.executed++;
+          row.totalExecutions++;
+          if (event.paymentJourneyId && event.paymentStatus === "paid") getSet(executedJourneySets, event.toolName).add(event.paymentJourneyId);
+          if (event.paymentJourneyId && event.paymentStatus === "paid" && event.eventType === "invocation") row.executionAttemptCount++;
+        }
+      }
       if (event.success === true && ["api_credits", "subscription", "mpp", "mpp-session"].includes(event.channel ?? "")) row.paid++;
     }
   }
   for (const row of Object.values(rows)) {
+    const tool = Object.entries(rows).find(([, candidate]) => candidate === row)?.[0];
+    if (tool) {
+      row.paidJourneys = paidJourneySets.get(tool)?.size ?? 0;
+      row.executedPaidJourneys = executedJourneySets.get(tool)?.size ?? 0;
+    }
     row.previewTo402Conversion = ratio(row.challenges402, row.preview);
     row.paymentConversionAfter402 = ratio(row.paid, row.challenges402);
-    row.paymentToExecutionConversion = ratio(row.executed, row.paid);
+    row.paymentToExecutionConversion = ratio(row.executedPaidJourneys, row.paidJourneys);
   }
+  return rows;
+}
+
+export interface SchemaFrictionRow {
+  requests: number;
+  validationFailures: number;
+  validationFailureRate: number | null;
+  missingRequiredFieldFailures: number;
+  invalidEnumFailures: number;
+  ambiguousEntityFailures: number;
+}
+
+/** Aggregates only explicit validation telemetry. A failed HTTP request is not assumed to be a
+ * schema failure unless the error middleware classified it, so payment/auth/provider failures do
+ * not inflate schema-friction rates. */
+export function summarizeSchemaFriction(events: readonly AnalyticsEvent[]): Record<string, SchemaFrictionRow> {
+  const rows: Record<string, SchemaFrictionRow> = {};
+  for (const event of events) {
+    if (event.category !== "tool" || !event.toolName) continue;
+    const row = rows[event.toolName] ??= { requests: 0, validationFailures: 0, validationFailureRate: null, missingRequiredFieldFailures: 0, invalidEnumFailures: 0, ambiguousEntityFailures: 0 };
+    row.requests++;
+    if (event.validationErrorCode) {
+      row.validationFailures++;
+      if (event.validationFailureKind === "missing_required_field") row.missingRequiredFieldFailures++;
+      if (event.validationFailureKind === "invalid_enum") row.invalidEnumFailures++;
+      if (event.validationFailureKind === "ambiguous_entity") row.ambiguousEntityFailures++;
+    }
+  }
+  for (const row of Object.values(rows)) row.validationFailureRate = ratio(row.validationFailures, row.requests);
   return rows;
 }

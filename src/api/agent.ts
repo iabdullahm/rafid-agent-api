@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { capabilities, capabilityCategory, discoveryCapabilities } from "../domain/capabilities.js";
+import { capabilities, capabilityCategory, discoveryCapabilities, toolSelectionMetadata } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
 import { prices } from "../billing/catalog.js";
 import { x402BasePath, x402DocsPath, X402_PAYMENT_GUIDANCE_VERSION } from "../billing/x402.js";
@@ -80,6 +80,15 @@ export const toolsBasePath = "/api/v1/tools";
 export const capabilitiesBasePath = "/api/v1/capabilities";
 export const subscriptionPlansPath = "/api/v1/subscription-plans";
 
+function categorySummary() {
+  const counts = new Map<string, number>();
+  for (const c of capabilities) {
+    const category = capabilityCategory(c);
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([id, count]) => ({ id, count }));
+}
+
 function summarizeOutput(schema: z.ZodType): string {
   const json = z.toJSONSchema(schema) as { properties?: Record<string, unknown> };
   const keys = Object.keys(json.properties ?? {});
@@ -145,6 +154,14 @@ export function buildAgentInfo(config: PaymentDiscoveryConfig, baseUrl?: string)
     ...(config.mpp?.enabled ? { mpp: mppBasePath, mppEnabled: true } : {}),
     payments: buildPaymentsSummary(config),
     paymentMethods: paymentMethodsPath,
+    discovery: {
+      index: "/api/v1/discovery",
+      search: "/api/v1/discovery/search?q=...",
+      intents: "/api/v1/discovery/intents",
+      publicTools: "/tools",
+      categories: categorySummary(),
+      methodology: "Use the deterministic discovery endpoints to narrow candidates; inspect the selected capability metadata before preview/payment."
+    },
     subscriptionPlans: subscriptionPlansPath,
     ...(railAvailability(config).billing ? { billing: buildAccountBillingSummary(config) } : {}),
     endpoints: discoveryCapabilities.map(c => "/api/v1" + c.path),
@@ -192,6 +209,7 @@ export function buildToolCatalog() {
     method: "POST",
     inputSchema: z.toJSONSchema(c.input),
     outputSummary: summarizeOutput(c.output)
+    ,selection: toolSelectionMetadata(c)
   }));
 }
 
@@ -214,6 +232,12 @@ export function buildCapabilitiesRegistry(config: PaymentDiscoveryConfig, baseUr
     // Optional capability category (e.g. "risk_intelligence"); null when a capability defines none.
     category: capabilityCategory(c),
     intents: c.useCases,
+    selection: toolSelectionMetadata(c),
+    hierarchy: toolSelectionMetadata(c).toolRole,
+    recommendedFor: toolSelectionMetadata(c).recommendedFor,
+    notFor: toolSelectionMetadata(c).notFor,
+    preferOver: toolSelectionMetadata(c).preferOver,
+    selectionExamples: toolSelectionMetadata(c).selectionExamples,
     whenToUse: c.whenToUse,
     useCases: c.useCases,
     price: c.price,
@@ -224,8 +248,13 @@ export function buildCapabilitiesRegistry(config: PaymentDiscoveryConfig, baseUr
     network: config.x402Enabled ? config.x402Network : null,
     idempotent: c.idempotent,
     sideEffects: c.sideEffects,
+    restEndpoint: absolute("/api/v1" + c.path),
     endpoint: absolute("/api/v1" + c.path),
     x402Endpoint: absolute(x402BasePath + c.path),
+    ...(config.l402Enabled ? { l402Endpoint: absolute(l402BasePath + c.path) } : {}),
+    mcpTool: c.name,
+    mcpAvailable: true,
+    a2aAvailable: true,
     // Additive (MPP rollout): every enabled payment rail for this tool, and the MPP charge route
     // when MPP charge mode is on. Session calls use POST /api/v1/mpp/sessions/{id}/tools/{name}.
     paymentMethods,
@@ -255,7 +284,7 @@ export function buildCapabilitiesRegistry(config: PaymentDiscoveryConfig, baseUr
           available: true,
           price: { amount: "0", currency: c.currency },
           endpoint: absolute(`${previewBasePath}/${c.name}`),
-          description: "Use this free preview before purchasing this capability, to verify that relevant data and analysis coverage are available. Recommended agent flow: discover -> preview -> evaluate -> pay -> execute. This does not reveal the paid analysis itself."
+          description: "Use this free preview before purchasing this capability, to verify that relevant data and analysis coverage are available. The response includes a leakageClass and a canonical nextAction.pay_and_retry contract; retry the same body after payment. Recommended agent flow: discover -> preview -> evaluate -> pay -> execute. This does not reveal the paid analysis itself."
         }
       : { available: false },
     method: "POST",

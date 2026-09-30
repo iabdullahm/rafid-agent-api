@@ -104,6 +104,14 @@ export interface AgentCapability {
   /** Short scenario keywords/phrases this tool answers — the same recommendation-layer intent
    *  as `whenToUse`, in list form for programmatic matching rather than prose. */
   useCases: readonly string[];
+  /** Machine-readable tool-selection guidance. These fields steer intent matching only; they
+   *  never disable a capability or create a dependency on another tool. */
+  toolRole?: "primary" | "supporting" | "specialized";
+  selectionPriority?: number;
+  recommendedFor?: readonly string[];
+  notFor?: readonly string[];
+  preferOver?: readonly string[];
+  selectionExamples?: readonly { use: string[]; doNotUse: string[] }[];
   input: z.ZodType;
   output: z.ZodType;
   example: unknown;
@@ -1120,7 +1128,7 @@ export const capabilities = [
     useCases: ["supplier onboarding", "vendor review", "procurement", "partnership screening", "investment screening", "marketplace onboarding", "customer risk"],
     category: "risk_intelligence",
     input: companyDueDiligenceInput, output: companyDueDiligenceOutput,
-    example: { company: "Example Trading Ltd", domain: "example.com", country: "GB", purpose: "supplier_onboarding" },
+    example: { company: "Example Trading Ltd", domain: "example.com", country: "GB", purpose: "supplier_onboarding", depth: "standard", checks: { registry: true, sanctions: true, adverseMedia: true, reputation: true, businessRisk: true } },
     exampleOutput: COMPANY_DUE_DILIGENCE_EXAMPLE_OUTPUT,
     execute: (input: unknown) => companyDueDiligence(input),
     preview: (input: unknown) => previewCompanyDueDiligenceCapability(input),
@@ -1604,3 +1612,117 @@ export const discoveryCapabilities = [...capabilities].sort((a, b) => {
   const bRank = DISCOVERY_CATEGORY_ORDER.indexOf(bCategory as typeof DISCOVERY_CATEGORY_ORDER[number]);
   return (aRank - bRank) || aCategory.localeCompare(bCategory) || a.name.localeCompare(b.name);
 });
+
+export type ToolRole = "primary" | "supporting" | "specialized";
+export interface ToolSelectionMetadata {
+  toolRole: ToolRole;
+  selectionPriority: number;
+  intents: readonly string[];
+  recommendedFor: readonly string[];
+  notFor: readonly string[];
+  preferOver: readonly string[];
+  selectionExamples: readonly { use: string[]; doNotUse: string[] }[];
+}
+
+/** Category-level hierarchy used by every discovery surface. It is guidance only: all tools
+ * remain callable and no capability is hidden because another tool is primary. */
+export const TOOL_SELECTION_HIERARCHY: Readonly<Record<string, {
+  primary: string;
+  supporting: readonly string[];
+  specialized: readonly string[];
+}>> = Object.freeze({
+  risk_intelligence: { primary: "company_due_diligence", supporting: ["business_risk_score", "company_reputation_check", "research_company"], specialized: ["company_risk_batch", "company_risk_report", "due_diligence_oman_company", "analyze_company_risk"] },
+  finance_risk: { primary: "invoice_anomaly_check", supporting: [], specialized: [] },
+  document_intelligence: { primary: "document_facts_extract", supporting: [], specialized: [] },
+  automotive: { primary: "vehicle_value_estimate", supporting: [], specialized: [] },
+  logistics: { primary: "shipping_cost_estimate", supporting: [], specialized: [] },
+  property: { primary: "analyze_oman_property", supporting: ["analyze_property", "compare_properties"], specialized: ["portfolio_screen", "property_investment_report", "estimate_maintenance"] },
+  website_services: { primary: "website_audit", supporting: ["website_project_estimate"], specialized: ["website_download"] },
+  recruitment: { primary: "cv_score", supporting: ["cv_job_match", "extract_candidate_profile"], specialized: ["cv_improve", "generate_job_profile", "candidate_shortlist_score"] },
+  supplier: { primary: "oman_supplier_check", supporting: ["supplier_due_diligence_report"], specialized: ["procurement_vendor_shortlist"] },
+  trading: { primary: "trade_risk_score", supporting: ["portfolio_exposure_check", "trade_log_analysis"], specialized: ["strategy_performance_analysis"] },
+  voice: { primary: "voice_lead_qualifier", supporting: [], specialized: ["ai_call_agent", "appointment_call_agent"] },
+  video_generation: { primary: "social_video_generate", supporting: [], specialized: ["news_video_generate", "product_promo_video"] },
+  book_business: { primary: "business_idea_validate", supporting: ["business_risk_check", "product_pricing_calculator"], specialized: ["business_90_day_growth_plan", "final_business_plan_builder", "oman_business_launch_plan"] },
+  other: { primary: "", supporting: [], specialized: [] }
+});
+
+const CURATED_SELECTION: Readonly<Record<string, Partial<ToolSelectionMetadata>>> = Object.freeze({
+  company_due_diligence: {
+    recommendedFor: ["before onboarding a supplier", "before signing a commercial agreement", "before paying an unfamiliar company"],
+    notFor: ["simple company search", "stock price lookup", "basic website lookup"],
+    selectionExamples: [{ use: ["Should I onboard Acme LLC as a supplier?", "Check this company before we pay their first invoice.", "Run due diligence on example.com."], doNotUse: ["Find companies in Oman.", "What is Microsoft's stock price?"] }]
+  },
+  business_risk_score: {
+    recommendedFor: ["structured risk score and action for a company", "automated transaction guardrails", "supplier or vendor risk screening"],
+    notFor: ["public reputation only", "finding companies", "stock or market-price lookup"],
+    preferOver: ["company_reputation_check"],
+    selectionExamples: [{ use: ["Can we safely transact with this business?", "Score this vendor before onboarding."], doNotUse: ["Find local suppliers.", "Extract fields from this contract."] }]
+  },
+  company_reputation_check: {
+    recommendedFor: ["public reputation and adverse-media screening", "sanctions name screening", "global company credibility checks"],
+    notFor: ["a deterministic business risk decision", "finding companies", "invoice arithmetic"],
+    selectionExamples: [{ use: ["Check this company for negative news.", "Screen this counterparty's public reputation."], doNotUse: ["Should we approve payment automatically?", "Calculate invoice tax."] }]
+  },
+  invoice_anomaly_check: {
+    recommendedFor: ["invoice review before payment", "duplicate and arithmetic checks", "PO, contract and supplier-history comparison"],
+    notFor: ["company-level due diligence", "extracting arbitrary document facts", "carrier shipping quotes"],
+    selectionExamples: [{ use: ["Check this invoice before paying it.", "Is this invoice a duplicate?", "Does it exceed the purchase order?"], doNotUse: ["Screen the supplier's sanctions status.", "Estimate a vehicle value."] }]
+  },
+  vehicle_value_estimate: {
+    recommendedFor: ["fair-market vehicle valuation", "asking-price and trade-in checks", "fleet or insurance valuation"],
+    notFor: ["vehicle inspection", "vehicle history verification", "shipping cost estimation"],
+    selectionExamples: [{ use: ["Is this 2022 Land Cruiser fairly priced?", "Estimate the trade-in value of this car."], doNotUse: ["Check whether the vehicle was in an accident.", "Calculate freight cost."] }]
+  },
+  shipping_cost_estimate: {
+    recommendedFor: ["route and shipment cost estimation", "chargeable-weight planning", "choosing a service level"],
+    notFor: ["customs or tax determination", "a guaranteed carrier quote", "vehicle valuation"],
+    selectionExamples: [{ use: ["Estimate shipping from Muscat to Dubai.", "Compare express and economy delivery."], doNotUse: ["Calculate import duties.", "Audit the supplier website."] }]
+  },
+  document_facts_extract: {
+    recommendedFor: ["evidence-backed extraction from a supplied document", "contract, invoice or tender fact capture"],
+    notFor: ["general company due diligence without a document", "legal advice", "unprovided document research"],
+    selectionExamples: [{ use: ["Extract the expiry date from this contract.", "List the tender deadline and mandatory documents."], doNotUse: ["Investigate this company online.", "Decide whether to pay the supplier."] }]
+  },
+  website_audit: {
+    recommendedFor: ["passive technical, SEO, accessibility and security checks for a public HTTPS site"],
+    notFor: ["estimating a build budget", "penetration testing", "company reputation screening"],
+    selectionExamples: [{ use: ["Audit this website before we rebuild it.", "Find measurable SEO and accessibility issues."], doNotUse: ["Estimate the project cost.", "Check the company sanctions status."] }]
+  },
+  website_project_estimate: {
+    recommendedFor: ["transparent website build or remediation estimates", "scope, timeline and effort planning"],
+    notFor: ["measuring live website defects", "a fixed quotation", "company due diligence"],
+    selectionExamples: [{ use: ["Estimate the cost to rebuild this website.", "How long would this multilingual portal take?"], doNotUse: ["Audit this live site's security headers.", "Screen the company before payment."] }]
+  },
+  analyze_oman_property: {
+    recommendedFor: ["Oman-specific property analysis with local comparables", "Al Mouj or Muscat rental and sale positioning"],
+    notFor: ["a property outside the supported Oman market", "a simple yield calculation with supplied numbers"],
+    selectionExamples: [{ use: ["Analyze this Al Mouj investment.", "Compare this Muscat property's rent and sale position."], doNotUse: ["Calculate yield from these numbers only.", "Estimate website costs."] }]
+  },
+  analyze_property: {
+    recommendedFor: ["simple single-property yield, income and payback arithmetic"],
+    notFor: ["live Oman market comparables", "multi-property portfolio screening", "company risk"],
+    selectionExamples: [{ use: ["Calculate gross and net yield for this property.", "What is the simple payback?"], doNotUse: ["Find Muscat comparables.", "Screen the property seller."] }]
+  },
+  oman_supplier_check: {
+    recommendedFor: ["screening an Oman supplier before an RFQ or onboarding", "identity, activity and contact consistency checks"],
+    notFor: ["global company screening", "a final procurement approval", "finding suppliers from scratch"],
+    selectionExamples: [{ use: ["Should we add this Oman supplier to the RFQ?", "Does this supplier's activity match CCTV installation?"], doNotUse: ["Find suppliers in Oman.", "Check a UK company's reputation."] }]
+  }
+});
+
+export function toolSelectionMetadata(capability: { name: string; useCases: readonly string[]; whenToUse: string; path: string; category?: string }): ToolSelectionMetadata {
+  const category = capabilityCategory(capability);
+  const hierarchy = TOOL_SELECTION_HIERARCHY[category] ?? TOOL_SELECTION_HIERARCHY.other;
+  const role: ToolRole = capability.name === hierarchy.primary ? "primary" : hierarchy.specialized.includes(capability.name) ? "specialized" : "supporting";
+  const curated = CURATED_SELECTION[capability.name] ?? {};
+  return {
+    toolRole: curated.toolRole ?? role,
+    selectionPriority: curated.selectionPriority ?? (role === "primary" ? 100 : role === "supporting" ? 60 : 30),
+    intents: capability.useCases,
+    recommendedFor: curated.recommendedFor ?? [capability.whenToUse],
+    notFor: curated.notFor ?? [],
+    preferOver: curated.preferOver ?? (role === "primary" ? hierarchy.supporting : []),
+    selectionExamples: curated.selectionExamples ?? []
+  };
+}

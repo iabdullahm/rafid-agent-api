@@ -127,6 +127,8 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
         const resource = context.adapter.getUrl();
         const docs = new URL(x402DocsPath, resource).toString();
         const requestId = context.adapter.getHeader("x-rafid-request-id") ?? null;
+        const paymentJourneyId = context.adapter.getHeader("x-rafid-payment-journey") ?? null;
+        const challengeRequestId = requestId;
         let assetContract: string | null = null;
         let assetDecimals: number | null = null;
         try {
@@ -173,6 +175,9 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
               header: "X-PAYMENT",
               preserveRequestBody: true,
               retrySameBody: true,
+              paymentJourneyId,
+              challengeRequestId,
+              headers: { "X-Rafid-Payment-Journey": paymentJourneyId, "X-Rafid-Payment-Challenge-Request": challengeRequestId },
               instructions: "Use an x402-compatible client or SDK to create the payment, attach its X-PAYMENT header, and retry the same method, URL, and JSON body."
             },
             nextAction: {
@@ -180,7 +185,9 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
               protocol: "x402",
               method: context.method,
               url: resource,
-              retrySameBody: true
+              retrySameBody: true,
+              paymentJourneyId,
+              challengeRequestId
             },
             clients: {
               recommended: ["@x402/fetch", "@x402/evm"],
@@ -190,6 +197,8 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
             },
             docs,
             requestId,
+            paymentJourneyId,
+            challengeRequestId,
             paymentSupportRequired: true,
             supportedProtocols: ["x402"],
             unsupportedClientAction: "Use an x402-compatible client or SDK; do not retry unpaid requests repeatedly."
@@ -280,7 +289,21 @@ export function buildX402Info(config: X402Config, billing: BillingService) {
     asset: config.x402Enabled ? "USDC" : null,
     docs: x402DocsPath,
     executionFlow: ["POST without payment", "parse PAYMENT-REQUIRED", "pay exact requirement", "retry same request with X-PAYMENT"],
-    tools: discoveryCapabilities.map(c => ({ name: c.name, endpoint: x402BasePath + c.path, price: billing.getToolPrice(c.name) }))
+    tools: discoveryCapabilities.map(c => ({
+      name: c.name,
+      capability: c.name,
+      purpose: c.whenToUse,
+      description: c.description,
+      endpoint: x402BasePath + c.path,
+      method: "POST",
+      price: billing.getToolPrice(c.name),
+      currency: c.currency,
+      network: config.x402Enabled ? config.x402Network : null,
+      asset: config.x402Enabled ? "USDC" : null,
+      inputSchema: z.toJSONSchema(c.input),
+      paymentRequired: c.price > 0 && config.x402Enabled,
+      retry: "Parse PAYMENT-REQUIRED, pay the exact requirement, then retry the same method, URL and JSON body with X-PAYMENT."
+    }))
   };
 }
 

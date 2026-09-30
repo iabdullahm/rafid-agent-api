@@ -6,6 +6,6 @@
 export const VEHICLE_EXAMPLE_INPUT = {
   make: "Toyota", model: "Land Cruiser", year: 2022, trim: "GXR", mileageKm: 68000, condition: "good",
   country: "Oman", city: "Muscat", currency: "OMR", fuelType: "petrol", transmission: "automatic", bodyType: "suv",
-  engine: "4.0L V6", drivetrain: "4WD", accidentHistory: false, serviceHistory: "full", owners: 1, color: "white",
+  engine: "4.0L V6", drivetrain: "4wd", accidentHistory: false, serviceHistory: "full", owners: 1, color: "white",
   options: ["sunroof", "leather seats", "360 camera"], askingPrice: 22500
 };

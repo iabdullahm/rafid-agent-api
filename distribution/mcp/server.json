@@ -1,0 +1,21 @@
+{
+  "name": "io.github.iabdullahm/rafid-agent-api",
+  "title": "Rafid Intelligence Network",
+  "description": "Rafid Agent API provides structured intelligence and paid APIs for AI agents across property, company and risk, supplier, finance, document, website, automotive, logistics, recruitment, trading, voice, video and business-planning workflows.",
+  "version": "0.1.2",
+  "websiteUrl": "https://api.rafidsystem.com",
+  "repository": {
+    "url": "https://github.com/iabdullahm/rafid-agent-api",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.rafidsystem.com/mcp"
+    }
+  ],
+  "stdio": {
+    "command": "npm run mcp"
+  },
+  "metadataSource": "src/domain/capabilities.ts"
+}

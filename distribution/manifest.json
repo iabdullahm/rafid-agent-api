@@ -1,26 +1,17 @@
 {
   "name": "Rafid Intelligence Network",
-  "tagline": "Property intelligence built for AI agents.",
-  "description": "Property and facility intelligence tools built for autonomous AI agents: discover a capability, pay per call over x402 (or authenticate with an API key), execute, get a structured result. Not designed primarily as a human dashboard product.",
+  "tagline": "Rafid Agent API — structured intelligence and paid tools for AI agents.",
+  "description": "Rafid Agent API provides structured intelligence and paid APIs for AI agents across property, company and risk, supplier, finance, document, website, automotive, logistics, recruitment, trading, voice, video and business-planning workflows.",
   "baseUrl": "https://api.rafidsystem.com",
   "version": "0.1.0",
   "audience": "ai-agents",
   "discovery": {
-    "agentManifest": "/agent.json",
-    "aiPlugin": "/.well-known/ai-plugin.json",
-    "a2aAgentCard": "/.well-known/agent.json",
-    "llmsTxt": "/llms.txt",
-    "capabilities": "/api/v1/capabilities",
-    "tools": "/api/v1/tools",
-    "pricing": "/api/v1/pricing",
-    "agentInfo": "/api/v1/agent",
-    "openapi": "/openapi.json",
-    "docs": "/docs",
-    "health": "/api/v1/health",
-    "mcpStatus": "/api/v1/mcp/status",
-    "mcpRemote": "/mcp",
-    "x402Info": "/api/v1/x402",
-    "x402Status": "/api/v1/x402/status"
+    "index": "/api/v1/discovery",
+    "search": "/api/v1/discovery/search?q=...",
+    "intents": "/api/v1/discovery/intents",
+    "publicTools": "/tools",
+    "robots": "/robots.txt",
+    "sitemap": "/sitemap.xml"
   },
   "protocols": [
     "mcp",
@@ -60,6 +51,38 @@
       "price": 0.01,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "property",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "property investment analysis",
+          "rental yield check",
+          "single-property evaluation",
+          "buy vs. hold financial screening"
+        ],
+        "recommendedFor": [
+          "simple single-property yield, income and payback arithmetic"
+        ],
+        "notFor": [
+          "live Oman market comparables",
+          "multi-property portfolio screening",
+          "company risk"
+        ],
+        "preferOver": [],
+        "selectionExamples": [
+          {
+            "use": [
+              "Calculate gross and net yield for this property.",
+              "What is the simple payback?"
+            ],
+            "doNotUse": [
+              "Find Muscat comparables.",
+              "Screen the property seller."
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/property/analyze",
@@ -83,6 +106,23 @@
       "price": 0.03,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "property",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "property comparison",
+          "ranking multiple properties",
+          "portfolio shortlisting",
+          "choosing between investment options"
+        ],
+        "recommendedFor": [
+          "Use when an agent must rank or choose between 2-20 candidate properties by net yield."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/property/compare",
@@ -106,6 +146,23 @@
       "price": 0.02,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "property",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "maintenance budgeting",
+          "annual reserve estimation",
+          "facility cost planning",
+          "pre-purchase cost forecasting"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs an annual maintenance reserve estimate for a property, not an actual inspection."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/maintenance/estimate",
@@ -130,6 +187,42 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "property",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "Oman rental investment analysis",
+          "Muscat property market comparison",
+          "Al Mouj Muscat sale price positioning",
+          "rental yield with local comparables",
+          "Oman price-per-sqm benchmarking"
+        ],
+        "recommendedFor": [
+          "Oman-specific property analysis with local comparables",
+          "Al Mouj or Muscat rental and sale positioning"
+        ],
+        "notFor": [
+          "a property outside the supported Oman market",
+          "a simple yield calculation with supplied numbers"
+        ],
+        "preferOver": [
+          "analyze_property",
+          "compare_properties"
+        ],
+        "selectionExamples": [
+          {
+            "use": [
+              "Analyze this Al Mouj investment.",
+              "Compare this Muscat property's rent and sale position."
+            ],
+            "doNotUse": [
+              "Calculate yield from these numbers only.",
+              "Estimate website costs."
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/oman/property/analyze",
@@ -194,6 +287,23 @@
       "price": 0.05,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "find a company in Oman",
+          "resolve a company name to a companyId",
+          "look up a business by registration number",
+          "shortlist companies by industry or governorate"
+        ],
+        "recommendedFor": [
+          "Use before company analysis or due diligence when the exact company identity is uncertain, or to find candidate Oman companies matching a name or registration number."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/business/search",
@@ -216,6 +326,22 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "get company details",
+          "look up a company's registration and contact information",
+          "check what sources back a company record"
+        ],
+        "recommendedFor": [
+          "Use after search_oman_company resolves a companyId, to retrieve the company's structured profile before deciding whether deeper analysis or due diligence is warranted."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/business/profile",
@@ -239,6 +365,23 @@
       "price": 0.75,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "assess a company before doing business with it",
+          "supplier risk screening",
+          "partner or investor evaluation",
+          "commercial intelligence on an Oman business"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs to assess whether an Oman company looks like a serious, established operating business — as a supplier, customer, partner or investment target."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/business/analyze",
@@ -262,6 +405,23 @@
       "price": 2,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "pre-contract supplier due diligence",
+          "partnership due diligence",
+          "investment due diligence",
+          "customer credit risk screening"
+        ],
+        "recommendedFor": [
+          "Use before awarding a contract, entering a partnership, extending credit or investing, when a structured, source-backed due-diligence pass is needed ahead of the decision."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/business/due-diligence",
@@ -285,6 +445,23 @@
       "price": 0.15,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "company background research",
+          "sales prospect research",
+          "investment/competitor research",
+          "build a company profile from public web sources"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs a structured research brief on a named company — for sales/investment/partnership research, competitive analysis, or general company background — beyond what a structured company registry alone provides."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/intelligence/research-company",
@@ -333,6 +510,23 @@
       "price": 0.05,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "find companies in an industry or location",
+          "build a prospect/lead list",
+          "market landscape scan",
+          "shortlist potential partners or suppliers by criteria"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs to discover a list of candidate companies matching criteria (industry, location, size, keywords) rather than analyze one already-known company."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/intelligence/find-companies",
@@ -356,6 +550,23 @@
       "price": 0.35,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "pre-transaction risk screening",
+          "vendor/partner risk check",
+          "sanctions name-matching indicator",
+          "adverse media / reputation check"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs risk evidence to weigh before a transaction, partnership, or onboarding decision — not a substitute for compliance/legal sign-off."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/intelligence/analyze-company-risk",
@@ -380,6 +591,42 @@
       "price": 0.5,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "supplier",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "pre-RFQ supplier screening",
+          "vendor shortlist check",
+          "supplier onboarding screening",
+          "check whether a supplier's activity matches the required product or service",
+          "detect identity or contact inconsistencies before procurement contact"
+        ],
+        "recommendedFor": [
+          "screening an Oman supplier before an RFQ or onboarding",
+          "identity, activity and contact consistency checks"
+        ],
+        "notFor": [
+          "global company screening",
+          "a final procurement approval",
+          "finding suppliers from scratch"
+        ],
+        "preferOver": [
+          "supplier_due_diligence_report"
+        ],
+        "selectionExamples": [
+          {
+            "use": [
+              "Should we add this Oman supplier to the RFQ?",
+              "Does this supplier's activity match CCTV installation?"
+            ],
+            "doNotUse": [
+              "Find suppliers in Oman.",
+              "Check a UK company's reputation."
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/procurement/oman-supplier-check",
@@ -453,6 +700,44 @@
       "price": 0.4,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "check a company before signing a contract",
+          "vendor / SaaS vendor onboarding",
+          "check a counterparty before sending payment",
+          "partner or investment pre-screening",
+          "marketplace seller approval",
+          "contractor or supplier selection (any country)",
+          "negative news / adverse media check",
+          "sanctions name screening of a company"
+        ],
+        "recommendedFor": [
+          "public reputation and adverse-media screening",
+          "sanctions name screening",
+          "global company credibility checks"
+        ],
+        "notFor": [
+          "a deterministic business risk decision",
+          "finding companies",
+          "invoice arithmetic"
+        ],
+        "preferOver": [],
+        "selectionExamples": [
+          {
+            "use": [
+              "Check this company for negative news.",
+              "Screen this counterparty's public reputation."
+            ],
+            "doNotUse": [
+              "Should we approve payment automatically?",
+              "Calculate invoice tax."
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/risk/company-reputation-check",
@@ -542,6 +827,47 @@
       "price": 0.5,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "Before onboarding a supplier or vendor",
+          "Before paying a new business",
+          "Before entering a B2B transaction",
+          "Before recommending a company to a user",
+          "Before approving a marketplace seller",
+          "When evaluating company compliance or reputation risk",
+          "When an autonomous agent needs structured business due diligence",
+          "lending / credit pre-screening",
+          "insurance underwriting pre-check"
+        ],
+        "recommendedFor": [
+          "structured risk score and action for a company",
+          "automated transaction guardrails",
+          "supplier or vendor risk screening"
+        ],
+        "notFor": [
+          "public reputation only",
+          "finding companies",
+          "stock or market-price lookup"
+        ],
+        "preferOver": [
+          "company_reputation_check"
+        ],
+        "selectionExamples": [
+          {
+            "use": [
+              "Can we safely transact with this business?",
+              "Score this vendor before onboarding."
+            ],
+            "doNotUse": [
+              "Find local suppliers.",
+              "Extract fields from this contract."
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/risk/business-risk-score",
@@ -644,6 +970,24 @@
       "price": 1.5,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "video_generation",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "social video",
+          "TikTok video",
+          "Instagram Reel",
+          "YouTube Short",
+          "short-form video"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs a publish-ready TikTok, Reel, Short or generic social video from a topic or script."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": true,
       "endpoint": "/api/v1/video/social-generate",
@@ -667,6 +1011,23 @@
       "price": 1.5,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "video_generation",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "news video",
+          "factual news video",
+          "vertical news",
+          "news short"
+        ],
+        "recommendedFor": [
+          "Use when an agent already has a verified headline, summary, facts and source URLs and needs a short news video."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": true,
       "endpoint": "/api/v1/video/news-generate",
@@ -690,6 +1051,23 @@
       "price": 2,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "video_generation",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "product promo video",
+          "marketing video",
+          "product advertisement",
+          "service promotion"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs a publish-ready product or service promotion from structured marketing input."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": true,
       "endpoint": "/api/v1/video/product-promo",
@@ -716,6 +1094,48 @@
       "price": 1.5,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "supplier onboarding",
+          "vendor review",
+          "procurement",
+          "partnership screening",
+          "investment screening",
+          "marketplace onboarding",
+          "customer risk"
+        ],
+        "recommendedFor": [
+          "before onboarding a supplier",
+          "before signing a commercial agreement",
+          "before paying an unfamiliar company"
+        ],
+        "notFor": [
+          "simple company search",
+          "stock price lookup",
+          "basic website lookup"
+        ],
+        "preferOver": [
+          "business_risk_score",
+          "company_reputation_check",
+          "research_company"
+        ],
+        "selectionExamples": [
+          {
+            "use": [
+              "Should I onboard Acme LLC as a supplier?",
+              "Check this company before we pay their first invoice.",
+              "Run due diligence on example.com."
+            ],
+            "doNotUse": [
+              "Find companies in Oman.",
+              "What is Microsoft's stock price?"
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/risk/company-due-diligence",
@@ -786,6 +1206,46 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "document_intelligence",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "Read this supplier contract and tell me its expiry date, payment terms and termination notice period",
+          "Extract invoice number, due date, totals and bank details before paying an invoice",
+          "Check an invoice's subtotal + tax against its total",
+          "List a tender's submission deadline, eligibility requirements, mandatory documents and evaluation criteria",
+          "Extract rent, deposit, lease dates and notice period from a lease",
+          "Find auto-renewal, penalty and liability clauses in an agreement",
+          "Turn a purchase order into line items, quantities and delivery deadline",
+          "Answer targeted questions about a document with evidence (requestedFacts)",
+          "Contract review pre-screening",
+          "Accounts-payable automation",
+          "Procurement / tender screening"
+        ],
+        "recommendedFor": [
+          "evidence-backed extraction from a supplied document",
+          "contract, invoice or tender fact capture"
+        ],
+        "notFor": [
+          "general company due diligence without a document",
+          "legal advice",
+          "unprovided document research"
+        ],
+        "preferOver": [],
+        "selectionExamples": [
+          {
+            "use": [
+              "Extract the expiry date from this contract.",
+              "List the tender deadline and mandatory documents."
+            ],
+            "doNotUse": [
+              "Investigate this company online.",
+              "Decide whether to pay the supplier."
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/documents/facts-extract",
@@ -877,6 +1337,50 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "finance_risk",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "Check this invoice before I pay it",
+          "Is this invoice a duplicate of one we already received or paid?",
+          "Did the supplier's bank account change?",
+          "Does the invoice exceed the purchase order or contract?",
+          "Are these invoices split to stay under the approval limit?",
+          "Verify invoice arithmetic (quantity × unit price, subtotal, tax, total)",
+          "Accounts-payable automation guardrail",
+          "Pre-payment fraud prevention (invoice redirection / BEC)",
+          "Three-way-match pre-check (invoice vs purchase order)",
+          "Audit sampling and reconciliation",
+          "finance",
+          "accounts-payable",
+          "procurement"
+        ],
+        "recommendedFor": [
+          "invoice review before payment",
+          "duplicate and arithmetic checks",
+          "PO, contract and supplier-history comparison"
+        ],
+        "notFor": [
+          "company-level due diligence",
+          "extracting arbitrary document facts",
+          "carrier shipping quotes"
+        ],
+        "preferOver": [],
+        "selectionExamples": [
+          {
+            "use": [
+              "Check this invoice before paying it.",
+              "Is this invoice a duplicate?",
+              "Does it exceed the purchase order?"
+            ],
+            "doNotUse": [
+              "Screen the supplier's sanctions status.",
+              "Estimate a vehicle value."
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/finance/invoice-anomaly-check",
@@ -968,6 +1472,50 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "automotive",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "Estimate the current market value of a used vehicle",
+          "Is this asking price above, below or near market?",
+          "Estimate private-sale value",
+          "Estimate dealer acquisition / trade-in value",
+          "Estimate dealer retail value",
+          "Assess depreciation",
+          "Compare a vehicle with similar market listings",
+          "Vehicle purchase decision support",
+          "Auto-finance and loan-to-value checks",
+          "Insurance valuation workflows",
+          "Fleet and leasing residual checks",
+          "Dealership software",
+          "Vehicle marketplaces and auction platforms",
+          "automotive"
+        ],
+        "recommendedFor": [
+          "fair-market vehicle valuation",
+          "asking-price and trade-in checks",
+          "fleet or insurance valuation"
+        ],
+        "notFor": [
+          "vehicle inspection",
+          "vehicle history verification",
+          "shipping cost estimation"
+        ],
+        "preferOver": [],
+        "selectionExamples": [
+          {
+            "use": [
+              "Is this 2022 Land Cruiser fairly priced?",
+              "Estimate the trade-in value of this car."
+            ],
+            "doNotUse": [
+              "Check whether the vehicle was in an accident.",
+              "Calculate freight cost."
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/automotive/vehicle-value-estimate",
@@ -1046,6 +1594,23 @@
       "price": 0.75,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "website_services",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "download website",
+          "mirror website",
+          "offline website archive",
+          "save public website"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs an offline mirror of a public website and its frontend assets."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": false,
       "sideEffects": true,
       "endpoint": "/api/v1/websites/download",
@@ -1069,6 +1634,23 @@
       "price": 0.1,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "recruitment",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "CV parsing",
+          "resume extraction",
+          "candidate profile",
+          "ATS normalization"
+        ],
+        "recommendedFor": [
+          "Use before scoring or matching a CV when an agent needs reusable structured candidate evidence."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/recruitment/extract-candidate-profile",
@@ -1091,6 +1673,22 @@
       "price": 0.1,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "recruitment",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "job description parsing",
+          "job requirements",
+          "ATS job profile"
+        ],
+        "recommendedFor": [
+          "Use before candidate matching or shortlisting when an agent needs a structured job requirement profile."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/recruitment/generate-job-profile",
@@ -1113,6 +1711,25 @@
       "price": 0.2,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "recruitment",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "CV quality score",
+          "resume review",
+          "ATS readability"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs general CV quality feedback independent of a specific job."
+        ],
+        "notFor": [],
+        "preferOver": [
+          "cv_job_match",
+          "extract_candidate_profile"
+        ],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/recruitment/cv-score",
@@ -1135,6 +1752,22 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "recruitment",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "CV job match",
+          "candidate fit",
+          "skill gap analysis"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs evidence-based candidate-to-job matching for one candidate."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/recruitment/cv-job-match",
@@ -1157,6 +1790,22 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "recruitment",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "CV improvement",
+          "resume rewrite guidance",
+          "ATS optimization"
+        ],
+        "recommendedFor": [
+          "Use when a candidate or recruitment agent needs actionable CV improvement guidance."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/recruitment/cv-improve",
@@ -1179,6 +1828,22 @@
       "price": 0.1,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "recruitment",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "candidate shortlist",
+          "batch CV ranking",
+          "recruitment screening"
+        ],
+        "recommendedFor": [
+          "Use after extracting multiple candidate profiles when an agent needs transparent batch comparison against one job."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/recruitment/candidate-shortlist-score",
@@ -1204,6 +1869,25 @@
       "price": 0.35,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "trading",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "strategy performance",
+          "backtest results",
+          "trade statistics",
+          "drawdown analysis",
+          "profit factor",
+          "expectancy"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs deterministic historical performance analysis for a supplied trading strategy or trade set."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/trading/strategy-performance-analysis",
@@ -1228,6 +1912,27 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "trading",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "trade risk",
+          "position sizing",
+          "risk reward",
+          "pre-trade check",
+          "leverage check"
+        ],
+        "recommendedFor": [
+          "Use before an agent recommends or executes a trade and needs an auditable risk score rather than an opaque model judgment."
+        ],
+        "notFor": [],
+        "preferOver": [
+          "portfolio_exposure_check",
+          "trade_log_analysis"
+        ],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/trading/trade-risk-score",
@@ -1252,6 +1957,24 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "trading",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "portfolio exposure",
+          "concentration check",
+          "gross exposure",
+          "net exposure",
+          "margin usage"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs to assess portfolio concentration or directional exposure before adding or modifying a position."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/trading/portfolio-exposure-check",
@@ -1276,6 +1999,24 @@
       "price": 0.3,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "trading",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "trade log",
+          "execution history",
+          "trading behavior",
+          "fee analysis",
+          "overtrading"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs structured statistics and findings from a trading log or execution history."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/trading/trade-log-analysis",
@@ -1303,6 +2044,44 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "logistics",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "international shipping estimate",
+          "domestic shipping estimate",
+          "calculate volumetric weight",
+          "compare shipping options",
+          "ecommerce shipping",
+          "freight planning",
+          "procurement logistics",
+          "marketplace delivery cost"
+        ],
+        "recommendedFor": [
+          "route and shipment cost estimation",
+          "chargeable-weight planning",
+          "choosing a service level"
+        ],
+        "notFor": [
+          "customs or tax determination",
+          "a guaranteed carrier quote",
+          "vehicle valuation"
+        ],
+        "preferOver": [],
+        "selectionExamples": [
+          {
+            "use": [
+              "Estimate shipping from Muscat to Dubai.",
+              "Compare express and economy delivery."
+            ],
+            "doNotUse": [
+              "Calculate import duties.",
+              "Audit the supplier website."
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/logistics/shipping-cost-estimate",
@@ -1355,6 +2134,22 @@
       "price": 0.3,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "voice",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "outbound AI call",
+          "customer confirmation",
+          "telephone follow-up"
+        ],
+        "recommendedFor": [
+          "Use when an authorized agent must contact a customer by telephone for a lawful, consent-aware objective and retrieve a structured result later."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": false,
       "sideEffects": true,
       "endpoint": "/api/v1/voice/ai-call",
@@ -1377,6 +2172,22 @@
       "price": 0.75,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "voice",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "lead qualification",
+          "sales discovery call",
+          "qualification score"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs structured lead qualification from a lawful customer conversation rather than an ungrounded free-form model opinion."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": false,
       "sideEffects": true,
       "endpoint": "/api/v1/voice/lead-qualifier",
@@ -1401,6 +2212,40 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "website_services",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "website quote",
+          "web project estimate",
+          "website rebuild cost",
+          "agency proposal",
+          "remediation estimate"
+        ],
+        "recommendedFor": [
+          "transparent website build or remediation estimates",
+          "scope, timeline and effort planning"
+        ],
+        "notFor": [
+          "measuring live website defects",
+          "a fixed quotation",
+          "company due diligence"
+        ],
+        "preferOver": [],
+        "selectionExamples": [
+          {
+            "use": [
+              "Estimate the cost to rebuild this website.",
+              "How long would this multilingual portal take?"
+            ],
+            "doNotUse": [
+              "Audit this live site's security headers.",
+              "Screen the company before payment."
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/websites/project-estimate",
@@ -1426,6 +2271,42 @@
       "price": 0.75,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "website_services",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "website audit",
+          "SEO audit",
+          "technical website review",
+          "accessibility checks",
+          "security headers",
+          "website remediation"
+        ],
+        "recommendedFor": [
+          "passive technical, SEO, accessibility and security checks for a public HTTPS site"
+        ],
+        "notFor": [
+          "estimating a build budget",
+          "penetration testing",
+          "company reputation screening"
+        ],
+        "preferOver": [
+          "website_project_estimate"
+        ],
+        "selectionExamples": [
+          {
+            "use": [
+              "Audit this website before we rebuild it.",
+              "Find measurable SEO and accessibility issues."
+            ],
+            "doNotUse": [
+              "Estimate the project cost.",
+              "Check the company sanctions status."
+            ]
+          }
+        ]
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/websites/audit",
@@ -1449,6 +2330,23 @@
       "price": 0.5,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "voice",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "book appointment",
+          "confirm appointment",
+          "reschedule call",
+          "cancel appointment"
+        ],
+        "recommendedFor": [
+          "Use when an authorized agent must coordinate a customer appointment by telephone and return a machine-readable scheduling result."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": false,
       "sideEffects": true,
       "endpoint": "/api/v1/voice/appointment",
@@ -1472,6 +2370,23 @@
       "price": 1.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "supplier",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "supplier due diligence",
+          "vendor screening report",
+          "procurement risk report",
+          "Oman supplier report"
+        ],
+        "recommendedFor": [
+          "Use when a procurement agent needs one paid supplier due-diligence result instead of coordinating several screening steps."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/procurement/supplier-due-diligence-report",
@@ -1495,6 +2410,23 @@
       "price": 1.5,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "company risk report",
+          "business due diligence",
+          "reputation and risk",
+          "counterparty screening"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs a consolidated company risk report with both evidence and an explicit risk model."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/risk/company-risk-report",
@@ -1518,6 +2450,23 @@
       "price": 0.75,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "property",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "property investment report",
+          "real estate investment analysis",
+          "Oman property valuation",
+          "rental yield report"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs one structured investment analysis for a property rather than separate market and calculator calls."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/property/property-investment-report",
@@ -1541,6 +2490,23 @@
       "price": 0.5,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "property",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "portfolio screening",
+          "property shortlist",
+          "compare investment properties",
+          "rental yield ranking"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs a first-pass ranking of multiple properties before deeper analysis."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/property/portfolio-screen",
@@ -1564,6 +2530,23 @@
       "price": 2,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "supplier",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "vendor shortlist",
+          "procurement shortlist",
+          "compare suppliers",
+          "supplier ranking"
+        ],
+        "recommendedFor": [
+          "Use when a procurement agent needs a ranked vendor shortlist from several candidate suppliers."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/procurement/vendor-shortlist",
@@ -1587,6 +2570,23 @@
       "price": 8,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "risk_intelligence",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "batch company screening",
+          "100 company risk check",
+          "CSV company analysis",
+          "bulk due diligence"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs to screen many companies efficiently instead of making separate risk-report calls."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/risk/company-risk-batch",
@@ -1609,6 +2609,22 @@
       "price": 0.05,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "startup readiness score",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for startup readiness score."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/startup-readiness-score",
@@ -1631,6 +2647,25 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "primary",
+        "selectionPriority": 100,
+        "intents": [
+          "business idea validate",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for business idea validate."
+        ],
+        "notFor": [],
+        "preferOver": [
+          "business_risk_check",
+          "product_pricing_calculator"
+        ],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/business-idea-validate",
@@ -1653,6 +2688,22 @@
       "price": 0.2,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "business idea generator",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for business idea generator."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/business-idea-generator",
@@ -1675,6 +2726,22 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "business validation plan",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for business validation plan."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/business-validation-plan",
@@ -1697,6 +2764,22 @@
       "price": 0.2,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "ideal customer profile",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for ideal customer profile."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/ideal-customer-profile",
@@ -1719,6 +2802,22 @@
       "price": 0.3,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "competitor analysis",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for competitor analysis."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/competitor-analysis",
@@ -1741,6 +2840,22 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "business model builder",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for business model builder."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/business-model-builder",
@@ -1763,6 +2878,22 @@
       "price": 0.1,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "startup cost estimate",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for startup cost estimate."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/startup-cost-estimate",
@@ -1785,6 +2916,22 @@
       "price": 0.1,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "product pricing calculator",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for product pricing calculator."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/product-pricing-calculator",
@@ -1807,6 +2954,22 @@
       "price": 0.1,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "break even calculator",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for break even calculator."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/break-even-calculator",
@@ -1829,6 +2992,22 @@
       "price": 0.15,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "business profitability analysis",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for business profitability analysis."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/business-profitability-analysis",
@@ -1851,6 +3030,22 @@
       "price": 0.2,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "offer builder",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for offer builder."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/offer-builder",
@@ -1873,6 +3068,22 @@
       "price": 0.4,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "oman go to market plan",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for oman go to market plan."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/oman-go-to-market-plan",
@@ -1895,6 +3106,22 @@
       "price": 0.2,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "content plan generator",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for content plan generator."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/content-plan-generator",
@@ -1917,6 +3144,22 @@
       "price": 0.25,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "first 10 customers plan",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for first 10 customers plan."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/first-10-customers-plan",
@@ -1939,6 +3182,22 @@
       "price": 0.1,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "sales response builder",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for sales response builder."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/sales-response-builder",
@@ -1961,6 +3220,22 @@
       "price": 0.2,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "whatsapp business setup",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for whatsapp business setup."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/whatsapp-business-setup",
@@ -1983,6 +3258,22 @@
       "price": 0.15,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "monthly business financial report",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for monthly business financial report."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/monthly-business-financial-report",
@@ -2005,6 +3296,22 @@
       "price": 0.4,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "oman business launch plan",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for oman business launch plan."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/oman-business-launch-plan",
@@ -2027,6 +3334,22 @@
       "price": 0.4,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "business 90 day growth plan",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for business 90 day growth plan."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/business-90-day-growth-plan",
@@ -2049,6 +3372,22 @@
       "price": 0.2,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "business risk check",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for business risk check."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/business-risk-check",
@@ -2071,6 +3410,22 @@
       "price": 0.5,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "specialized",
+        "selectionPriority": 30,
+        "intents": [
+          "final business plan builder",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for final business plan builder."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/final-business-plan-builder",
@@ -2093,6 +3448,22 @@
       "price": 0.5,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "oman business launch advisor",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for oman business launch advisor."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/oman-business-launch-advisor",
@@ -2115,6 +3486,22 @@
       "price": 1,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "oman business plan generator",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for oman business plan generator."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/oman-business-plan-generator",
@@ -2137,6 +3524,22 @@
       "price": 0.15,
       "currency": "USD",
       "paymentProtocol": "x402",
+      "category": "book_business",
+      "selection": {
+        "toolRole": "supporting",
+        "selectionPriority": 60,
+        "intents": [
+          "oman small business guide",
+          "small business planning",
+          "Oman entrepreneurship"
+        ],
+        "recommendedFor": [
+          "Use when an agent needs the Creative Techno book framework for oman small business guide."
+        ],
+        "notFor": [],
+        "preferOver": [],
+        "selectionExamples": []
+      },
       "idempotent": true,
       "sideEffects": false,
       "endpoint": "/api/v1/book/oman-small-business-guide",
@@ -2303,6 +3706,6 @@
     ],
     "note": "Coverage is Muscat governorate only, and only its supported areas. Al Mouj Muscat is the deployment's strongest single-area coverage today because it is the only area with real partner-fed (sourceType partner_feed) sale records; other supported areas may only have demo/manual_benchmark data on a given deployment. This is not nationwide Oman coverage."
   },
-  "generatedAt": "2026-09-29T04:05:46.826Z",
+  "generatedAt": "2026-09-30T05:05:28.857Z",
   "generatedBy": "scripts/generateDistributionManifest.ts (derived from src/domain/capabilities.ts — never hand-edit this file)"
 }

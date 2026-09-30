@@ -30,8 +30,11 @@
     "test:db": "node --env-file-if-exists=.env --import tsx scripts/test-db.ts",
     "test:partner-e2e": "node --env-file-if-exists=.env --import tsx scripts/partner-e2e.ts",
     "distribution:manifest": "node --import tsx scripts/generateDistributionManifest.ts",
+    "distribution:discovery": "node --import tsx scripts/generateDiscoveryPack.ts",
     "predistribution:check": "npm run distribution:manifest",
     "distribution:check": "node --import tsx scripts/distributionCheck.ts",
+    "audit:capabilities": "node --import tsx scripts/generateCapabilityAudit.ts",
+    "audit:production": "node --import tsx scripts/productionReadinessCheck.ts",
     "pretest": "npm run build",
     "test": "node scripts/runTests.mjs"
   },

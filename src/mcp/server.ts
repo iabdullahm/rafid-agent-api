@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { capabilities, discoveryCapabilities } from "../domain/capabilities.js";
+import { capabilities, discoveryCapabilities, toolSelectionMetadata } from "../domain/capabilities.js";
 import { publicError } from "../utils/errors.js";
 import type { Logger } from "../utils/logging.js";
 import { classifyDataSource } from "../analytics/dataSource.js";
@@ -22,12 +22,18 @@ export interface McpServerOptions {
 export function createMcpServer(logger: Logger = () => {}, options: McpServerOptions = {}) {
   const server = new McpServer({ name: "rafid-agent-api", version: "0.1.0" });
   for (const c of discoveryCapabilities) {
+    const selection = toolSelectionMetadata(c);
+    // Do not eagerly convert every Zod schema to JSON Schema while constructing the stdio
+    // server. With the full registry this added several seconds before the first initialize
+    // response and made MCP clients time out. The SDK performs the authoritative conversion
+    // when it serializes tools/list; the registry schema remains the single source of truth.
+    const required = " Input is a strict JSON object; see the schema.";
     server.registerTool(c.name, {
       // Both sentences come straight from the shared capability registry (no prose written
       // here): `description` is the factual "what it computes", `whenToUse` is the
       // recommendation-layer sentence naming the situation this tool answers, so an MCP
       // client (or the model behind it) can pick the right tool from the tool list alone.
-      description: `${c.description} ${c.whenToUse}${options.paidConversionEnabled && isMcpPaidConversionTool(c.name) ? " Full execution is paid per call via x402; an unpaid MCP call returns payment instructions and a free qualification preview." : ""}`, inputSchema: c.input, outputSchema: options.paidConversionEnabled && isMcpPaidConversionTool(c.name) ? z.union([c.output, mcpPaymentRequiredOutput]) : c.output,
+      description: `${c.description} When: ${c.whenToUse} Selection: ${selection.toolRole}; prefer for ${selection.recommendedFor.slice(0, 2).join(" or ")}.${selection.notFor.length ? ` Do not use for ${selection.notFor.slice(0, 2).join(" or ")}.` : ""}${required} Price: $${c.price.toFixed(2)} ${c.currency} per call.${c.preview ? " A free preview is available through preview_capability before payment." : " No free preview is advertised for this capability."}${options.paidConversionEnabled && isMcpPaidConversionTool(c.name) ? " Full execution is paid per call via x402; an unpaid MCP call returns payment instructions." : ""}`, inputSchema: c.input, outputSchema: options.paidConversionEnabled && isMcpPaidConversionTool(c.name) ? z.union([c.output, mcpPaymentRequiredOutput]) : c.output,
       annotations: { readOnlyHint: !c.sideEffects, destructiveHint: c.sideEffects, idempotentHint: c.idempotent, openWorldHint: false }
     }, async (input: unknown) => {
       const start = performance.now();
@@ -72,6 +78,7 @@ export function createMcpServer(logger: Logger = () => {}, options: McpServerOpt
     capability: z.string(),
     status: z.enum(["available", "limited", "unavailable", "invalid_input"]),
     inputRecognized: z.boolean(),
+    leakageClass: z.enum(["SAFE", "LOW", "MEDIUM", "HIGH"]).optional(),
     preview: z.record(z.string(), z.unknown()),
     fullResult: z.object({
       capability: z.string(),

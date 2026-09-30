@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { capabilities, discoveryCapabilities } from "../domain/capabilities.js";
+import { capabilities, discoveryCapabilities, toolSelectionMetadata } from "../domain/capabilities.js";
 import { prices } from "../billing/catalog.js";
 import { x402BasePath, x402DocsPath } from "../billing/x402.js";
 import { agentBasePath, buildAgentInfo, buildCapabilitiesRegistry, buildPricingInfo, buildToolCatalog, capabilitiesBasePath, pricingBasePath, toolsBasePath } from "./agent.js";
@@ -16,6 +16,7 @@ import { buildPaymentMethods, paymentMethodsPath, railAvailability } from "../bi
 import { accountBasePath } from "../billing/unified/http.js";
 import { mcpCreditsPath } from "../billing/unified/mcp.js";
 import { PLATFORM_DESCRIPTION, PLATFORM_NAME } from "../brand.js";
+import { buildDiscoveryOpenapiPaths } from "./discovery.js";
 const json = (schema: unknown, example?: unknown, summary = "Example") => ({ "application/json": {
   schema, ...(example === undefined ? {} : { examples: { default: { summary, value: example } } })
 } });
@@ -126,7 +127,7 @@ for (const c of discoveryCapabilities) {
       "Property"
     ],
     summary: c.description,
-    description: `${c.description} Click Authorize and enter an active Rafid API key before using Try it out.` + (rails.billing ? " Accepts either a legacy X-API-Key or a Rafid billing key (Authorization: Bearer raf_live_…), which is charged the listed price from the account's subscription allowance / prepaid credits (response meta.billing and X-Rafid-* headers report the charge)." : ""),
+    description: `${c.description} Selection: ${toolSelectionMetadata(c).toolRole}; prefer for ${toolSelectionMetadata(c).recommendedFor.slice(0, 2).join(" or ")}. Click Authorize and enter an active Rafid API key before using Try it out.` + (rails.billing ? " Accepts either a legacy X-API-Key or a Rafid billing key (Authorization: Bearer raf_live_…), which is charged the listed price from the account's subscription allowance / prepaid credits (response meta.billing and X-Rafid-* headers report the charge)." : ""),
     security: [{ ApiKeyAuth: [] }, ...(rails.billing ? [{ BillingApiKey: [] }] : [])],
     parameters: paymentParameters,
     requestBody: { required: true, description: "Strict JSON input; unknown fields are rejected.", content: json(z.toJSONSchema(c.input), c.example, `${c.name} request`) },
@@ -384,6 +385,7 @@ Object.assign(paths, buildMppOpenapiPaths(config.mpp));
 // retrieves the current state without holding an HTTP or MCP connection open.
 paths["/api/v1/calls/{callId}"] = { get: { operationId: "get_call_status", tags: ["Voice"], summary: "Retrieve asynchronous voice call status", description: "Returns the current verified call state. queued/dialing/ringing/answered/in_progress are not completed outcomes.", security: [], parameters: [{ name: "callId", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "Call status" }, "404": { description: "Call not found" } } } };
 paths["/api/v1/voice/webhooks"] = { post: { operationId: "voice_webhook", tags: ["Voice"], summary: "Receive a verified voice provider callback", description: "Provider callback endpoint. Requests must carry X-Voice-Signature and are replay/idempotency handled by the voice service boundary.", security: [], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["callId", "status"], properties: { callId: { type: "string" }, status: { type: "string" }, durationSeconds: { type: "integer" }, result: { type: "object" } } } } } }, responses: { "200": { description: "Callback accepted" }, "401": { description: "Invalid signature" }, "409": { description: "Invalid state transition" } } } };
+Object.assign(paths, buildDiscoveryOpenapiPaths(config));
 return {
   openapi: "3.1.0", info: { title: `${PLATFORM_NAME} API`, version: "0.1.0", description: `${PLATFORM_DESCRIPTION} Property-specific calculations use OMR where documented; capability prices and payment rails are documented per operation. Use Authorize to set X-API-Key for compatibility routes or the enabled prepaid API-key billing rail.` },
   tags: [

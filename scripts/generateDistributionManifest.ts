@@ -8,6 +8,8 @@ import { x402BasePath } from "../src/billing/x402.js";
 import { mcpRemotePath, mcpStatusBasePath } from "../src/mcp/remote.js";
 import { MUSCAT_GOVERNORATE, SUPPORTED_MUSCAT_AREAS } from "../src/domain/oman/locations.js";
 import { PRODUCTION_BASE_URL } from "./distributionConfig.js";
+import { PLATFORM_DESCRIPTION, PLATFORM_NAME } from "../src/brand.js";
+import { capabilityCategory, toolSelectionMetadata } from "../src/domain/capabilities.js";
 
 /**
  * Generates distribution/manifest.json — the machine-readable summary of Rafid's agent
@@ -29,12 +31,9 @@ import { PRODUCTION_BASE_URL } from "./distributionConfig.js";
  */
 
 const manifest = {
-  name: "Rafid Intelligence Network",
-  tagline: "Property intelligence built for AI agents.",
-  description:
-    "Property and facility intelligence tools built for autonomous AI agents: discover a capability, " +
-    "pay per call over x402 (or authenticate with an API key), execute, get a structured result. " +
-    "Not designed primarily as a human dashboard product.",
+  name: PLATFORM_NAME,
+  tagline: "Rafid Agent API — structured intelligence and paid tools for AI agents.",
+  description: PLATFORM_DESCRIPTION,
   baseUrl: PRODUCTION_BASE_URL,
   version: "0.1.0",
   audience: "ai-agents",
@@ -54,6 +53,14 @@ const manifest = {
     mcpRemote: mcpRemotePath,
     x402Info: x402BasePath,
     x402Status: x402BasePath + "/status"
+  },
+  discovery: {
+    index: "/api/v1/discovery",
+    search: "/api/v1/discovery/search?q=...",
+    intents: "/api/v1/discovery/intents",
+    publicTools: "/tools",
+    robots: "/robots.txt",
+    sitemap: "/sitemap.xml"
   },
   protocols: ["mcp", "openapi", "x402", "rest"],
   mcp: {
@@ -79,6 +86,8 @@ const manifest = {
     price: c.price,
     currency: c.currency,
     paymentProtocol: c.paymentProtocol,
+    category: capabilityCategory(c),
+    selection: toolSelectionMetadata(c),
     idempotent: c.idempotent,
     sideEffects: c.sideEffects,
     endpoint: "/api/v1" + c.path,

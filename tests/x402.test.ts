@@ -8,6 +8,7 @@ import { prices } from "../src/billing/catalog.js";
 import { BillingService } from "../src/billing/service.js";
 import { buildX402Info, buildX402Status } from "../src/billing/x402.js";
 import { buildOpenapi } from "../src/api/openapi.js";
+import { MemoryAnalyticsRepository } from "../src/analytics/memoryRepository.js";
 
 const key = "test-only-not-a-real-credential-12345";
 const wallet = "0x1234567890123456789012345678901234567890";
@@ -76,6 +77,48 @@ test("x402 OpenAPI 402 guidance documents additive pay-and-retry aliases", () =>
   assert.equal(schema.properties.nextAction.properties.type.const, "pay_and_retry");
   assert.equal(schema.properties.nextAction.properties.retrySameBody.const, true);
   assert.equal(schema.properties.retry.properties.retrySameBody.type, "boolean");
+});
+
+test("unpaid x402 challenge keeps one journey id across response, body and persisted analytics", async t => {
+  const previousKey = process.env.ANALYTICS_INTERNAL_API_KEY;
+  process.env.ANALYTICS_INTERNAL_API_KEY = "test-analytics-internal-key";
+  const repository = new MemoryAnalyticsRepository();
+  const config = loadConfig({ RAFID_API_KEYS: key, X402_ENABLED: "true", X402_WALLET_ADDRESS: wallet, X402_FACILITATOR_URL: "https://127.0.0.1:1" });
+  const app = createApp(config, { logger: () => {}, analyticsRepository: repository });
+  const server = app.listen(0, "127.0.0.1");
+  t.after(() => {
+    server.closeAllConnections(); server.close();
+    if (previousKey === undefined) delete process.env.ANALYTICS_INTERNAL_API_KEY;
+    else process.env.ANALYTICS_INTERNAL_API_KEY = previousKey;
+  });
+  await once(server, "listening");
+  const address = server.address(); assert.ok(address && typeof address !== "string");
+  const response = await fetch(`http://127.0.0.1:${address.port}/api/v1/x402/property/analyze`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(capabilities[0].example)
+  });
+  assert.equal(response.status, 402);
+  const id = response.headers.get("x-rafid-payment-journey");
+  const challengeRequestId = response.headers.get("x-rafid-payment-challenge-request");
+  assert.ok(id); assert.ok(challengeRequestId);
+  const body = await response.json() as any;
+  assert.equal(body.paymentJourneyId, id);
+  assert.equal(body.retry.paymentJourneyId, id);
+  assert.equal(body.retry.headers["X-Rafid-Payment-Journey"], id);
+  assert.equal(body.nextAction.paymentJourneyId, id);
+  const events = await repository.findByPaymentJourneyId(id);
+  assert.ok(events.length > 0);
+  assert.equal(events[0]?.paymentJourneyId, id);
+  assert.equal(events[0]?.requestId, challengeRequestId);
+  assert.equal(events[0]?.eventType, "payment_challenge");
+  const internal = await fetch(`http://127.0.0.1:${address.port}/api/v1/internal/analytics/payment-journeys?paymentJourneyId=${id}`, { headers: { "X-Internal-Api-Key": "test-analytics-internal-key" } });
+  assert.equal(internal.status, 200);
+  const internalBody = await internal.json() as any;
+  assert.equal(internalBody.data.count, 1);
+  assert.equal(internalBody.data.journeys[0].paymentJourneyId, id);
+  assert.equal(internalBody.data.journeys[0].payment, null);
+  assert.equal(internalBody.data.journeys[0].settlement, null);
+  assert.equal(internalBody.data.journeys[0].retry, null);
+  assert.equal(internalBody.data.journeys[0].execution, null);
 });
 
 // Requires real internet access to the public x402.org facilitator, so it's opt-in like
