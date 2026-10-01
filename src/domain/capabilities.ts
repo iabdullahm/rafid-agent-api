@@ -226,6 +226,18 @@ const OMAN_EXAMPLE_OUTPUT = {
   unavailableOutputs: ["pricePosition.observedComparableRange", "pricePosition.marketPosition"],
   currency: "OMR",
   dataQuality: { latestDataDate: "2026-05-25", dataFreshnessDays: 185, sampleSize: 3, sourceTypes: ["manual_benchmark"], staleMarketData: false },
+  historicalSalesContext: {
+    available: false,
+    recordsAvailable: 0,
+    recentComparableSales: 0,
+    medianHistoricalPricePerSqmOMR: null,
+    recentMedianPricePerSqmOMR: null,
+    oldestRecordDate: null,
+    latestRecordDate: null,
+    sourceTypes: [],
+    priceSemantics: [],
+    phaseBreakdown: []
+  },
   // NCSI integration: this example reflects the default, unconfigured state (no
   // NCSI_REAL_ESTATE_DATASET_ID/NCSI_FIELD_MAP_JSON set) — see officialContext.ts. A deployment
   // that configures a verified NCSI dataset sees `available: true` with populated statistics

@@ -205,14 +205,12 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
           }
         };
       },
-      // Bazaar discovery declaration: same input/output shape already published via OpenAPI
+      // Bazaar discovery declaration: the same input/output shape already published via OpenAPI
       // (z.toJSONSchema(c.input)/(c.output), the same conversion src/api/openapi.ts uses) and
       // the same hand-verified example/exampleOutput used everywhere else in this registry —
-      // no second copy of a schema or example is maintained here. The exceptionally large invoice
-      // schema is intentionally excluded below rather than emitting a malformed header.
-      // The invoice schema is too large for a valid Bazaar declaration inside a payment header.
-      // Its complete, tested contract remains available in OpenAPI and the capability registry.
-      ...(c.name === "invoice_anomaly_check" ? {} : { extensions: discoveryDeclaration(c) })
+      // no second copy of a schema or example is maintained here. Large declarations are compacted
+      // below so Bazaar still receives both input and output metadata within the HTTP header budget.
+      extensions: discoveryDeclaration(c)
     };
   }
   // syncFacilitatorOnStart (default true): the returned handler awaits the facilitator's
@@ -228,12 +226,9 @@ export function buildX402Gate(config: X402Config, billing: BillingService): Requ
  *  (base64 adds a third, plus the payment requirements). Routes under budget are unchanged. */
 export const MAX_DISCOVERY_DECLARATION_CHARS = 10_000;
 
-/** Full declaration (input + output schema + output example) when it fits; otherwise degrade
- *  gracefully — drop the output example, then the output entirely, then (for capabilities whose
- *  input schema alone is large, e.g. invoice_anomaly_check) the human-readable descriptions inside
- *  the input schema, then the example input. The complete schemas and examples always remain
- *  available from /openapi.json and /api/v1/capabilities. Capabilities that already fit are
- *  unaffected by the later steps. */
+/** Full declaration (input + output schema + output example) when it fits; otherwise compact
+ *  descriptions while retaining output metadata. The complete schemas and examples always remain
+ *  available from /openapi.json and /api/v1/capabilities. */
 export function discoveryDeclaration(c: (typeof capabilities)[number]): ReturnType<typeof declareDiscoveryExtension> {
   const inputSchema = z.toJSONSchema(c.input) as Record<string, unknown>;
   const parsedExample = c.input.safeParse(c.example);
@@ -241,10 +236,25 @@ export function discoveryDeclaration(c: (typeof capabilities)[number]): ReturnTy
   const base = { bodyType: "json" as const, input: discoveryInput, inputSchema };
   const outputSchema = z.toJSONSchema(c.output) as Record<string, unknown>;
   const compactInputSchema = stripDescriptions(inputSchema) as Record<string, unknown>;
+  const compactOutputExample = compactExample(c.exampleOutput, outputSchema);
   const candidates = [
     { ...base, output: { example: c.exampleOutput, schema: outputSchema } },
-    { ...base, output: { schema: outputSchema } },
-    base,
+    { ...base, output: { example: compactOutputExample, schema: stripDescriptions(outputSchema) as Record<string, unknown> } },
+    { ...base, inputSchema: compactInputSchema, output: { example: compactOutputExample, schema: stripDescriptions(outputSchema) as Record<string, unknown> } },
+    // Keep output discovery present for large contracts without exceeding the
+    // payment-required header budget. The example is still derived from and
+    // validated against the canonical output schema; the full schema remains
+    // available through OpenAPI/capabilities.
+    {
+      ...base,
+      inputSchema: { type: "object", additionalProperties: true },
+      output: {
+        example: compactOutputExample,
+        schema: { type: "object", additionalProperties: true }
+      }
+    },
+    { ...base, output: { schema: stripDescriptions(outputSchema) as Record<string, unknown> } },
+    { ...base, inputSchema: compactInputSchema, output: { schema: stripDescriptions(outputSchema) as Record<string, unknown> } },
     { ...base, inputSchema: compactInputSchema },
     { bodyType: "json" as const, inputSchema: compactInputSchema }
   ];
@@ -267,6 +277,38 @@ function stripDescriptions(node: unknown): unknown {
   if (Array.isArray(node)) return node.map(stripDescriptions);
   if (!node || typeof node !== "object") return node;
   return Object.fromEntries(Object.entries(node as Record<string, unknown>).filter(([k, v]) => !(k === "description" && typeof v === "string")).map(([k, v]) => [k, stripDescriptions(v)]));
+}
+
+/** Keep a representative, valid-looking output example small enough for Bazaar's header. */
+export function compactExample(value: unknown, schema: Record<string, unknown>): unknown {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(schema.anyOf)) {
+    const branch = schema.anyOf.find((candidate: unknown) => {
+      const object = candidate && typeof candidate === "object" ? candidate as Record<string, unknown> : {};
+      if (Array.isArray(object.enum)) return object.enum.includes(value);
+      if (object.type === "null") return value === null;
+      if (object.type === typeof value) return true;
+      return false;
+    }) as Record<string, unknown> | undefined;
+    return branch ? compactExample(value, branch) : value;
+  }
+  if (Array.isArray(schema.type)) {
+    const nonNullType = schema.type.find((type: unknown) => type !== "null");
+    return compactExample(value, { ...schema, type: nonNullType });
+  }
+  if (schema.type === "object" && typeof value === "object" && !Array.isArray(value)) {
+    const objectValue = value as Record<string, unknown>;
+    const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+    const required = Array.isArray(schema.required) ? schema.required as string[] : Object.keys(properties).slice(0, 8);
+    return Object.fromEntries(required.filter(key => key in objectValue).map(key => [key, compactExample(objectValue[key], properties[key] ?? {})]));
+  }
+  if (schema.type === "array" && Array.isArray(value)) {
+    return value.slice(0, 1).map(item => compactExample(item, (schema.items ?? {}) as Record<string, unknown>));
+  }
+  if (schema.type === "string" && typeof value === "string" && !schema.enum && !schema.format && value.length > 96) {
+    return value.slice(0, 93) + "...";
+  }
+  return value;
 }
 
 /**

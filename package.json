@@ -33,6 +33,7 @@
     "distribution:discovery": "node --import tsx scripts/generateDiscoveryPack.ts",
     "predistribution:check": "npm run distribution:manifest",
     "distribution:check": "node --import tsx scripts/distributionCheck.ts",
+    "bazaar:audit": "node --env-file-if-exists=.env --import tsx scripts/bazaarAudit.ts",
     "audit:capabilities": "node --import tsx scripts/generateCapabilityAudit.ts",
     "audit:production": "node --import tsx scripts/productionReadinessCheck.ts",
     "pretest": "npm run build",
