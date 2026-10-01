@@ -144,9 +144,10 @@ export function createDashboardRoutes(options: DashboardRoutesOptions): Router {
 
   router.get("/internal/dashboard", configured, htmlAuth, async (req, res, next) => {
     try {
-      const period = parsePeriod(req.query.period);
-      const initialData = await buildDashboardData({ config, analyticsRepository, revenueLedger, billingService, billingEngine, externalPaymentsService }, period);
-      res.type("html").send(dashboardPageHtml({ adminUser: res.locals.adminUser, csrfToken: res.locals.adminCsrf, initialData, view: parseView(req.query.view) }));
+      // Render the authenticated shell immediately. Data loading happens through the
+      // JSON BFF after DOMContentLoaded so a slow/cold database cannot turn the page
+      // request itself into a platform function timeout.
+      res.type("html").send(dashboardPageHtml({ adminUser: res.locals.adminUser, csrfToken: res.locals.adminCsrf, initialData: null, view: parseView(req.query.view) }));
     } catch (error) { next(error); }
   });
 
@@ -164,9 +165,7 @@ export function createDashboardRoutes(options: DashboardRoutesOptions): Router {
   router.get("/internal/dashboard/:view", configured, htmlAuth, async (req, res, next) => {
     try {
       const view = parseView(req.params.view);
-      const period = parsePeriod(req.query.period);
-      const initialData = await buildDashboardData({ config, analyticsRepository, revenueLedger, billingService, billingEngine, externalPaymentsService }, period);
-      res.type("html").send(dashboardPageHtml({ adminUser: res.locals.adminUser, csrfToken: res.locals.adminCsrf, initialData, view }));
+      res.type("html").send(dashboardPageHtml({ adminUser: res.locals.adminUser, csrfToken: res.locals.adminCsrf, initialData: null, view }));
     } catch (error) { next(error); }
   });
 

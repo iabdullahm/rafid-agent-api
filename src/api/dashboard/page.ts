@@ -1186,7 +1186,7 @@ const CLIENT_SCRIPT = `
       { header: "Source", render: function (r) { return esc(r.source); } },
       { header: "Price", right: true, render: function (r) { return r.price === null ? "—" : fmtAmount(r.price) + " " + esc(r.currency || "USD"); } },
       { header: "Challenge", render: function (r) { return r.challenge.at ? chip("issued") : "—"; } },
-      { header: "Payment", render: function (r) { return r.payment ? chip(r.payment.status || "attempted") : chip("abandoned"); } },
+      { header: "Payment", render: function (r) { return r.payment ? chip(r.payment.status || "attempted") : chip(r.status === "awaiting_payment" ? "awaiting_payment" : "abandoned"); } },
       { header: "Settlement", render: function (r) { return r.settlement ? chip(r.settlement.status || "failed") : "—"; } },
       { header: "Retry", render: function (r) { return r.retry ? chip("received") : "—"; } },
       { header: "Execution", render: function (r) { return r.execution ? chip(r.execution.status || "failed") : "—"; } },
@@ -1210,6 +1210,7 @@ const CLIENT_SCRIPT = `
       '<dt>Settlement</dt><dd>' + esc(row.settlement && row.settlement.status || "not observed") + '</dd>' +
       '<dt>Retry request</dt><dd><code>' + esc(row.retry && row.retry.requestId || "—") + '</code></dd>' +
       '<dt>Execution</dt><dd>' + esc(row.execution && row.execution.status || "not observed") + '</dd>' +
+      '<dt>Status</dt><dd>' + esc(row.status || "unknown") + '</dd>' +
       '<dt>Duration</dt><dd>' + fmtMs(row.durationMs) + '</dd></dl>';
     document.getElementById("drawer").classList.add("open"); document.getElementById("drawer-backdrop").classList.add("open");
   }
@@ -1478,7 +1479,10 @@ const CLIENT_SCRIPT = `
   }
 
   var currentPeriod = null;
+  var periodRequestInFlight = false;
   function loadPeriod(period, silent) {
+    if (periodRequestInFlight) return Promise.resolve(null);
+    periodRequestInFlight = true;
     currentPeriod = period;
     return fetch("/internal/dashboard/data?period=" + encodeURIComponent(period), { cache: "no-store", credentials: "same-origin", headers: { Accept: "application/json", "Cache-Control": "no-cache" } })
       .then(function (res) {
@@ -1494,6 +1498,9 @@ const CLIENT_SCRIPT = `
       })
       .catch(function (err) {
         if (!silent) showError("Unable to load dashboard data right now (" + (err && err.message ? err.message : "unknown error") + "). Showing the last successfully loaded data, if any.");
+      })
+      .finally(function () {
+        periodRequestInFlight = false;
       });
   }
 
@@ -1511,6 +1518,7 @@ const CLIENT_SCRIPT = `
   document.addEventListener("DOMContentLoaded", function () {
     var initial = window.__DASHBOARD_INITIAL__;
     if (initial) { currentPeriod = initial.period; renderDashboard(initial); markDashboardRefreshed(initial.generatedAt); }
+    else { loadPeriod("24h", false); }
     document.querySelectorAll(".period-bar button").forEach(function (btn) {
       btn.addEventListener("click", function () { loadPeriod(btn.getAttribute("data-period")); });
     });
@@ -1578,10 +1586,10 @@ const SIDEBAR_ANCHORS: Record<string, string> = {
   requests: "activity-feed", performance: "system-health", errors: "conversion-audit", mcp: "system-status"
 };
 
-export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; initialData: DashboardData; view?: DashboardView }): string {
+export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; initialData: DashboardData | null; view?: DashboardView }): string {
   const view = opts.view ?? "overview";
   const periodButtons = (["24h", "7d", "30d", "all"] as DashboardPeriod[])
-    .map(p => `<button type="button" data-period="${p}" class="${p === opts.initialData.period ? "active" : ""}">${esc(PERIOD_LABELS[p])}</button>`)
+    .map(p => `<button type="button" data-period="${p}" class="${p === (opts.initialData?.period ?? "24h") ? "active" : ""}">${esc(PERIOD_LABELS[p])}</button>`)
     .join("\n");
 
   const sidebarNav = SIDEBAR_GROUPS.map(group => `${group.label ? `<div class="nav-group">${esc(group.label)}</div>` : ""}${group.items.map(item => `<a href="/internal/dashboard/${esc(item.key)}" data-view="${esc(item.key)}" aria-label="${esc(item.key === "agents" ? "Agents & Tools" : item.label)}" class="${item.key === view ? "active" : ""}">${SIDEBAR_ICONS[item.icon] ?? ""}<span>${esc(item.label)}</span></a>`).join("\n")}`).join("\n");
@@ -1631,7 +1639,7 @@ export function dashboardPageHtml(opts: { adminUser: string; csrfToken: string; 
           <div class="user-chip">${esc(opts.adminUser)} &middot; <form method="post" action="/internal/dashboard/logout" style="display:inline">${csrfField(opts.csrfToken)}<button type="submit" class="link">Log out</button></form></div>
         </div>
       </div>
-      <div id="generated-at" class="meta-row">Data as of ${esc(opts.initialData.generatedAt)} &middot; period: ${esc(opts.initialData.period)}</div>
+      <div id="generated-at" class="meta-row">Loading dashboard data…</div>
 
       <div class="global-toolbar">
         <div class="toolbar-left"><span class="chip chip-blue">Production</span><div class="period-bar" style="margin:0">${periodButtons}</div></div>
