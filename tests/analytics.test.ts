@@ -146,8 +146,12 @@ test("analytics/x402: outcome classification, settlement header decoding, and th
   assert.equal(decodeX402SettlementHeader("not-base64-json"), null);
   assert.equal(decodeX402SettlementHeader(encode({ noSuccessField: true })), null);
 
-  const repository = new MemoryAnalyticsRepository();
   const fakeReq = { header: () => undefined, socket: { remoteAddress: "127.0.0.1" } } as unknown as Request;
+  const attemptRepository = new MemoryAnalyticsRepository();
+  recordX402Event(attemptRepository, fakeReq, { eventType: "payment_attempt_received", toolName: "analyze_property", amount: 0.01, currency: "USD", txHash: null, journey: { paymentAttemptId: "attempt-1", paymentStatus: "paid" } });
+  assert.equal(attemptRepository.all()[0]!.eventType, "payment_attempt_received");
+
+  const repository = new MemoryAnalyticsRepository();
   recordX402Event(repository, fakeReq, { eventType: "challenge", toolName: "analyze_oman_property", amount: 0.05, currency: "USD", txHash: null });
   recordX402Event(repository, fakeReq, { eventType: "payment_verified", toolName: "analyze_oman_property", amount: 0.05, currency: "USD", txHash: null });
   recordX402Event(repository, fakeReq, { eventType: "settlement_success", toolName: "analyze_oman_property", amount: 0.05, currency: "USD", txHash: "0xdeadbeef" });

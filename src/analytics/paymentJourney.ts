@@ -47,7 +47,7 @@ export async function findPaymentJourney(repository: AnalyticsRepository, id: st
   if (local) return local;
   try {
     const events = await repository.queryEvents(new Date(Date.now() - 24 * 60 * 60 * 1000));
-    const event = events.find(item => item.paymentJourneyId === id && item.eventType === "challenge");
+    const event = events.find(item => item.paymentJourneyId === id && (item.eventType === "challenge" || item.eventType === "payment_challenge"));
     if (!event || !event.challengeRequestId) return null;
     const snapshot: PaymentJourneySnapshot = {
       paymentJourneyId: id,

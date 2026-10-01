@@ -1,6 +1,8 @@
 import type { AnalyticsEvent } from "./types.js";
 
-export type PaymentJourneyStatus = "abandoned" | "attempted" | "settled" | "retried" | "executed" | "failed";
+export type PaymentJourneyStatus = "awaiting_payment" | "abandoned" | "attempted" | "settled" | "retried" | "executed" | "failed";
+
+export const PAYMENT_ABANDONMENT_WINDOW_MS = 15 * 60 * 1000;
 
 export interface PaymentJourneyRow {
   paymentJourneyId: string;
@@ -48,7 +50,8 @@ export function buildPaymentJourneyRows(events: readonly AnalyticsEvent[], limit
     const rows = input.slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     const first = rows[0]!;
     const challenge = firstEvent(rows, e => e.eventType === "challenge" || e.eventType === "payment_challenge");
-    const attempted = firstEvent(rows, e => e.eventType === "payment_verified" || e.eventType === "payment_failed" || e.eventType === "settlement_success" || e.eventType === "settlement_failure");
+    const attempted = firstEvent(rows, e => e.eventType === "payment_attempt_received" || e.eventType === "payment_verified" || e.eventType === "payment_failed" || e.eventType === "settlement_success" || e.eventType === "settlement_failure");
+    const paymentAttemptReceived = firstEvent(rows, e => e.eventType === "payment_attempt_received");
     const paymentFailed = firstEvent(rows, e => e.eventType === "payment_failed");
     const settlement = firstEvent(rows, e => e.eventType === "settlement_success" || e.eventType === "settlement_failure");
     const retry = firstEvent(rows, e => e.eventType === "paid_retry_received");
@@ -56,13 +59,15 @@ export function buildPaymentJourneyRows(events: readonly AnalyticsEvent[], limit
       ?? firstEvent(rows, e => e.category === "tool" && e.eventType === "invocation" && e.success !== null);
     const succeededExecution = execution?.success === true ? execution : null;
     const failedExecution = execution?.success === false ? execution : null;
+    const ageMs = Date.now() - Date.parse(first.createdAt);
     const status: PaymentJourneyStatus = succeededExecution ? "executed"
       : failedExecution ? "failed"
       : settlement?.eventType === "settlement_success" ? retry ? "retried" : "settled"
       : paymentFailed ? "failed"
       : retry ? "retried"
       : attempted ? "attempted"
-      : "abandoned";
+      : Number.isFinite(ageMs) && ageMs >= PAYMENT_ABANDONMENT_WINDOW_MS ? "abandoned"
+      : "awaiting_payment";
     const last = rows[rows.length - 1]!;
     const startMs = Date.parse(first.createdAt), endMs = Date.parse(last.createdAt);
     return {
@@ -75,7 +80,7 @@ export function buildPaymentJourneyRows(events: readonly AnalyticsEvent[], limit
       price: challenge?.amount ?? settlement?.amount ?? first.amount ?? null,
       currency: challenge?.currency ?? settlement?.currency ?? first.currency ?? null,
       challenge: { requestId: challenge?.challengeRequestId ?? challenge?.requestId ?? null, at: challenge?.challengeIssuedAt ?? challenge?.createdAt ?? null },
-      payment: attempted ? { attemptId: attempted.paymentAttemptId ?? null, status: (paymentFailed ? "failed" : attempted.eventType === "payment_verified" ? "verified" : "attempted") as "attempted" | "verified" | "failed", at: attempted.paymentAttemptedAt ?? attempted.paymentVerifiedAt ?? attempted.createdAt } : null,
+      payment: attempted ? { attemptId: attempted.paymentAttemptId ?? paymentAttemptReceived?.paymentAttemptId ?? null, status: (paymentFailed ? "failed" : attempted.eventType === "payment_verified" ? "verified" : "attempted") as "attempted" | "verified" | "failed", at: attempted.paymentAttemptedAt ?? attempted.paymentVerifiedAt ?? attempted.createdAt } : null,
       settlement: settlement ? { status: (settlement.eventType === "settlement_success" ? "succeeded" : "failed") as "succeeded" | "failed", txHash: settlement.txHash, at: settlement.chainSettledAt ?? settlement.settlementRecordedAt ?? settlement.createdAt } : null,
       retry: retry ? { requestId: retry.paidRetryRequestId ?? retry.requestId ?? null, at: retry.paidRetryReceivedAt ?? retry.createdAt } : null,
       execution: execution ? { status: (succeededExecution ? "succeeded" : failedExecution ? "failed" : null) as "succeeded" | "failed" | null, at: execution.executionCompletedAt ?? execution.createdAt } : null,

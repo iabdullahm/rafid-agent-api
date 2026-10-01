@@ -432,7 +432,7 @@ const CLIENT_SCRIPT = `
     converted: "chip-green", free_success: "chip-green", not_converted: "chip-gray",
     failed_before_payment: "chip-red", payment_failed: "chip-red", reconciliation_issue: "chip-red",
     unknown: "chip-gray", issued: "chip-blue", attempted: "chip-blue", verified: "chip-green", received: "chip-green",
-    succeeded: "chip-green", abandoned: "chip-amber", settled: "chip-green", retried: "chip-green", executed: "chip-green"
+    succeeded: "chip-green", awaiting_payment: "chip-blue", abandoned: "chip-amber", settled: "chip-green", retried: "chip-green", executed: "chip-green"
   };
   var chip = function (label) {
     if (label === null || label === undefined || label === "") return '<span class="chip chip-gray">\u2014</span>';

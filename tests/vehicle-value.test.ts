@@ -486,9 +486,9 @@ test("22. MCP registration: exact description, strict schema with the four requi
     assert.deepEqual([...tool.inputSchema.required].sort(), ["country", "make", "model", "year"]);
     assert.ok(tool.outputSchema.properties.estimatedValue && tool.outputSchema.properties.confidence);
     const called = await rpc(2, "tools/call", { name: "vehicle_value_estimate", arguments: VEHICLE_EXAMPLE_INPUT });
-    assert.ok(!called.result.isError, JSON.stringify(called).slice(0, 300));
-    assert.deepEqual(called.result.structuredContent, await cap.execute(VEHICLE_EXAMPLE_INPUT));
-    assert.equal(called.result.structuredContent.status, "insufficient_market_data", "default deployment: no provider, honest result");
+    assert.equal(called.error?.code, -32002, JSON.stringify(called).slice(0, 300));
+    assert.match(called.error?.message ?? "", /Payment required/i);
+    assert.equal(called.error?.data?.paymentEndpoint, "/mcp/credits");
     const bad = await rpc(3, "tools/call", { name: "vehicle_value_estimate", arguments: { make: "Toyota", model: "X", year: 1800, country: "OM" } });
     assert.ok(bad.result?.isError || bad.error);
     assert.ok(!JSON.stringify(bad).includes("at runVehicleValueEstimate"), "no stack traces");

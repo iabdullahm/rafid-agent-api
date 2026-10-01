@@ -56,7 +56,7 @@ export type McpEventType = "initialize" | "tools_list" | "tools_call";
  *  how a response is mapped to one of these from the (necessarily black-box) @x402/express
  *  payment-gate middleware's observable behavior — status code plus the standard, spec-defined
  *  X-PAYMENT-RESPONSE/PAYMENT-RESPONSE settlement header. */
-export type X402EventType = "challenge" | "payment_challenge" | "payment_verified" | "payment_failed" | "settlement_success" | "settlement_failure" | "paid_retry_received";
+export type X402EventType = "challenge" | "payment_challenge" | "payment_attempt_received" | "payment_verified" | "payment_failed" | "settlement_success" | "settlement_failure" | "paid_retry_received";
 
 /** Tool: always "invocation" — one row per capability call, across every access mode (REST
  *  X-API-Key, x402, remote MCP). */

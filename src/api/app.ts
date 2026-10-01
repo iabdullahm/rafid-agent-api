@@ -579,6 +579,23 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       res.setHeader("X-Rafid-Payment-Journey", paymentJourneyId);
       if (challengeRequestId) res.setHeader("X-Rafid-Payment-Challenge-Request", challengeRequestId);
       if (res.locals.paymentAttemptId) res.setHeader("X-Rafid-Payment-Attempt", res.locals.paymentAttemptId);
+      // Record the attempt before x402 verification/settlement. A rejected or malformed
+      // payment must remain distinguishable from a caller that never tried to pay.
+      if (hadPaymentHeader) {
+        recordX402Event(analyticsRepository, req, {
+          eventType: "payment_attempt_received", toolName,
+          amount: billingService.getToolPrice(toolName), currency: "USD", txHash: null,
+          requestId: res.locals.requestId as string,
+          client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>,
+          journey: {
+            paymentJourneyId, paymentAttemptId: res.locals.paymentAttemptId as string,
+            challengeRequestId: res.locals.challengeRequestId as string | null,
+            paidRetryRequestId: res.locals.requestId as string,
+            paymentStatus: "paid", paymentMode: "x402",
+            paymentAttemptedAt: res.locals.paymentAttemptedAt as string
+          }
+        });
+      }
       // The x402 adapter reads request headers when it invokes unpaidResponseBody. Stamp the
       // server-generated values onto the request before entering the gate; setting only the
       // response header is too late for the 402 JSON body and produces a null journey there.

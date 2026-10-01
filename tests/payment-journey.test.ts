@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { summarizeCapabilityFunnel } from "../src/analytics/aggregate.js";
+import { buildPaymentJourneyRows } from "../src/analytics/paymentJourneyReporting.js";
 import type { AnalyticsEvent } from "../src/analytics/types.js";
 
 const base = (overrides: Partial<AnalyticsEvent>): AnalyticsEvent => ({
@@ -36,4 +37,21 @@ test("legacy settlement remains explicitly uncorrelated", () => {
   assert.equal(row.paidJourneys, 0);
   assert.equal(row.legacyUncorrelatedPaid, 1);
   assert.equal(row.paymentToExecutionConversion, null);
+});
+
+test("payment attempt is visible before verification and fresh challenges await payment", () => {
+  const journey = "22222222-2222-4222-8222-222222222222";
+  const now = Date.now();
+  const fresh = buildPaymentJourneyRows([
+    base({ paymentJourneyId: journey, challengeRequestId: "req-402", createdAt: new Date(now).toISOString() })
+  ])[0]!;
+  assert.equal(fresh.status, "awaiting_payment");
+
+  const attempted = buildPaymentJourneyRows([
+    base({ paymentJourneyId: journey, challengeRequestId: "req-402", createdAt: new Date(now).toISOString() }),
+    base({ eventType: "payment_attempt_received", paymentJourneyId: journey, paymentAttemptId: "attempt-1", paymentAttemptedAt: new Date(now + 1).toISOString(), createdAt: new Date(now + 1).toISOString() })
+  ])[0]!;
+  assert.equal(attempted.payment?.attemptId, "attempt-1");
+  assert.equal(attempted.payment?.status, "attempted");
+  assert.equal(attempted.status, "attempted");
 });

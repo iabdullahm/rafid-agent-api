@@ -169,6 +169,7 @@ export function decodeX402SettlementHeader(headerValue: string | string[] | unde
 const X402_SUCCESS_BY_EVENT_TYPE: Record<X402EventType, boolean | null> = {
   challenge: null,
   payment_challenge: null,
+  payment_attempt_received: null,
   payment_verified: true,
   payment_failed: false,
   settlement_success: true,
