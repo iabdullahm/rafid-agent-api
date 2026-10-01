@@ -91,10 +91,13 @@ export function createMppMcpHandler(deps: { service: MppService; delegate: Reque
       const challengeId = credentialValue && typeof credentialValue === "object" ? String((credentialValue as { challenge?: { id?: unknown } }).challenge?.id ?? "") || null : null;
       const session = meta[RAFID_SESSION_META_KEY] as { sessionId?: unknown; idempotencyKey?: unknown } | undefined;
       const url = `https://${deps.service.config.realm}${mppMcpPath}`;
-      const common = { body: params.arguments ?? {}, authorization, url, requestId: requestIdOf(res) };
+      const common = { body: params.arguments ?? {}, authorization, url, requestId: requestIdOf(res), paymentJourneyId: res.locals.paymentJourneyId, paymentAttemptId: res.locals.paymentAttemptId, challengeRequestId: res.locals.challengeRequestId };
       const result = session && typeof session.sessionId === "string"
         ? await deps.service.callTool({ ...common, sessionId: session.sessionId, tool, idempotencyKey: typeof session.idempotencyKey === "string" ? session.idempotencyKey : undefined })
         : await deps.service.charge({ ...common, tool });
+      if (typeof res.locals.paymentJourneyId === "string") {
+        result.body = { ...result.body, paymentJourneyId: res.locals.paymentJourneyId, meta: { ...(result.body.meta as Record<string, unknown> | undefined), paymentJourneyId: res.locals.paymentJourneyId, challengeRequestId: res.locals.challengeRequestId } };
+      }
       if (result.executed) {
         res.locals.toolName = result.executed.tool;
         res.locals.channel = result.executed.channel;

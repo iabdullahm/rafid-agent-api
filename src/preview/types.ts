@@ -21,6 +21,7 @@ import type { PaymentMethodDetail } from "../billing/paymentMethods.js";
  *  the capability's own Zod schema — the same validation the paid route runs, so a preview 400 and
  *  a paid-route 400 always agree. */
 export type CapabilityPreviewStatus = "available" | "limited" | "unavailable" | "invalid_input";
+export type PreviewLeakageClass = "SAFE" | "LOW" | "MEDIUM" | "HIGH";
 
 /** Objective, non-prescriptive coverage signals an agent can weigh for itself. Every field is
  *  optional: a capability includes only the signals it can honestly compute cheaply. Nothing here
@@ -51,11 +52,16 @@ export interface CapabilityPreviewBody {
   status: CapabilityPreviewStatus;
   inputRecognized: boolean;
   preview: CapabilityPreviewSignals;
+  /** Semantic leakage classification: SAFE means coverage/availability only; it is not a score. */
+  leakageClass?: PreviewLeakageClass;
 }
 
 export interface CapabilityPreviewFullResult {
   capability: string;
   price: { amount: string; currency: string };
+  /** Canonical transition to the paid call. The body is intentionally unchanged so a preview
+   *  cannot trap an agent in a preview loop or require a second request contract. */
+  nextAction: { type: "pay_and_retry"; protocol: string; method: "POST"; url: string; retrySameBody: true };
   /** Real, config-derived payment rails an agent can actually use for the paid call — see
    *  billing/paymentMethods.ts's buildPaymentMethodDetails(). Omitted (never an empty array) when
    *  no pay-per-call rail is enabled on this deployment, so a caller can check `"paymentMethods"

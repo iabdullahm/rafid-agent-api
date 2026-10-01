@@ -11,7 +11,8 @@ export const MCP_PAID_CONVERSION_TOOLS = new Set([
   "business_risk_score",
   "company_reputation_check",
   "document_facts_extract",
-  "invoice_anomaly_check"
+  "invoice_anomaly_check",
+  "oman_supplier_check"
 ] as const);
 
 export const mcpPaymentRequiredOutput = z.object({

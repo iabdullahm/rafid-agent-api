@@ -1,0 +1,697 @@
+{
+  "protocol": "x402",
+  "network": "deployment-configured; production is expected to use Base Mainnet",
+  "asset": "USDC",
+  "services": [
+    {
+      "capability": "analyze_property",
+      "purpose": "Use when an agent needs financial metrics (yield, income, payback) for a single property.",
+      "price": 0.01,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/property/analyze",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#analyze_property",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "compare_properties",
+      "purpose": "Use when an agent must rank or choose between 2-20 candidate properties by net yield.",
+      "price": 0.03,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/property/compare",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#compare_properties",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "estimate_maintenance",
+      "purpose": "Use when an agent needs an annual maintenance reserve estimate for a property, not an actual inspection.",
+      "price": 0.02,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/maintenance/estimate",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#estimate_maintenance",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "analyze_oman_property",
+      "purpose": "Use when an agent needs Oman-specific rental, yield, sale price positioning or operating-cost analysis, especially for an Al Mouj Muscat property.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/oman/property/analyze",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#analyze_oman_property",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "search_oman_company",
+      "purpose": "Use before company analysis or due diligence when the exact company identity is uncertain, or to find candidate Oman companies matching a name or registration number.",
+      "price": 0.05,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/business/search",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#search_oman_company",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "get_oman_company_profile",
+      "purpose": "Use after search_oman_company resolves a companyId, to retrieve the company's structured profile before deciding whether deeper analysis or due diligence is warranted.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/business/profile",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#get_oman_company_profile",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "analyze_oman_company",
+      "purpose": "Use when an agent needs to assess whether an Oman company looks like a serious, established operating business — as a supplier, customer, partner or investment target.",
+      "price": 0.75,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/business/analyze",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#analyze_oman_company",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "due_diligence_oman_company",
+      "purpose": "Use before awarding a contract, entering a partnership, extending credit or investing, when a structured, source-backed due-diligence pass is needed ahead of the decision.",
+      "price": 2,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/business/due-diligence",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#due_diligence_oman_company",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "research_company",
+      "purpose": "Use when an agent needs a structured research brief on a named company — for sales/investment/partnership research, competitive analysis, or general company background — beyond what a structured company registry alone provides.",
+      "price": 0.15,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/intelligence/research-company",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#research_company",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "find_companies",
+      "purpose": "Use when an agent needs to discover a list of candidate companies matching criteria (industry, location, size, keywords) rather than analyze one already-known company.",
+      "price": 0.05,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/intelligence/find-companies",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#find_companies",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "analyze_company_risk",
+      "purpose": "Use when an agent needs risk evidence to weigh before a transaction, partnership, or onboarding decision — not a substitute for compliance/legal sign-off.",
+      "price": 0.35,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/intelligence/analyze-company-risk",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#analyze_company_risk",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "oman_supplier_check",
+      "purpose": "Use before adding an Oman supplier to an RFQ, vendor shortlist, procurement process or supplier onboarding workflow.",
+      "price": 0.5,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/procurement/oman-supplier-check",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#oman_supplier_check",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "company_reputation_check",
+      "purpose": "Use this capability when an AI agent needs to assess a company's public reputation, credibility, adverse-media exposure, sanctions signals, customer reputation, online presence, identity consistency and other publicly observable commercial risk indicators before entering a business relationship.",
+      "price": 0.4,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/risk/company-reputation-check",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#company_reputation_check",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "business_risk_score",
+      "purpose": "Use before onboarding a supplier or vendor, paying a new business, entering a B2B transaction, approving a marketplace seller, extending credit or insurance, or recommending a company — whenever an autonomous agent needs structured, evidence-backed business due diligence it cannot reliably generate from its own model knowledge.",
+      "price": 0.5,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/risk/business-risk-score",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#business_risk_score",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "social_video_generate",
+      "purpose": "Use when an agent needs a publish-ready TikTok, Reel, Short or generic social video from a topic or script.",
+      "price": 1.5,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/video/social-generate",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#social_video_generate",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "news_video_generate",
+      "purpose": "Use when an agent already has a verified headline, summary, facts and source URLs and needs a short news video.",
+      "price": 1.5,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/video/news-generate",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#news_video_generate",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "product_promo_video",
+      "purpose": "Use when an agent needs a publish-ready product or service promotion from structured marketing input.",
+      "price": 2,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/video/product-promo",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#product_promo_video",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "company_due_diligence",
+      "purpose": "Use when an autonomous agent must decide whether to continue doing business with a company and what verification or escalation should happen next.",
+      "price": 1.5,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/risk/company-due-diligence",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#company_due_diligence",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "document_facts_extract",
+      "purpose": "Use when an agent needs reliable machine-readable facts from a contract, invoice, tender, lease, purchase order, policy, financial report or other business document instead of a general summary.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/documents/facts-extract",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#document_facts_extract",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "invoice_anomaly_check",
+      "purpose": "Use before approving, paying, booking, reconciling or auditing an invoice, especially when an agent needs to determine whether the invoice requires human review.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/finance/invoice-anomaly-check",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#invoice_anomaly_check",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "vehicle_value_estimate",
+      "purpose": "Use this capability when an AI agent needs to estimate the current market value of a passenger vehicle, determine whether an asking price is reasonable, estimate private-sale or dealer values, assess depreciation, or evaluate a vehicle using local or regional market comparables.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/automotive/vehicle-value-estimate",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#vehicle_value_estimate",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "website_download",
+      "purpose": "Use when an agent needs an offline mirror of a public website and its frontend assets.",
+      "price": 0.75,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/websites/download",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#website_download",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "extract_candidate_profile",
+      "purpose": "Use before scoring or matching a CV when an agent needs reusable structured candidate evidence.",
+      "price": 0.1,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/extract-candidate-profile",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#extract_candidate_profile",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "generate_job_profile",
+      "purpose": "Use before candidate matching or shortlisting when an agent needs a structured job requirement profile.",
+      "price": 0.1,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/generate-job-profile",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#generate_job_profile",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "cv_score",
+      "purpose": "Use when an agent needs general CV quality feedback independent of a specific job.",
+      "price": 0.2,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/cv-score",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#cv_score",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "cv_job_match",
+      "purpose": "Use when an agent needs evidence-based candidate-to-job matching for one candidate.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/cv-job-match",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#cv_job_match",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "cv_improve",
+      "purpose": "Use when a candidate or recruitment agent needs actionable CV improvement guidance.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/cv-improve",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#cv_improve",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "candidate_shortlist_score",
+      "purpose": "Use after extracting multiple candidate profiles when an agent needs transparent batch comparison against one job.",
+      "price": 0.1,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/recruitment/candidate-shortlist-score",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#candidate_shortlist_score",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "strategy_performance_analysis",
+      "purpose": "Use when an agent needs deterministic historical performance analysis for a supplied trading strategy or trade set.",
+      "price": 0.35,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/trading/strategy-performance-analysis",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#strategy_performance_analysis",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "trade_risk_score",
+      "purpose": "Use before an agent recommends or executes a trade and needs an auditable risk score rather than an opaque model judgment.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/trading/trade-risk-score",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#trade_risk_score",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "portfolio_exposure_check",
+      "purpose": "Use when an agent needs to assess portfolio concentration or directional exposure before adding or modifying a position.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/trading/portfolio-exposure-check",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#portfolio_exposure_check",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "trade_log_analysis",
+      "purpose": "Use when an agent needs structured statistics and findings from a trading log or execution history.",
+      "price": 0.3,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/trading/trade-log-analysis",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#trade_log_analysis",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "shipping_cost_estimate",
+      "purpose": "Use when an agent needs to estimate delivery cost for a physical shipment before purchasing, selling, importing, exporting or selecting a shipping option.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/logistics/shipping-cost-estimate",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#shipping_cost_estimate",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "ai_call_agent",
+      "purpose": "Use when an authorized agent must contact a customer by telephone for a lawful, consent-aware objective and retrieve a structured result later.",
+      "price": 0.3,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/voice/ai-call",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#ai_call_agent",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "voice_lead_qualifier",
+      "purpose": "Use when an agent needs structured lead qualification from a lawful customer conversation rather than an ungrounded free-form model opinion.",
+      "price": 0.75,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/voice/lead-qualifier",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#voice_lead_qualifier",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "website_project_estimate",
+      "purpose": "Use when an agent needs a transparent cost and delivery estimate for building or remediating a website.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/websites/project-estimate",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#website_project_estimate",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "website_audit",
+      "purpose": "Use when an agent needs evidence-backed website issues from a public HTTPS URL before estimating remediation or rebuild work.",
+      "price": 0.75,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/websites/audit",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#website_audit",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "appointment_call_agent",
+      "purpose": "Use when an authorized agent must coordinate a customer appointment by telephone and return a machine-readable scheduling result.",
+      "price": 0.5,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/voice/appointment",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#appointment_call_agent",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "supplier_due_diligence_report",
+      "purpose": "Use when a procurement agent needs one paid supplier due-diligence result instead of coordinating several screening steps.",
+      "price": 1.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/procurement/supplier-due-diligence-report",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#supplier_due_diligence_report",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "company_risk_report",
+      "purpose": "Use when an agent needs a consolidated company risk report with both evidence and an explicit risk model.",
+      "price": 1.5,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/risk/company-risk-report",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#company_risk_report",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "property_investment_report",
+      "purpose": "Use when an agent needs one structured investment analysis for a property rather than separate market and calculator calls.",
+      "price": 0.75,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/property/property-investment-report",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#property_investment_report",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "portfolio_screen",
+      "purpose": "Use when an agent needs a first-pass ranking of multiple properties before deeper analysis.",
+      "price": 0.5,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/property/portfolio-screen",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#portfolio_screen",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "procurement_vendor_shortlist",
+      "purpose": "Use when a procurement agent needs a ranked vendor shortlist from several candidate suppliers.",
+      "price": 2,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/procurement/vendor-shortlist",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#procurement_vendor_shortlist",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "company_risk_batch",
+      "purpose": "Use when an agent needs to screen many companies efficiently instead of making separate risk-report calls.",
+      "price": 8,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/risk/company-risk-batch",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#company_risk_batch",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "startup_readiness_score",
+      "purpose": "Use when an agent needs the Creative Techno book framework for startup readiness score.",
+      "price": 0.05,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/startup-readiness-score",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#startup_readiness_score",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "business_idea_validate",
+      "purpose": "Use when an agent needs the Creative Techno book framework for business idea validate.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-idea-validate",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#business_idea_validate",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "business_idea_generator",
+      "purpose": "Use when an agent needs the Creative Techno book framework for business idea generator.",
+      "price": 0.2,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-idea-generator",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#business_idea_generator",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "business_validation_plan",
+      "purpose": "Use when an agent needs the Creative Techno book framework for business validation plan.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-validation-plan",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#business_validation_plan",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "ideal_customer_profile",
+      "purpose": "Use when an agent needs the Creative Techno book framework for ideal customer profile.",
+      "price": 0.2,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/ideal-customer-profile",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#ideal_customer_profile",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "competitor_analysis",
+      "purpose": "Use when an agent needs the Creative Techno book framework for competitor analysis.",
+      "price": 0.3,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/competitor-analysis",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#competitor_analysis",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "business_model_builder",
+      "purpose": "Use when an agent needs the Creative Techno book framework for business model builder.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-model-builder",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#business_model_builder",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "startup_cost_estimate",
+      "purpose": "Use when an agent needs the Creative Techno book framework for startup cost estimate.",
+      "price": 0.1,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/startup-cost-estimate",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#startup_cost_estimate",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "product_pricing_calculator",
+      "purpose": "Use when an agent needs the Creative Techno book framework for product pricing calculator.",
+      "price": 0.1,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/product-pricing-calculator",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#product_pricing_calculator",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "break_even_calculator",
+      "purpose": "Use when an agent needs the Creative Techno book framework for break even calculator.",
+      "price": 0.1,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/break-even-calculator",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#break_even_calculator",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "business_profitability_analysis",
+      "purpose": "Use when an agent needs the Creative Techno book framework for business profitability analysis.",
+      "price": 0.15,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-profitability-analysis",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#business_profitability_analysis",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "offer_builder",
+      "purpose": "Use when an agent needs the Creative Techno book framework for offer builder.",
+      "price": 0.2,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/offer-builder",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#offer_builder",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "oman_go_to_market_plan",
+      "purpose": "Use when an agent needs the Creative Techno book framework for oman go to market plan.",
+      "price": 0.4,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/oman-go-to-market-plan",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#oman_go_to_market_plan",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "content_plan_generator",
+      "purpose": "Use when an agent needs the Creative Techno book framework for content plan generator.",
+      "price": 0.2,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/content-plan-generator",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#content_plan_generator",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "first_10_customers_plan",
+      "purpose": "Use when an agent needs the Creative Techno book framework for first 10 customers plan.",
+      "price": 0.25,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/first-10-customers-plan",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#first_10_customers_plan",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "sales_response_builder",
+      "purpose": "Use when an agent needs the Creative Techno book framework for sales response builder.",
+      "price": 0.1,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/sales-response-builder",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#sales_response_builder",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "whatsapp_business_setup",
+      "purpose": "Use when an agent needs the Creative Techno book framework for whatsapp business setup.",
+      "price": 0.2,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/whatsapp-business-setup",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#whatsapp_business_setup",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "monthly_business_financial_report",
+      "purpose": "Use when an agent needs the Creative Techno book framework for monthly business financial report.",
+      "price": 0.15,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/monthly-business-financial-report",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#monthly_business_financial_report",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "oman_business_launch_plan",
+      "purpose": "Use when an agent needs the Creative Techno book framework for oman business launch plan.",
+      "price": 0.4,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/oman-business-launch-plan",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#oman_business_launch_plan",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "business_90_day_growth_plan",
+      "purpose": "Use when an agent needs the Creative Techno book framework for business 90 day growth plan.",
+      "price": 0.4,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-90-day-growth-plan",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#business_90_day_growth_plan",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "business_risk_check",
+      "purpose": "Use when an agent needs the Creative Techno book framework for business risk check.",
+      "price": 0.2,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/business-risk-check",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#business_risk_check",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "final_business_plan_builder",
+      "purpose": "Use when an agent needs the Creative Techno book framework for final business plan builder.",
+      "price": 0.5,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/final-business-plan-builder",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#final_business_plan_builder",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "oman_business_launch_advisor",
+      "purpose": "Use when an agent needs the Creative Techno book framework for oman business launch advisor.",
+      "price": 0.5,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/oman-business-launch-advisor",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#oman_business_launch_advisor",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "oman_business_plan_generator",
+      "purpose": "Use when an agent needs the Creative Techno book framework for oman business plan generator.",
+      "price": 1,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/oman-business-plan-generator",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#oman_business_plan_generator",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    },
+    {
+      "capability": "oman_small_business_guide",
+      "purpose": "Use when an agent needs the Creative Techno book framework for oman small business guide.",
+      "price": 0.15,
+      "currency": "USD",
+      "endpoint": "https://api.rafidsystem.com/api/v1/x402/book/oman-small-business-guide",
+      "method": "POST",
+      "inputSchema": "https://api.rafidsystem.com/api/v1/capabilities#oman_small_business_guide",
+      "payment": "Read PAYMENT-REQUIRED, pay the exact requirement, retry the same request with X-PAYMENT."
+    }
+  ]
+}

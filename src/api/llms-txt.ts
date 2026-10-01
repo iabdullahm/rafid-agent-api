@@ -1,4 +1,4 @@
-import { capabilities } from "../domain/capabilities.js";
+import { discoveryCapabilities } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
 import { prices } from "../billing/catalog.js";
 import { x402BasePath, x402DocsPath } from "../billing/x402.js";
@@ -11,6 +11,8 @@ import { paymentMethodsPath, railAvailability } from "../billing/unified/discove
 import { accountBasePath } from "../billing/unified/http.js";
 import { mcpCreditsPath } from "../billing/unified/mcp.js";
 import { PLATFORM_DESCRIPTION, PLATFORM_NAME } from "../brand.js";
+import { toolSelectionMetadata } from "../domain/capabilities.js";
+import { buildCategoryIndex, discoveryBasePath, discoveryIntentsPath, discoverySearchPath, publicToolsPath } from "./discovery.js";
 
 /**
  * GET /llms.txt — a plain-text briefing for an LLM-based agent that lands here without ever
@@ -25,12 +27,13 @@ export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network">
   const x402DocsUrl = baseUrl ? new URL(x402DocsPath, baseUrl).toString() : x402DocsPath;
   const mppCharge = Boolean(config.mpp?.enabled && config.mpp.modes.includes("charge"));
   const mppSession = Boolean(config.mpp?.enabled && config.mpp.modes.includes("session"));
-  const toolLines = capabilities.map(c => {
+  const toolLines = discoveryCapabilities.map(c => {
     const price = prices[c.name].toFixed(2);
     const lines = [
       `## ${c.name}`,
       c.description,
       `When to use: ${c.whenToUse}`,
+      (() => { const s = toolSelectionMetadata(c); return `Selection: ${s.toolRole}; prefer for ${s.recommendedFor.slice(0, 2).join(" or ")}${s.notFor.length ? `; not for ${s.notFor.slice(0, 2).join(" or ")}` : ""}.`; })(),
       `Price: $${price} ${c.currency} per call.`,
       `API key route: POST /api/v1${c.path}  (header: X-API-Key)`,
       ...(billing.billing ? [`Credits route: POST /api/v1${c.path}  (header: Authorization: Bearer raf_live_… — paid from ${[billing.subscription ? "subscription allowance" : "", billing.apiCredits ? "prepaid API credits" : ""].filter(Boolean).join(" / ")})`] : []),
@@ -62,6 +65,8 @@ export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network">
 
   const roadmapLines = plannedCapabilities.map(p => `- ${p.name}: ${p.description} (not yet implemented)`).join("\n");
 
+  const categoryLines = buildCategoryIndex().map(category => `- ${category.name}: ${category.count} capabilities`).join("\n");
+
   return `# ${PLATFORM_NAME}
 
 > ${PLATFORM_DESCRIPTION} Discover a
@@ -69,6 +74,43 @@ export function buildLlmsTxt(config: Pick<Config, "x402Enabled" | "x402Network">
 > structured JSON result. This is a calculator over the numbers you send it, not a source of
 > live market data, and not investment advice. All monetary property inputs/outputs are OMR;
 > tool prices are USD.
+
+## What Rafid Does
+
+Rafid is a multi-domain agent API. It is not only a property product: it provides structured
+company, supplier, finance, document, website, automotive, logistics, recruitment, trading,
+voice, video and business-planning tools, alongside property intelligence.
+
+## Best Starting Points
+
+- Need full company due diligence before onboarding or payment? -> company_due_diligence
+- Need only a structured company risk score? -> business_risk_score
+- Need public reputation or adverse-media signals? -> company_reputation_check
+- Need to check a supplier before procurement onboarding? -> oman_supplier_check
+- Need to detect a suspicious or duplicate invoice? -> invoice_anomaly_check
+- Need to calculate rental yield from supplied numbers? -> analyze_property
+- Need Oman/Muscat comparables? -> analyze_oman_property
+- Need a website audit? -> website_audit
+- Need a vehicle valuation? -> vehicle_value_estimate
+- Need a shipping estimate? -> shipping_cost_estimate
+
+## Capability Categories
+
+${categoryLines}
+
+## How to Choose a Tool
+
+Use the deterministic discovery search before scanning the full catalog. Prefer a primary tool
+for the broad workflow; use supporting or specialized tools only when the request is narrower.
+Do not infer that a crawler impression means a tool was selected, previewed, paid for or executed.
+
+## Discovery API
+
+- GET ${discoveryBasePath} — compact platform and protocol index
+- GET ${discoverySearchPath}?q=<intent> — deterministic lexical candidate search, not semantic AI
+- GET ${discoveryIntentsPath} — intent index derived from registry names, use cases and guidance
+- GET ${discoveryIntentsPath}/<intent> — primary/supporting resolution
+- GET ${publicToolsPath} and ${publicToolsPath}/<capability> — indexable public tool pages
 
 ## How to call a tool
 
@@ -138,6 +180,9 @@ above for which capabilities support it, or GET /api/v1/capabilities' \`preview\
 - GET /api/v1/capabilities — machine-first capability registry (schemas, pricing, when to use)
 - GET ${paymentMethodsPath} — every enabled payment method and how to select it
 - GET /openapi.json — full OpenAPI 3.1 document
+- GET /mcp — MCP Streamable HTTP when enabled; stdio: \`npm run mcp\`
+- GET /.well-known/agent.json — A2A-style Agent Card; it lists the same registry capabilities as skills
+- GET /robots.txt and /sitemap.xml — crawler policy and public documentation/tool URLs; internal routes are excluded
 
 ## Planned tools (not yet implemented — do not call these)
 

@@ -30,6 +30,9 @@ export type RevenueAmountSource = "settlement_response" | "verified_requirement"
 
 export interface RevenueSettlement {
   requestId: string;
+  paymentJourneyId?: string | null;
+  paymentAttemptId?: string | null;
+  challengeRequestId?: string | null;
   /** A CapabilityName from the shared registry (src/domain/capabilities.ts). */
   toolName: string;
   /** Identical to toolName in this codebase today — this registry has no separate
@@ -98,6 +101,14 @@ export interface RevenueSettlement {
   reconciliationSource?: "onchain";
   reconciledAt?: string;
   auditMetadata?: Record<string, string>;
+  chainSettledAt?: string | null;
+  settlementRecordedAt?: string | null;
+  settlementObservationLagMs?: number | null;
+  isInternalTest?: boolean | null;
+  testMarkerHash?: string | null;
+  normalizedClient?: string | null;
+  attributionConfidence?: string | null;
+  trafficType?: string | null;
 }
 
 export type RevenueSettlementInput = Omit<RevenueSettlement, "createdAt"> & { createdAt?: string };

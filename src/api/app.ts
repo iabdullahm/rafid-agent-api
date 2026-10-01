@@ -41,7 +41,7 @@ import { getAnalyticsDatabaseUrl, getAnalyticsInternalApiKey } from "../analytic
 import { createAnalyticsRoutes } from "./analyticsRoutes.js";
 import { classifyDataSource } from "../analytics/dataSource.js";
 import { extractClientContext } from "../analytics/attribution.js";
-import { recordDiscoveryHit, recordFundingEvent, recordToolInvocation, recordToolInvocationAwaited, recordX402Event, recordX402EventAwaited, classifyX402Outcome, decodeX402SettlementHeader } from "../analytics/recorder.js";
+import { recordDiscoverySurface, recordDiscoverySurfaceAwaited, recordDiscoveryHit, recordFundingEvent, recordToolInvocation, recordToolInvocationAwaited, recordX402Event, recordX402EventAwaited, classifyX402Outcome, decodeX402SettlementHeader } from "../analytics/recorder.js";
 import { getWebsiteDownloadArtifact } from "../website-download/service.js";
 import type { RevenueLedger } from "../revenue/types.js";
 import { MemoryRevenueLedger } from "../revenue/memoryLedger.js";
@@ -59,6 +59,7 @@ import { PublicBtcUsdRateProvider, type BtcUsdRateProvider } from "../billing/l4
 import { MemoryL402RedemptionStore, PostgresL402RedemptionStore, type L402RedemptionStore } from "../billing/l402/redemptions.js";
 import { buildL402SettlementRecord } from "../billing/l402/settlement.js";
 import { recordL402Event } from "../analytics/recorder.js";
+import { PAYMENT_ATTEMPT_HEADER, PAYMENT_CHALLENGE_REQUEST_HEADER, PAYMENT_JOURNEY_HEADER, findPaymentJourney, journeyIdFrom, newPaymentAttemptId, rememberPaymentJourney, type PaymentJourneySnapshot } from "../analytics/paymentJourney.js";
 import { createVoiceRoutes } from "./voiceRoutes.js";
 import { defaultVoiceService } from "../voice/service.js";
 import { createMppMcpHandler, mppMcpPath } from "../billing/mpp/mcp.js";
@@ -67,6 +68,7 @@ import { BillingEngine, MemoryBillingStore, PostgresBillingStore, BILLING_RESPON
 import { ExternalPaymentsService, MemoryExternalPaymentStore, PostgresExternalPaymentStore, RealStripeClient, buildJsonRpcCaller, createExternalPaymentsAdminRoutes, createExternalPaymentsRoutes, disabledExternalPaymentsConfig, type ExternalPaymentStore, type JsonRpcCall, type StripeClient } from "../billing/external/index.js";
 import { buildMppService, buildMppInfo, buildMppStatus, createMppDisabledRoutes, createMppRoutes, createMppSessionCreateLimiter, mppBasePath, type MppAuditSink, type MppProvider, type MppSessionRepository, type MppChargeRedemptionStore, type MppKv, type MppService } from "../billing/mpp/index.js";
 import { createMonitoringRoutes, MonitoringService } from "../monitoring/service.js";
+import { buildDiscoveryIndex, buildIntentDetail, buildIntentIndex, buildRobotsTxt, buildSitemapXml, discoveryBasePath, discoveryIntentsPath, discoverySearchPath, publicToolsPath, renderToolIndex, renderToolPage, searchCapabilities } from "./discovery.js";
 /** The largest per-capability JSON body limit (bytes → body-parser string), for shared endpoints. */
 function maxCapabilityBodyLimit(): string {
   const toBytes = (l: string) => { const m = /^(\d+(?:\.\d+)?)\s*(kb|mb)$/i.exec(l.trim()); return m ? Number(m[1]) * (m[2]!.toLowerCase() === "mb" ? 1024 * 1024 : 1024) : 32 * 1024; };
@@ -74,6 +76,15 @@ function maxCapabilityBodyLimit(): string {
   return `${Math.round(max / 1024)}kb`;
 }
 function formatBytes(n: number): string { return n >= 1024 * 1024 ? `${Math.round(n / 1024 / 1024 * 10) / 10}mb` : `${Math.round(n / 1024)}kb`; }
+function validationFailureKind(errorCode: string | undefined, details: unknown): "missing_required_field" | "invalid_enum" | "ambiguous_entity" | "other" | null {
+  if (!errorCode) return null;
+  if (errorCode === "AMBIGUOUS_ENTITY") return "ambiguous_entity";
+  if (errorCode !== "INVALID_INPUT") return null;
+  const text = JSON.stringify(details ?? "");
+  if (/required|received undefined|expected .+ received undefined/i.test(text)) return "missing_required_field";
+  if (/enum|invalid_enum|Invalid enum/i.test(text)) return "invalid_enum";
+  return "other";
+}
 
 export function createApp(config: Config, options: { logger?: Logger; billing?: BillingGate; billingService?: BillingService; rateLimiter?: RequestHandler; store?: CustomerStore; marketRepository?: PropertyMarketRepository; partnerRepository?: PartnerRepository; ingestionAuditRepository?: PartnerIngestionAuditRepository; businessRepository?: CompanyRepository; analyticsRepository?: AnalyticsRepository; revenueLedger?: RevenueLedger; l402Backend?: LightningBackend; l402Rates?: BtcUsdRateProvider; l402Redemptions?: L402RedemptionStore; l402Now?: () => number; mppProvider?: MppProvider; mppSessions?: MppSessionRepository; mppRedemptions?: MppChargeRedemptionStore; mppKv?: MppKv; mppAudit?: MppAuditSink; mppNow?: () => Date; billingStore?: BillingStore; billingNow?: () => Date; previewCache?: PreviewCache; previewConversionIndex?: PreviewConversionIndex; externalPaymentStore?: ExternalPaymentStore; externalPaymentsNow?: () => Date; stripeClient?: StripeClient; usdcRpcCall?: JsonRpcCall } = {}) {
   if (config.authMode === "postgres" && !options.store) throw new Error("PostgreSQL customer store required");
@@ -183,10 +194,10 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     // call idempotency keys — per-request values, never ambient browser state.
     // X-Rafid-Payment-Method / X-Rafid-Api-Key: unified-billing rail selection and an alternative
     // header for a Rafid billing key — per-request values, never ambient browser state.
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-PAYMENT, PAYMENT-SIGNATURE, Authorization, Payment-Authorization, Idempotency-Key, X-Rafid-Payment-Method, X-Rafid-Api-Key, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-API-Key, X-PAYMENT, PAYMENT-SIGNATURE, Authorization, Payment-Authorization, Idempotency-Key, X-Rafid-Payment-Method, X-Rafid-Api-Key, X-Rafid-Payment-Journey, X-Rafid-Payment-Attempt, X-Rafid-Payment-Challenge-Request, MCP-Protocol-Version, Mcp-Session-Id, Last-Event-ID");
     // WWW-Authenticate carries the L402 challenge (macaroon + invoice); a browser client must be
     // able to read it back.
-    res.setHeader("Access-Control-Expose-Headers", `Mcp-Session-Id, WWW-Authenticate, X-L402-Error, PAYMENT-REQUIRED, X-PAYMENT-RESPONSE, PAYMENT-RESPONSE, Payment-Receipt, Idempotent-Replay, X-Request-ID, X-Rafid-Request-Id, ${BILLING_RESPONSE_HEADERS.join(", ")}, X-Rafid-Refunded-Transaction-Id`);
+    res.setHeader("Access-Control-Expose-Headers", `Mcp-Session-Id, WWW-Authenticate, X-L402-Error, PAYMENT-REQUIRED, X-PAYMENT-RESPONSE, PAYMENT-RESPONSE, Payment-Receipt, Idempotent-Replay, X-Request-ID, X-Rafid-Request-Id, X-Rafid-Payment-Journey, X-Rafid-Payment-Attempt, X-Rafid-Payment-Challenge-Request, ${BILLING_RESPONSE_HEADERS.join(", ")}, X-Rafid-Refunded-Transaction-Id`);
     res.setHeader("Access-Control-Max-Age", "600");
     res.on("finish", () => {
       const durationMs = Math.round((performance.now() - start) * 100) / 100;
@@ -228,7 +239,17 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
             toolName, channel: accessMode === "api-key" ? "rest" : accessMode, success: res.statusCode < 400, durationMs,
             dataSource: (res.locals.dataSource as DataSource | undefined) ?? null,
             client: extractClientContext(req),
-            requestId: typeof res.locals.requestId === "string" ? res.locals.requestId : null
+            requestId: typeof res.locals.requestId === "string" ? res.locals.requestId : null,
+            validationErrorCode: (res.locals.validationErrorCode as string | undefined) ?? null,
+            validationFailureKind: (res.locals.validationFailureKind as "missing_required_field" | "invalid_enum" | "ambiguous_entity" | "other" | undefined) ?? null,
+            journey: res.locals.paymentJourneyId ? {
+              paymentJourneyId: res.locals.paymentJourneyId as string,
+              paymentAttemptId: res.locals.paymentAttemptId as string | null,
+              challengeRequestId: res.locals.challengeRequestId as string | null,
+              paidRetryRequestId: res.locals.requestId as string | null,
+              paymentStatus: "paid" as const,
+              paymentMode: "x402"
+            } : undefined
           });
         }
         // Free Preview conversion analytics (src/preview/analytics.ts): this `finish` handler is
@@ -322,6 +343,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     ...(config.mpp.enabled ? { mpp: mppBasePath } : {}),
     endpoints: capabilities.map(c => "/api/v1" + c.path)
   };
+  const presentedCapabilities = capabilities.map(c => c.name);
   // Section I: browsers get a landing page; machine/agent clients that ask for JSON (the
   // pre-existing behavior) keep getting the discovery payload unchanged.
   app.get("/", discoveryLimiter, (req, res) => {
@@ -329,12 +351,12 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     res.type("html").send(landingHtml(config));
   });
   for (const path of ["/health", "/api/v1/health"]) app.get(path, (_req, res) => send(res, { ok: true }));
-  // Internal analytics DISCOVERY tracking: exactly the 7 surfaces the spec names (see
+  // Internal analytics DISCOVERY tracking: the named discovery surfaces (see
   // analytics/recorder.ts's DISCOVERY_PATHS) — "/mcp" is recorded separately, inside
   // mcp/remote.ts's handler, since it lives on its own route family below. Deliberately NOT
   // added to every discovery-ish endpoint (e.g. /api/v1/agent, /api/v1/pricing, /.well-known/
   // ai-plugin.json, /api/v1/mcp/status) — only the ones actually named.
-  app.get("/openapi.json", (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/openapi.json"); res.json(openapiDoc); });
+   app.get("/openapi.json", async (req, res) => { await recordDiscoverySurfaceAwaited(analyticsRepository, req, "/openapi.json", presentedCapabilities); res.json(openapiDoc); });
   app.get("/docs", (_req, res) => {
     res.setHeader("Content-Security-Policy", swaggerContentSecurityPolicy);
     res.type("html").send(swaggerHtml);
@@ -344,7 +366,7 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   app.get(agentBasePath, discoveryLimiter, (req, res) => send(res, buildAgentInfo(config, getPublicBaseUrl(req))));
   app.get(pricingBasePath, discoveryLimiter, (_req, res) => send(res, buildPricingInfo(config)));
   app.get(subscriptionPlansPath, discoveryLimiter, (_req, res) => send(res, buildSubscriptionPlans(config)));
-  app.get(toolsBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, toolsBasePath); send(res, buildToolCatalog()); });
+   app.get(toolsBasePath, discoveryLimiter, async (req, res) => { await recordDiscoverySurfaceAwaited(analyticsRepository, req, toolsBasePath, presentedCapabilities); send(res, buildToolCatalog()); });
   // Machine-first capability registry (Section 8/13): the same data /agent.json's `tools`
   // field carries, exposed on its own path so a caller that only wants tool metadata doesn't
   // have to fetch the full manifest.
@@ -352,13 +374,55 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // how to authenticate. Always mounted, like /api/v1/x402 — even when billing is disabled it
   // still truthfully lists whichever of x402 / L402 / MPP are live.
   app.get(paymentMethodsPath, discoveryLimiter, (_req, res) => send(res, buildPaymentMethods(config)));
-  app.get(capabilitiesBasePath, discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, capabilitiesBasePath); send(res, buildCapabilitiesRegistry(config, getPublicBaseUrl(req))); });
+   app.get(capabilitiesBasePath, discoveryLimiter, async (req, res) => { await recordDiscoverySurfaceAwaited(analyticsRepository, req, capabilitiesBasePath, presentedCapabilities); send(res, buildCapabilitiesRegistry(config, getPublicBaseUrl(req))); });
   // Top-level agent discovery manifests. Unauthenticated, GET-only, and — like every other
   // discovery endpoint here — read straight from the shared capability registry.
-  app.get("/agent.json", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/agent.json"); res.json(buildAgentManifest(config, getPublicBaseUrl(req))); });
-  app.get("/.well-known/ai-plugin.json", discoveryLimiter, (req, res) => res.json(buildAiPluginManifest(config, getOrigin(req))));
-  app.get("/.well-known/agent.json", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/.well-known/agent.json"); res.json(buildAgentCard(config, getOrigin(req))); });
-  app.get("/llms.txt", discoveryLimiter, (req, res) => { recordDiscoveryHit(analyticsRepository, req, "/llms.txt"); res.type("text/plain").send(buildLlmsTxt(config, `${req.protocol}://${req.get("host")}`)); });
+   app.get("/agent.json", discoveryLimiter, async (req, res) => { await recordDiscoverySurfaceAwaited(analyticsRepository, req, "/agent.json", presentedCapabilities); res.json(buildAgentManifest(config, getPublicBaseUrl(req))); });
+   app.get("/.well-known/ai-plugin.json", discoveryLimiter, async (req, res) => { await recordDiscoverySurfaceAwaited(analyticsRepository, req, "/.well-known/ai-plugin.json", presentedCapabilities); res.json(buildAiPluginManifest(config, getOrigin(req))); });
+   app.get("/.well-known/agent.json", discoveryLimiter, async (req, res) => { await recordDiscoverySurfaceAwaited(analyticsRepository, req, "/.well-known/agent.json", presentedCapabilities); res.json(buildAgentCard(config, getOrigin(req))); });
+   app.get("/llms.txt", discoveryLimiter, async (req, res) => { await recordDiscoverySurfaceAwaited(analyticsRepository, req, "/llms.txt", presentedCapabilities); res.type("text/plain").send(buildLlmsTxt(config, getPublicBaseUrl(req) ?? `${req.protocol}://${req.get("host")}`)); });
+  // Compact discovery index and deterministic intent search. These are public navigation
+  // surfaces, not capabilities and not an LLM: every result is derived from the canonical
+  // registry and its selection metadata, with no price-based ranking.
+   app.get(discoveryBasePath, discoveryLimiter, async (req, res) => {
+     await recordDiscoverySurfaceAwaited(analyticsRepository, req, discoveryBasePath, presentedCapabilities);
+    res.json({ success: true, data: buildDiscoveryIndex(config, getPublicBaseUrl(req)), meta: { requestId: res.locals.requestId } });
+  });
+   app.get(discoverySearchPath, discoveryLimiter, async (req, res) => {
+    const query = typeof req.query.q === "string" ? req.query.q : "";
+     await recordDiscoverySurfaceAwaited(analyticsRepository, req, discoverySearchPath, []);
+    res.json({ success: true, data: searchCapabilities(query, config, getPublicBaseUrl(req)), meta: { requestId: res.locals.requestId } });
+  });
+   app.get(discoveryIntentsPath, discoveryLimiter, async (req, res) => {
+     await recordDiscoverySurfaceAwaited(analyticsRepository, req, discoveryIntentsPath, []);
+    res.json({ success: true, data: buildIntentIndex(), meta: { requestId: res.locals.requestId } });
+  });
+   app.get(`${discoveryIntentsPath}/:intent`, discoveryLimiter, async (req, res) => {
+    const intent = typeof req.params.intent === "string" ? req.params.intent : "";
+    const detail = buildIntentDetail(intent);
+     await recordDiscoverySurfaceAwaited(analyticsRepository, req, `${discoveryIntentsPath}/:intent`, detail?.capabilities ?? []);
+    if (!detail) return res.status(404).json({ success: false, error: { code: "INTENT_NOT_FOUND", message: "Unknown discovery intent" }, meta: { requestId: res.locals.requestId } });
+    return res.json({ success: true, data: detail, meta: { requestId: res.locals.requestId } });
+  });
+  // SEO-friendly public pages are generated from the same registry. They contain no internal
+  // analytics paths and never duplicate prices, schemas or protocol metadata by hand.
+   app.get(publicToolsPath, discoveryLimiter, async (req, res) => {
+     await recordDiscoverySurfaceAwaited(analyticsRepository, req, publicToolsPath, presentedCapabilities);
+    res.type("html").send(renderToolIndex(config, getPublicBaseUrl(req), {
+      q: typeof req.query.q === "string" ? req.query.q : undefined,
+      category: typeof req.query.category === "string" ? req.query.category : undefined,
+      intent: typeof req.query.intent === "string" ? req.query.intent : undefined
+    }));
+  });
+   app.get(`${publicToolsPath}/:capability`, discoveryLimiter, async (req, res) => {
+    const capability = typeof req.params.capability === "string" ? req.params.capability : "";
+    const page = renderToolPage(capability, config, getPublicBaseUrl(req));
+     await recordDiscoverySurfaceAwaited(analyticsRepository, req, `${publicToolsPath}/:capability`, page ? [capability] : []);
+    if (!page) return res.status(404).type("html").send("<!doctype html><title>Not found</title><h1>Capability not found</h1>");
+    return res.type("html").send(page);
+  });
+  app.get("/robots.txt", discoveryLimiter, (req, res) => res.type("text/plain").send(buildRobotsTxt(getPublicBaseUrl(req))));
+  app.get("/sitemap.xml", discoveryLimiter, (req, res) => res.type("application/xml").send(buildSitemapXml(getPublicBaseUrl(req))));
   // GET /api/v1/mcp/status — always mounted (independent of MCP_REMOTE_ENABLED, like
   // /api/v1/x402/status is independent of X402_ENABLED), so a caller can check whether the
   // remote transport is live without guessing from a manifest.
@@ -487,14 +551,78 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       const match = capabilities.find(c => path === x402BasePath + c.path);
       return match ? match.name : null;
     };
-    app.use((req, res, next) => {
+    app.use(async (req, res, next) => {
       const toolName = toolNameForX402Path(req.path);
       if (!toolName) { next(); return; }
+      const hadPaymentHeader = Boolean(req.header("x-payment"));
+      const paymentJourneyId = journeyIdFrom(req.header(PAYMENT_JOURNEY_HEADER));
+      const currentClient = extractClientContext(req);
+      const suppliedChallengeRequestId = req.header(PAYMENT_CHALLENGE_REQUEST_HEADER);
+      let snapshot: PaymentJourneySnapshot | null = null;
+      if (hadPaymentHeader) snapshot = await findPaymentJourney(analyticsRepository, paymentJourneyId);
+      const challengeRequestId = suppliedChallengeRequestId ?? snapshot?.challengeRequestId ?? (hadPaymentHeader ? null : res.locals.requestId);
+      const effectiveClient = snapshot ?? {
+        ...currentClient,
+        paymentJourneyId,
+        challengeRequestId: challengeRequestId ?? res.locals.requestId,
+        isInternalTest: currentClient.isInternalTest === true,
+        testMarkerHash: currentClient.testMarkerHash ?? null
+      };
+      if (!hadPaymentHeader) rememberPaymentJourney(effectiveClient);
+      res.locals.paymentJourneyId = paymentJourneyId;
+      res.locals.paymentAttemptId = hadPaymentHeader ? newPaymentAttemptId() : null;
+      res.locals.challengeRequestId = challengeRequestId;
+      res.locals.paymentJourneyClient = effectiveClient;
+      res.locals.challengeIssuedAt = hadPaymentHeader ? null : new Date().toISOString();
+      res.locals.paymentAttemptedAt = hadPaymentHeader ? new Date().toISOString() : null;
+      res.locals.paidRetryReceivedAt = hadPaymentHeader ? new Date().toISOString() : null;
+      res.setHeader("X-Rafid-Payment-Journey", paymentJourneyId);
+      if (challengeRequestId) res.setHeader("X-Rafid-Payment-Challenge-Request", challengeRequestId);
+      if (res.locals.paymentAttemptId) res.setHeader("X-Rafid-Payment-Attempt", res.locals.paymentAttemptId);
+      // Record the attempt before x402 verification/settlement. A rejected or malformed
+      // payment must remain distinguishable from a caller that never tried to pay.
+      if (hadPaymentHeader) {
+        recordX402Event(analyticsRepository, req, {
+          eventType: "payment_attempt_received", toolName,
+          amount: billingService.getToolPrice(toolName), currency: "USD", txHash: null,
+          requestId: res.locals.requestId as string,
+          client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>,
+          journey: {
+            paymentJourneyId, paymentAttemptId: res.locals.paymentAttemptId as string,
+            challengeRequestId: res.locals.challengeRequestId as string | null,
+            paidRetryRequestId: res.locals.requestId as string,
+            paymentStatus: "paid", paymentMode: "x402",
+            paymentAttemptedAt: res.locals.paymentAttemptedAt as string
+          }
+        });
+      }
+      // The x402 adapter reads request headers when it invokes unpaidResponseBody. Stamp the
+      // server-generated values onto the request before entering the gate; setting only the
+      // response header is too late for the 402 JSON body and produces a null journey there.
+      req.headers[PAYMENT_JOURNEY_HEADER] = paymentJourneyId;
+      if (challengeRequestId) req.headers[PAYMENT_CHALLENGE_REQUEST_HEADER] = challengeRequestId;
       // @x402/express response-body callbacks receive a protocol adapter rather than the
       // Express response. Preserve the server-generated correlation id in an internal request
       // header so the agent-facing 402 JSON can include the same id without trusting caller input.
       req.headers["x-rafid-request-id"] = res.locals.requestId;
-      const hadPaymentHeader = Boolean(req.header("x-payment"));
+      if (!hadPaymentHeader) {
+        try {
+          await recordX402EventAwaited(analyticsRepository, req, {
+            eventType: "payment_challenge", toolName, amount: billingService.getToolPrice(toolName), currency: "USD", txHash: null,
+            requestId: res.locals.requestId as string,
+            paymentGuidanceVersion: X402_PAYMENT_GUIDANCE_VERSION, paymentDocsUrl: `${getOrigin(req)}${x402DocsPath}`, challengeParseable: true,
+            client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>,
+            journey: {
+              paymentJourneyId, paymentAttemptId: null, challengeRequestId: res.locals.requestId as string,
+              paidRetryRequestId: null, paymentStatus: "unpaid", paymentMode: "x402", challengeIssuedAt: res.locals.challengeIssuedAt as string
+            }
+          });
+          res.locals.x402ChallengeRecorded = true;
+        } catch {
+          // Preserve payment availability if analytics storage is temporarily unavailable;
+          // the finish observer below remains a best-effort fallback.
+        }
+      }
       res.on("finish", () => {
         const settlementHeader = (res.getHeader("x-payment-response") ?? res.getHeader("payment-response")) as string | string[] | undefined;
         const settlement = decodeX402SettlementHeader(settlementHeader);
@@ -508,18 +636,31 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         // could be mistaken for a real join key. RevenueSettlement.requestId is non-nullable so
         // recordSettlement below still falls back to randomUUID() for its own record.
         const x402RequestId = typeof res.locals.requestId === "string" ? res.locals.requestId : null;
-        if (!res.locals.x402DurableSettlementRecorded) {
+        const journey = {
+          paymentJourneyId: res.locals.paymentJourneyId as string | null,
+          paymentAttemptId: res.locals.paymentAttemptId as string | null,
+          challengeRequestId: res.locals.challengeRequestId as string | null,
+          paidRetryRequestId: hadPaymentHeader ? x402RequestId : null,
+          paymentStatus: hadPaymentHeader ? "paid" as const : "unpaid" as const,
+          paymentMode: "x402",
+          challengeIssuedAt: res.locals.challengeIssuedAt as string | null,
+          paymentAttemptedAt: res.locals.paymentAttemptedAt as string | null,
+          paidRetryReceivedAt: res.locals.paidRetryReceivedAt as string | null,
+          settlementRecordedAt: eventType === "settlement_success" ? new Date().toISOString() : null
+        };
+        if (!res.locals.x402DurableSettlementRecorded && !(eventType === "challenge" && res.locals.x402ChallengeRecorded)) {
           const paymentDocsUrl = `${getOrigin(req)}${x402DocsPath}`;
           recordX402Event(analyticsRepository, req, {
             eventType, toolName, amount, currency: "USD", txHash: settlement?.transaction ?? null, requestId: x402RequestId,
-            ...(eventType === "challenge" ? { paymentGuidanceVersion: X402_PAYMENT_GUIDANCE_VERSION, paymentDocsUrl, challengeParseable: true } : {})
+            ...(eventType === "challenge" ? { paymentGuidanceVersion: X402_PAYMENT_GUIDANCE_VERSION, paymentDocsUrl, challengeParseable: true } : {}),
+            client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>, journey
           });
         }
         // A settled payment implies verification already succeeded (buildX402Gate()'s doc
         // comment: settlement is never attempted on an unverified payment) — record both funnel
         // steps from the one observable success, rather than only the terminal one.
         if (eventType === "settlement_success" && !res.locals.x402DurableSettlementRecorded) {
-          recordX402Event(analyticsRepository, req, { eventType: "payment_verified", toolName, amount, currency: "USD", txHash: null, requestId: x402RequestId });
+          recordX402Event(analyticsRepository, req, { eventType: "payment_verified", toolName, amount, currency: "USD", txHash: null, requestId: x402RequestId, client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>, journey: { ...journey, paymentVerifiedAt: new Date().toISOString(), facilitatorVerifiedAt: new Date().toISOString() } });
         }
         // Revenue ledger (trustworthy accounting — see src/revenue/types.ts): only when a
         // settlement was actually observed (succeeded or failed), never for a bare 402 challenge
@@ -530,13 +671,17 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         if (!res.locals.x402DurableSettlementRecorded && (eventType === "settlement_success" || eventType === "settlement_failure")) {
           const decoded = decodeX402SettlementMetadata(settlementHeader);
           if (decoded) {
-            recordSettlement(revenueLedger, buildSettlementRecord({
+              recordSettlement(revenueLedger, buildSettlementRecord({
               settlement: decoded,
               requestId: typeof res.locals.requestId === "string" ? res.locals.requestId : randomUUID(),
               toolName, network: config.x402Network,
               facilitator: config.cdpConfigured ? "coinbase-cdp" : "public",
               payToAddress: config.x402WalletAddress,
-              requirementAmountDecimal: amount, currency: "USDC"
+              requirementAmountDecimal: amount, currency: "USDC",
+              paymentJourneyId: res.locals.paymentJourneyId as string | null,
+              paymentAttemptId: res.locals.paymentAttemptId as string | null,
+              challengeRequestId: res.locals.challengeRequestId as string | null,
+              client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>
             }));
           }
         }
@@ -551,6 +696,25 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
         (req, _res, next) => req.is("application/json") ? next() : next(new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Use application/json")),
         c.requestBodyLimit ? parseJsonFor(c) : parseJsonX402, async (req, res) => {
           const startedAt = performance.now();
+          const lifecycleRequestId = typeof res.locals.requestId === "string" ? res.locals.requestId : randomUUID();
+          const lifecycleAmount = billingService.getToolPrice(c.name);
+          const lifecycleJourney = {
+            paymentJourneyId: res.locals.paymentJourneyId as string | null,
+            paymentAttemptId: res.locals.paymentAttemptId as string | null,
+            challengeRequestId: res.locals.challengeRequestId as string | null,
+            paidRetryRequestId: lifecycleRequestId,
+            paymentStatus: "paid" as const,
+            paymentMode: "x402",
+            paymentAttemptedAt: res.locals.paymentAttemptedAt as string | null,
+            paidRetryReceivedAt: res.locals.paidRetryReceivedAt as string | null,
+            executionStartedAt: new Date().toISOString()
+          };
+          try {
+            await recordX402EventAwaited(analyticsRepository, req, { eventType: "paid_retry_received", toolName: c.name, amount: lifecycleAmount, currency: "USD", txHash: null, requestId: lifecycleRequestId, client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>, journey: lifecycleJourney });
+            await recordToolInvocationAwaited(analyticsRepository, { toolName: c.name, channel: "x402", success: true, durationMs: 0, dataSource: null, client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>, requestId: lifecycleRequestId, eventType: "execution_started", journey: lifecycleJourney });
+          } catch {
+            // Analytics must never turn a paid capability into a failed capability.
+          }
           const input = c.input.parse(req.body);
           const data = await c.execute(input);
           res.locals.dataSource = classifyDataSource(c.name, data);
@@ -568,15 +732,37 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
               const record = buildSettlementRecord({
                 settlement: settled, requestId, toolName: c.name, network: config.x402Network,
                 facilitator: config.cdpConfigured ? "coinbase-cdp" : "public",
-                payToAddress: config.x402WalletAddress, requirementAmountDecimal: amount, currency: "USDC"
+                payToAddress: config.x402WalletAddress, requirementAmountDecimal: amount, currency: "USDC",
+                paymentJourneyId: res.locals.paymentJourneyId as string | null,
+                paymentAttemptId: res.locals.paymentAttemptId as string | null,
+                challengeRequestId: res.locals.challengeRequestId as string | null,
+                client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>
               });
               await recordSettlementAwaited(revenueLedger, record);
-              await recordX402EventAwaited(analyticsRepository, req, { eventType: "settlement_success", toolName: c.name, amount, currency: "USD", txHash: settled.transaction, requestId });
-              await recordX402EventAwaited(analyticsRepository, req, { eventType: "payment_verified", toolName: c.name, amount, currency: "USD", txHash: null, requestId });
+              const journey = {
+                paymentJourneyId: res.locals.paymentJourneyId as string | null,
+                paymentAttemptId: res.locals.paymentAttemptId as string | null,
+                challengeRequestId: res.locals.challengeRequestId as string | null,
+                paidRetryRequestId: requestId,
+                paymentStatus: "paid" as const,
+                paymentMode: "x402",
+                paymentAttemptedAt: res.locals.paymentAttemptedAt as string | null,
+                paidRetryReceivedAt: res.locals.paidRetryReceivedAt as string | null,
+                paymentVerifiedAt: new Date().toISOString(),
+                facilitatorVerifiedAt: new Date().toISOString(),
+                settlementRecordedAt: new Date().toISOString()
+              };
+              await recordX402EventAwaited(analyticsRepository, req, { eventType: "settlement_success", toolName: c.name, amount, currency: "USD", txHash: settled.transaction, requestId, client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>, journey });
+              await recordX402EventAwaited(analyticsRepository, req, { eventType: "payment_verified", toolName: c.name, amount, currency: "USD", txHash: null, requestId, client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>, journey });
               await recordToolInvocationAwaited(analyticsRepository, {
                 toolName: c.name, channel: "x402", success: true,
                 durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
-                dataSource: (res.locals.dataSource as DataSource | undefined) ?? null, client: extractClientContext(req), requestId
+                dataSource: (res.locals.dataSource as DataSource | undefined) ?? null, client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>, requestId, eventType: "invocation", journey: { ...journey, executionCompletedAt: new Date().toISOString() }
+              });
+              await recordToolInvocationAwaited(analyticsRepository, {
+                toolName: c.name, channel: "x402", success: true,
+                durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+                dataSource: (res.locals.dataSource as DataSource | undefined) ?? null, client: res.locals.paymentJourneyClient as ReturnType<typeof extractClientContext>, requestId, eventType: "execution_completed", journey: { ...journey, executionCompletedAt: new Date().toISOString() }
               });
               res.locals.x402DurableSettlementRecorded = true;
               res.locals.x402DurableToolRecorded = true;
@@ -619,20 +805,30 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       // same join key recordSettlement below uses, never a fabricated one. Fallback is null (an
       // analytics row with no requestId is honestly uncorrelatable) — recordSettlement's own
       // requestId is non-nullable so it keeps its randomUUID() fallback.
-      onChallenge: (req, tool) => recordL402Event(analyticsRepository, req, { eventType: "challenge", toolName: tool, amount: billingService.getToolPrice(tool), txHash: null, requestId: typeof req.res?.locals.requestId === "string" ? req.res.locals.requestId : null }),
-      onRejected: (req, tool) => recordL402Event(analyticsRepository, req, { eventType: "payment_failed", toolName: tool, amount: billingService.getToolPrice(tool), txHash: null, requestId: typeof req.res?.locals.requestId === "string" ? req.res.locals.requestId : null }),
+      onChallenge: (req, tool) => recordL402Event(analyticsRepository, req, { eventType: "challenge", toolName: tool, amount: billingService.getToolPrice(tool), txHash: null, requestId: typeof req.res?.locals.requestId === "string" ? req.res.locals.requestId : null, journey: { paymentJourneyId: req.res?.locals.paymentJourneyId ?? null, challengeRequestId: req.res?.locals.requestId ?? null, paymentStatus: "unpaid", paymentMode: "l402" } }),
+      onRejected: (req, tool) => recordL402Event(analyticsRepository, req, { eventType: "payment_failed", toolName: tool, amount: billingService.getToolPrice(tool), txHash: null, requestId: typeof req.res?.locals.requestId === "string" ? req.res.locals.requestId : null, journey: { paymentJourneyId: req.res?.locals.paymentJourneyId ?? null, challengeRequestId: req.res?.locals.challengeRequestId ?? null, paymentStatus: "paid", paymentMode: "l402" } }),
       onRedeemed: (req, res, ctx) => {
         const l402RequestId = typeof res.locals.requestId === "string" ? res.locals.requestId : null;
-        recordL402Event(analyticsRepository, req, { eventType: "settlement_success", toolName: ctx.toolName, amount: ctx.priceUsd, txHash: ctx.paymentHashHex, requestId: l402RequestId });
+        recordL402Event(analyticsRepository, req, { eventType: "settlement_success", toolName: ctx.toolName, amount: ctx.priceUsd, txHash: ctx.paymentHashHex, requestId: l402RequestId, journey: { paymentJourneyId: res.locals.paymentJourneyId ?? null, paymentAttemptId: res.locals.paymentAttemptId ?? null, challengeRequestId: res.locals.challengeRequestId ?? null, paidRetryRequestId: l402RequestId, paymentStatus: "paid", paymentMode: "l402" } });
         recordSettlement(revenueLedger, buildL402SettlementRecord({
           ctx, network: config.l402Network, payTo: l402PayTo, facilitator: config.l402Backend,
-          requestId: l402RequestId ?? randomUUID()
+          requestId: l402RequestId ?? randomUUID(), paymentJourneyId: res.locals.paymentJourneyId ?? null, paymentAttemptId: res.locals.paymentAttemptId ?? null, challengeRequestId: res.locals.challengeRequestId ?? null
         }));
       }
     });
     const parseJsonL402 = express.json({ limit: "32kb" });
     for (const c of capabilities) {
       app.post(l402BasePath + c.path,
+        (req, res, next) => {
+          const id = journeyIdFrom(req.header(PAYMENT_JOURNEY_HEADER));
+          req.headers[PAYMENT_JOURNEY_HEADER] = id;
+          res.locals.paymentJourneyId = id;
+          res.locals.paymentAttemptId = req.header("authorization") ? newPaymentAttemptId() : null;
+          res.locals.challengeRequestId = req.header(PAYMENT_CHALLENGE_REQUEST_HEADER) ?? (req.header("authorization") ? null : res.locals.requestId);
+          res.setHeader("X-Rafid-Payment-Journey", id);
+          if (res.locals.challengeRequestId) res.setHeader("X-Rafid-Payment-Challenge-Request", res.locals.challengeRequestId);
+          next();
+        },
         // Gate first, then mark: like x402, an unpaid 402 challenge is not a tool invocation and
         // must not be recorded as a (failed) call in usage/analytics.
         l402Gate(c.name),
@@ -662,6 +858,20 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       provider: options.mppProvider, sessions: options.mppSessions, redemptions: options.mppRedemptions, kv: options.mppKv, now: options.mppNow
     });
     mppServiceRef = mppService;
+    // Correlate the complete MPP challenge/authorization/settlement journey without changing
+    // MPP pricing, credentials, or execution. Clients may carry this additive header across the
+    // 402 retry; otherwise the first request establishes a fresh logical journey.
+    app.use(mppBasePath, (req, res, next) => {
+      const paymentJourneyId = journeyIdFrom(req.header(PAYMENT_JOURNEY_HEADER)) ?? randomUUID();
+      const challengeRequestId = req.header(PAYMENT_CHALLENGE_REQUEST_HEADER) ?? (typeof res.locals.requestId === "string" ? res.locals.requestId : randomUUID());
+      res.locals.paymentJourneyId = paymentJourneyId;
+      res.locals.paymentAttemptId = req.header("authorization") ? newPaymentAttemptId() : null;
+      res.locals.challengeRequestId = challengeRequestId;
+      res.setHeader(PAYMENT_JOURNEY_HEADER, paymentJourneyId);
+      res.setHeader(PAYMENT_CHALLENGE_REQUEST_HEADER, challengeRequestId);
+      if (res.locals.paymentAttemptId) res.setHeader(PAYMENT_ATTEMPT_HEADER, res.locals.paymentAttemptId);
+      next();
+    });
     app.use(createMppRoutes({
       service: mppService, limiter: mppLimiter, sessionCreateLimiter: config.rateLimitEnabled ? createMppSessionCreateLimiter(config.mpp) : disabledRateLimiter,
       bodyLimitFor: tool => capabilities.find(c => c.name === tool)?.requestBodyLimit
@@ -670,6 +880,17 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     // on its own path, delegating everything but tools/call to the standard MCP handler, so the
     // free /mcp endpoint is untouched. See billing/mpp/mcp.ts.
     if (config.mpp.mcpEnabled && config.mcpRemoteEnabled) {
+      app.use(mppMcpPath, (req, res, next) => {
+        const paymentJourneyId = journeyIdFrom(req.header(PAYMENT_JOURNEY_HEADER));
+        const challengeRequestId = req.header(PAYMENT_CHALLENGE_REQUEST_HEADER) ?? (typeof res.locals.requestId === "string" ? res.locals.requestId : randomUUID());
+        res.locals.paymentJourneyId = paymentJourneyId;
+        res.locals.paymentAttemptId = req.header("authorization") ? newPaymentAttemptId() : null;
+        res.locals.challengeRequestId = challengeRequestId;
+        res.setHeader(PAYMENT_JOURNEY_HEADER, paymentJourneyId);
+        res.setHeader(PAYMENT_CHALLENGE_REQUEST_HEADER, challengeRequestId);
+        if (res.locals.paymentAttemptId) res.setHeader(PAYMENT_ATTEMPT_HEADER, res.locals.paymentAttemptId);
+        next();
+      });
       app.post(mppMcpPath, mcpLimiter, express.json({ limit: maxCapabilityBodyLimit() }),
         createMppMcpHandler({ service: mppService, delegate: createRemoteMcpHandler(billingService, logger, analyticsRepository, { previewConfig: config, paidConversionEnabled: false }) }));
     }
@@ -816,6 +1037,10 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
       : type === "charset.unsupported" || type === "encoding.unsupported" ? new ApiError(415, "UNSUPPORTED_MEDIA_TYPE", "Unsupported body encoding")
       : error;
     let result = publicError(normalized);
+    if (res.locals.toolName && (result.status === 400 || result.status === 409)) {
+      res.locals.validationErrorCode = result.error.code;
+      res.locals.validationFailureKind = validationFailureKind(result.error.code, result.error.details);
+    }
     try { await complete(res,result.status); } catch { result = publicError(new ApiError(503,"SERVICE_UNAVAILABLE","Usage storage unavailable")); }
     res.status(result.status).json({ success: false, error: result.error, meta: { requestId: res.locals.requestId } });
   };

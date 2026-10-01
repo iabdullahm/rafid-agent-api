@@ -26,6 +26,10 @@ export class MemoryAnalyticsRepository implements AnalyticsRepository {
       .slice(0, MAX_QUERY_EVENTS);
   }
 
+  async findByPaymentJourneyId(paymentJourneyId: string): Promise<AnalyticsEvent[]> {
+    return this.events.filter(event => event.paymentJourneyId === paymentJourneyId).slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
   /** Test-only helpers — never used by production call sites. */
   clear(): void {
     this.events.length = 0;

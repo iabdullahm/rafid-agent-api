@@ -1,6 +1,7 @@
 import { capabilities } from "../domain/capabilities.js";
 import { ApiError } from "../utils/errors.js";
 import type { CapabilityPreviewResult, CapabilityPreviewFullResult } from "./types.js";
+import { previewLeakageClass } from "./classification.js";
 import { buildPaymentMethodDetails, type PaymentDiscoveryConfig } from "../billing/paymentMethods.js";
 
 /**
@@ -46,6 +47,7 @@ export async function runCapabilityPreview(capabilityName: string, rawInput: unk
   const fullResult: CapabilityPreviewFullResult = {
     capability: capability.name,
     price: { amount: capability.price.toFixed(2), currency: capability.currency },
+    nextAction: { type: "pay_and_retry", protocol: capability.paymentProtocol, method: "POST", url: "/api/v1" + capability.path, retrySameBody: true },
     endpoint: "/api/v1" + capability.path,
     ...(paymentMethods.length ? { paymentMethods } : {})
   };
@@ -57,5 +59,5 @@ export async function runCapabilityPreview(capabilityName: string, rawInput: unk
     return { capability: capability.name, status: "unavailable", inputRecognized: false, preview: {}, fullResult };
   }
   const body = await capability.preview(rawInput);
-  return { ...body, fullResult };
+  return { ...body, leakageClass: previewLeakageClass(capability.name), fullResult };
 }

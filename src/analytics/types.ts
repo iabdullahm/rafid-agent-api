@@ -45,7 +45,7 @@ export type FundingEventType =
   | "usdc_topup_created" | "usdc_topup_confirmed" | "usdc_topup_failed" | "credits_funded";
 
 /** Discovery: always "hit" — which surface was hit is carried in `path`. */
-export type DiscoveryEventType = "hit";
+export type DiscoveryEventType = "hit" | "surface_requested";
 
 /** MCP: the three JSON-RPC methods this layer distinguishes, matching the spec's literal list
  *  (initialize, tools/list, tools/call) with underscores instead of slashes for a stable SQL/JS
@@ -56,11 +56,11 @@ export type McpEventType = "initialize" | "tools_list" | "tools_call";
  *  how a response is mapped to one of these from the (necessarily black-box) @x402/express
  *  payment-gate middleware's observable behavior — status code plus the standard, spec-defined
  *  X-PAYMENT-RESPONSE/PAYMENT-RESPONSE settlement header. */
-export type X402EventType = "challenge" | "payment_verified" | "payment_failed" | "settlement_success" | "settlement_failure";
+export type X402EventType = "challenge" | "payment_challenge" | "payment_attempt_received" | "payment_verified" | "payment_failed" | "settlement_success" | "settlement_failure" | "paid_retry_received";
 
 /** Tool: always "invocation" — one row per capability call, across every access mode (REST
  *  X-API-Key, x402, remote MCP). */
-export type ToolEventType = "invocation";
+export type ToolEventType = "invocation" | "execution_started" | "execution_completed";
 
 /** Free Preview funnel + preview→paid conversion events (see preview/analytics.ts). One row per
  *  step, across the whole discover -> preview -> evaluate -> pay -> execute flow:
@@ -129,6 +129,8 @@ export interface AnalyticsEvent {
   /** Discovery only — one of the exact surfaces this layer tracks (see recorder.ts's
    *  DISCOVERY_PATHS). Never a full URL, never a query string. */
   path: string | null;
+  /** Discovery surface response contents, not an assertion that an agent inspected every item. */
+  presentedCapabilities?: string[] | null;
   /** mcp tools_call and tool invocations only — a CapabilityName from the shared registry. */
   toolName: string | null;
   /** Tool invocations only — see AnalyticsChannel's doc comment. */
@@ -169,6 +171,35 @@ export interface AnalyticsEvent {
   referrerHost?: string | null;
   clientType?: "browser" | "curl" | "sdk" | "mcp-client" | "unknown";
   trafficClass?: "production_external" | "internal_test" | "unknown";
+  normalizedClient?: string | null;
+  attributionConfidence?: "high" | "medium" | "low" | "unknown";
+  trafficType?: "mcp_agent" | "rest_agent" | "browser_or_human" | "crawler" | "sdk_client" | "payment_test" | "internal_test" | "unknown";
+  interactionType?: "discovery" | "mcp" | "preview" | "capability" | "payment" | "browser_navigation" | "unknown";
+  mcpClient?: string | null;
+  sdk?: string | null;
+  /** Validation telemetry only: a stable public error code, never raw input or provider text. */
+  validationErrorCode?: string | null;
+  validationFailureKind?: "missing_required_field" | "invalid_enum" | "ambiguous_entity" | "other" | null;
+  paymentJourneyId?: string | null;
+  paymentAttemptId?: string | null;
+  parentRequestId?: string | null;
+  challengeRequestId?: string | null;
+  paidRetryRequestId?: string | null;
+  paymentStatus?: "unpaid" | "paid" | "free" | "internal" | "other" | null;
+  paymentMode?: string | null;
+  isInternalTest?: boolean | null;
+  testMarkerHash?: string | null;
+  challengeIssuedAt?: string | null;
+  paymentAttemptedAt?: string | null;
+  paymentVerifiedAt?: string | null;
+  facilitatorVerifiedAt?: string | null;
+  chainSubmittedAt?: string | null;
+  chainSettledAt?: string | null;
+  settlementRecordedAt?: string | null;
+  paidRetryReceivedAt?: string | null;
+  executionStartedAt?: string | null;
+  executionCompletedAt?: string | null;
+  settlementObservationLagMs?: number | null;
   /** Preview category only (see PreviewEventType) — a one-way SHA-256/HMAC digest of capability +
    *  normalized input (preview/fingerprint.ts). NEVER raw input: this is the one field that joins
    *  a preview_requested row to a later paid_capability_started/preview_converted row for the same
@@ -233,6 +264,8 @@ export interface AnalyticsRepository {
    *  counts rather than OOMing or timing out — see aggregate.ts's doc comment on what that means
    *  for very high-traffic windows. */
   queryEvents(since: Date): Promise<AnalyticsEvent[]>;
+  /** Correlation-specific read path used by the internal payment-journey endpoint and tests. */
+  findByPaymentJourneyId?(paymentJourneyId: string): Promise<AnalyticsEvent[]>;
 }
 
 /** Shared cap between MemoryAnalyticsRepository and PostgresAnalyticsRepository so both

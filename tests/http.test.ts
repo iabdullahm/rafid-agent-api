@@ -59,7 +59,18 @@ test("REST: auth, all services, discovery, errors, and log redaction", async t =
       }
       assert.equal(response.status, 200);
       const body = await response.json();
-      assert.equal(body.success, true); assert.deepEqual(body.data, await c.execute(c.example));
+      assert.equal(body.success, true);
+      const expected = await c.execute(c.example);
+      if (c.name === "website_download") {
+        assert.equal(typeof body.data.durationMs, "number");
+        assert.ok(body.data.durationMs >= 0);
+        assert.equal(typeof (expected as any).durationMs, "number");
+        const { durationMs: _actualDuration, ...actualStable } = body.data;
+        const { durationMs: _expectedDuration, ...expectedStable } = expected as any;
+        assert.deepEqual(actualStable, expectedStable);
+      } else {
+        assert.deepEqual(body.data, expected);
+      }
       assert.equal(body.meta.requestId, response.headers.get("x-request-id"));
       assert.ok(c.output.safeParse(body.data).success);
     }

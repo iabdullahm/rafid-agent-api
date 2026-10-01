@@ -399,7 +399,9 @@ test("analyze_oman_property: MCP tool registration matches the shared registry e
     assert.equal(called.error?.data?.paymentEndpoint, "/mcp/credits");
 
     const invalid = await rpc("tools/call", { name: "analyze_oman_property", arguments: { governorate: "Muscat" } });
-    assert.equal(invalid.error?.code, -32002);
+    // MCP validates canonical tool input before any payment handoff, so invalid requests are
+    // rejected as JSON-RPC invalid params and never receive a payment challenge.
+    assert.equal(invalid.error?.code, -32602);
   });
 });
 

@@ -9,7 +9,8 @@ import type { Config } from "../config/env.js";
 import type { AnalyticsRepository, DataSource } from "../analytics/types.js";
 import { mcpClientContext } from "../analytics/context.js";
 import { extractClientContext } from "../analytics/attribution.js";
-import { mapMcpMethod, recordMcpEvent, recordToolInvocation, recordDiscoveryHit, currentMcpClientContext } from "../analytics/recorder.js";
+import { mapMcpMethod, recordMcpEvent, recordToolInvocation, recordDiscoverySurface, currentMcpClientContext } from "../analytics/recorder.js";
+import { discoveryCapabilities } from "../domain/capabilities.js";
 import type { PaymentDiscoveryConfig } from "../billing/paymentMethods.js";
 
 /** Public path for the remote (Streamable HTTP) MCP transport. Mounted only when
@@ -108,7 +109,7 @@ export function createRemoteMcpHandler(
     // DISCOVERY_PATHS) — one row per HTTP request reaching this transport at all, independent of
     // and in addition to the more granular MCP-category method breakdown (initialize/tools_list/
     // tools_call) recorded below.
-    recordDiscoveryHit(analyticsRepository, req, mcpRemotePath);
+    recordDiscoverySurface(analyticsRepository, req, mcpRemotePath, discoveryCapabilities.map(c => c.name));
     const method = mapMcpMethod((req.body as { method?: unknown } | undefined)?.method);
     if (method === "initialize" || method === "tools_list") {
       recordMcpEvent(analyticsRepository, { eventType: method, client });
@@ -127,11 +128,54 @@ export function createRemoteMcpHandler(
     if (method === "tools_call") {
       const params = (req.body as { params?: { name?: unknown; arguments?: unknown } } | undefined)?.params;
       const toolName = typeof params?.name === "string" ? params.name : null;
-      const capability = toolName ? capabilities.find(c => c.name === toolName) : undefined;
+      const id = (req.body as { id?: string | number | null } | undefined)?.id ?? null;
+
+      if (!toolName) {
+        res.status(200).json({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32602, message: "Invalid params: tools/call requires a tool name." }
+        });
+        return;
+      }
+
+      // preview_capability is the one generic MCP tool registered by createMcpServer()
+      // alongside the registry-backed capabilities. It has its own schema and execution
+      // callback in mcp/server.ts, so it must reach the SDK instead of being rejected by this
+      // capability-only preflight as an unknown tool.
+      const capability = toolName === "preview_capability" ? null : capabilities.find(c => c.name === toolName);
+      if (toolName !== "preview_capability" && !capability) {
+        res.status(200).json({
+          jsonrpc: "2.0",
+          id,
+          error: { code: -32601, message: `Unknown tool: ${toolName}` }
+        });
+        return;
+      }
+
       if (capability) {
+
+      // Validate against the canonical registry schema before any billing or execution.
+      // This keeps every MCP tool in sync with REST/OpenAPI and guarantees invalid input
+      // can never trigger a charge or a payment handoff.
+      const parsed = capability.input.safeParse(params?.arguments ?? {});
+      if (!parsed.success) {
+        recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: capability.name, success: false, durationMs: 0, client });
+        recordToolInvocation(analyticsRepository, { toolName: capability.name, channel: "mcp-remote", success: false, durationMs: 0, dataSource: null, client });
+        res.status(200).json({
+          jsonrpc: "2.0",
+          id,
+          error: {
+            code: -32602,
+            message: `Invalid arguments for ${capability.name}.`,
+            data: { code: "INVALID_INPUT" }
+          }
+        });
+        return;
+      }
+
         const priceUsd = billingService.getToolPrice(capability.name as CapabilityName);
         if (priceUsd > 0 && !options.paidConversionEnabled) {
-          const id = (req.body as { id?: string | number | null } | undefined)?.id ?? null;
           res.status(402).json({
             jsonrpc: "2.0",
             id,
@@ -147,11 +191,6 @@ export function createRemoteMcpHandler(
             }
           });
           return;
-        }
-        const parsed = capability.input.safeParse(params?.arguments ?? {});
-        if (!parsed.success) {
-          recordMcpEvent(analyticsRepository, { eventType: "tools_call", toolName: capability.name, success: false, durationMs: 0, client });
-          recordToolInvocation(analyticsRepository, { toolName: capability.name, channel: "mcp-remote", success: false, durationMs: 0, dataSource: null, client });
         }
       }
     }

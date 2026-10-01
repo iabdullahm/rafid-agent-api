@@ -40,6 +40,12 @@ export interface MppResult {
   executed?: { tool: string; success: boolean; data?: unknown; channel: "mpp" | "mpp-session" };
 }
 
+export interface MppJourneyFields {
+  paymentJourneyId?: string | null;
+  paymentAttemptId?: string | null;
+  challengeRequestId?: string | null;
+}
+
 export interface MppServiceDeps {
   config: MppConfig;
   provider: MppProvider;
@@ -135,7 +141,7 @@ export class MppService {
   // charge — one-time payment for one tool call
   // ==========================================================================================
 
-  async charge(args: { tool: string; body: unknown; authorization: string | undefined; url: string; requestId: string }): Promise<MppResult> {
+  async charge(args: { tool: string; body: unknown; authorization: string | undefined; url: string; requestId: string } & MppJourneyFields): Promise<MppResult> {
     const { requestId } = args;
     if (!this.hasMode("charge")) return this.errorResult(new MppError(404, "MPP_MODE_DISABLED", "MPP charge mode is not enabled on this deployment."), requestId);
     let tool: MppTool, priceMicros: number;
@@ -205,7 +211,7 @@ export class MppService {
       return { ...r, executed: { tool: tool.name, success: false, channel: "mpp" } };
     }
     await this.deps.redemptions.markRedeemed(verified.challengeId, settled.reference).catch(() => process.stderr.write("MPP markRedeemed failed\n"));
-    this.deps.recordSettlement(buildMppChargeSettlementRecord({ settled, tool: tool.name, amountMicros: priceMicros, requestId, payer: verified.payer }));
+    this.deps.recordSettlement(buildMppChargeSettlementRecord({ settled, tool: tool.name, amountMicros: priceMicros, requestId, payer: verified.payer, paymentJourneyId: args.paymentJourneyId, paymentAttemptId: args.paymentAttemptId, challengeRequestId: args.challengeRequestId }));
     mppAudit(this.deps.audit, "mpp.charge.settled", { requestId, tool: tool.name, challengeId: verified.challengeId, method: settled.method, reference: settled.reference, amountUsd: microsToUsd(priceMicros) });
     return {
       status: 200,
@@ -223,7 +229,7 @@ export class MppService {
   // session — reusable authorization + metered usage
   // ==========================================================================================
 
-  async createSession(args: { body: unknown; authorization: string | undefined; url: string; requestId: string; clientKey?: string | null }): Promise<MppResult> {
+  async createSession(args: { body: unknown; authorization: string | undefined; url: string; requestId: string; clientKey?: string | null } & MppJourneyFields): Promise<MppResult> {
     const { requestId } = args;
     const config = this.deps.config;
     if (!this.hasMode("session")) return this.errorResult(new MppError(404, "MPP_MODE_DISABLED", "MPP session mode is not enabled on this deployment."), requestId);
@@ -371,7 +377,7 @@ export class MppService {
     }
   }
 
-  async callTool(args: { sessionId: string; tool: string; body: unknown; authorization: string | undefined; idempotencyKey: string | undefined; url: string; requestId: string }): Promise<MppResult> {
+  async callTool(args: { sessionId: string; tool: string; body: unknown; authorization: string | undefined; idempotencyKey: string | undefined; url: string; requestId: string } & MppJourneyFields): Promise<MppResult> {
     const { requestId } = args;
     const config = this.deps.config;
     if (!this.hasMode("session")) return this.errorResult(new MppError(404, "MPP_MODE_DISABLED", "MPP session mode is not enabled on this deployment."), requestId);
@@ -531,7 +537,7 @@ export class MppService {
    * after an unknown outcome can't capture twice; the ledger records only the delta the chain
    * reports. A result is "settled" only after the settle/close transaction's receipt is confirmed.
    */
-  async closeSession(args: { sessionId: string; authorization: string | undefined; requestId: string; url?: string }): Promise<MppResult> {
+  async closeSession(args: { sessionId: string; authorization: string | undefined; requestId: string; url?: string } & MppJourneyFields): Promise<MppResult> {
     const { requestId } = args;
     const config = this.deps.config;
     if (!this.hasMode("session")) return this.errorResult(new MppError(404, "MPP_MODE_DISABLED", "MPP session mode is not enabled on this deployment."), requestId);
@@ -622,7 +628,7 @@ export class MppService {
       return respond();
     }
     session = (await this.deps.sessions.finishSettlement(session.id, { settlementStatus: "settled", settlementReference: result.reference, settledMicros: result.settledMicros }).catch(() => null)) ?? session;
-    const record = buildMppSessionSettlementRecord({ result, sessionId: session.id, requestId });
+    const record = buildMppSessionSettlementRecord({ result, sessionId: session.id, requestId, paymentJourneyId: args.paymentJourneyId, paymentAttemptId: args.paymentAttemptId, challengeRequestId: args.challengeRequestId });
     if (record) this.deps.recordSettlement(record);
     mppAudit(this.deps.audit, "mpp.session.settled", { requestId, sessionId: session.id, channelId, reference: result.reference, amountUsd: microsToUsd(result.deltaMicros), spentUsd: microsToUsd(session.spentMicros), status: result.finalized ? "channel_closed" : "settled" });
     if (result.receiptHeader) headers.push(["Payment-Receipt", result.receiptHeader]);
@@ -635,7 +641,7 @@ export class MppService {
    * it returns null for anything that isn't a management credential. A management credential
    * never runs a tool. `topUp` is not supported yet and is refused explicitly.
    */
-  async sessionManagement(args: { sessionId?: string; authorization: string | undefined; url: string; requestId: string }): Promise<MppResult | null> {
+  async sessionManagement(args: { sessionId?: string; authorization: string | undefined; url: string; requestId: string } & MppJourneyFields): Promise<MppResult | null> {
     if (!args.authorization || !PAYMENT_SCHEME.test(args.authorization)) return null;
     const preview = this.deps.provider.previewCredential(args.authorization);
     if (!preview || preview.intent !== "session" || (preview.action !== "close" && preview.action !== "topUp")) return null;
@@ -649,7 +655,7 @@ export class MppService {
       session = args.sessionId ? await this.deps.sessions.get(args.sessionId) : preview.channelId ? await this.deps.sessions.getByExternalId(preview.channelId) : null;
     } catch { return this.errorResult(mppErrors.storageUnavailable(), requestId); }
     if (!session) return this.errorResult(mppErrors.sessionNotFound(), requestId);
-    return this.closeSession({ sessionId: session.id, authorization: args.authorization, requestId, url: args.url });
+    return this.closeSession({ sessionId: session.id, authorization: args.authorization, requestId, url: args.url, paymentJourneyId: args.paymentJourneyId, paymentAttemptId: args.paymentAttemptId, challengeRequestId: args.challengeRequestId });
   }
 
   /**

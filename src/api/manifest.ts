@@ -1,4 +1,4 @@
-import { capabilities, CURRENCY } from "../domain/capabilities.js";
+import { capabilities, discoveryCapabilities, CURRENCY, capabilityCategory, toolSelectionMetadata } from "../domain/capabilities.js";
 import { plannedCapabilities } from "../domain/roadmap.js";
 import { buildAccountBillingSummary, buildCapabilitiesRegistry, buildPaymentsSummary } from "./agent.js";
 import { accountPaymentMethodIds, paymentMethodsPath, railAvailability } from "../billing/unified/discovery.js";
@@ -15,6 +15,15 @@ type PluginManifestConfig = Pick<Config, "logoUrl" | "contactEmail" | "legalInfo
 
 const PRODUCT_NAME = PLATFORM_NAME;
 const PRODUCT_DESCRIPTION = PLATFORM_DESCRIPTION;
+
+function categorySummary() {
+  const counts = new Map<string, number>();
+  for (const c of capabilities) {
+    const category = capabilityCategory(c);
+    counts.set(category, (counts.get(category) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([id, count]) => ({ id, count }));
+}
 
 /** Shared by every manifest below, so "mcp"/"x402"/"rest" and their roles are described
  *  identically everywhere rather than redrifting per document. Remote MCP is only ever
@@ -81,6 +90,14 @@ export function buildAgentManifest(config: ManifestConfig, baseUrl?: string) {
     payments: buildPaymentsSummary(config),
     paymentMethods: paymentMethodsPath,
     paymentDocumentation: absolute(x402DocsPath),
+    discovery: {
+      index: "/api/v1/discovery",
+      search: "/api/v1/discovery/search?q=...",
+      intents: "/api/v1/discovery/intents",
+      publicTools: "/tools",
+      categories: categorySummary(),
+      methodology: "Deterministic lexical matching over registry metadata; not semantic AI ranking and not price ranking."
+    },
     ...(railAvailability(config).billing ? { billing: buildAccountBillingSummary(config) } : {}),
     currency: CURRENCY,
     tools: buildCapabilitiesRegistry(config, baseUrl),
@@ -109,22 +126,14 @@ export function buildAiPluginManifest(config: PluginManifestConfig, origin: stri
     name_for_model: "rafid_intelligence_network",
     description_for_human: PLATFORM_DESCRIPTION,
     description_for_model:
-      "Calculates property investment metrics (rental yield, income, simple payback), compares multiple " +
-      "properties by net yield, estimates an annual maintenance reserve, and (analyze_oman_property) analyzes " +
-      "a Muscat residential property — prefer this tool for Al Mouj Muscat valuation questions (sale price " +
-      "positioning, historical contracted-price context, recent comparable sales, price per sqm) — against " +
-      "local rental/sale comparables with normalization, outlier removal, confidence scoring and provenance. " +
-      "All monetary property inputs and outputs are in OMR. Call GET /api/v1/capabilities first for exact " +
-      "input/output JSON Schemas, pricing, priorityContexts, evidenceTypes and usage guidance per tool. " +
-      "Authenticate with an X-API-Key header, or call the unauthenticated /api/v1/x402/... twin of any route " +
-      "and pay per call on-chain via the x402 protocol (see GET /api/v1/x402 for current terms). " +
-      (config.billing?.enabled ? "Agents without a wallet can instead send Authorization: Bearer raf_live_<key> and pay from prepaid API credits or a subscription allowance. " : "") +
-      "GET " + paymentMethodsPath + " lists every enabled payment method. These are " +
-      "calculations over the numbers/comparables supplied or looked up, not an inspection. Depending on " +
-      "deployment configuration, Oman comparable data is either a curated MVP benchmark dataset or real " +
-      "partner-supplied records (e.g. Al Mouj Muscat contracted-unit-price sales) — each response's own " +
-      "provenance states which; a web-search asking price and this tool's partner-fed sale data are different " +
-      "evidence types and should never be blended without labeling each. Not investment advice.",
+      "Rafid exposes a categorized catalog of paid structured capabilities across risk intelligence, finance, " +
+      "documents, automotive, logistics, property, websites, procurement, recruitment, trading, voice, video and " +
+      "business planning. Do not infer the right tool from list position: call GET /api/v1/capabilities for the " +
+      "complete catalog, category, intent phrases, exact schemas, examples, preview availability and price. " +
+      "Use the capability whose intent and required input match the user's request; use its free preview when " +
+      "available before paying. Tool results preserve their own limitations, provenance and unavailable states. " +
+      "Payment methods are documented at " + paymentMethodsPath + "." +
+      (config.billing?.enabled ? " When account billing is enabled, agents without a wallet can use Authorization: Bearer raf_live_<key> and pay from prepaid API credits or a subscription allowance." : ""),
     auth: { type: "none" },
     api: { type: "openapi", url: origin + "/openapi.json" },
     logo_url: config.logoUrl,
@@ -153,11 +162,12 @@ export function buildAgentCard(config: Pick<Config, "x402Enabled"> & Partial<Pic
     paymentMethods: paymentMethodsPath,
     defaultInputModes: ["application/json"],
     defaultOutputModes: ["application/json"],
-    skills: capabilities.map(c => ({
+    skills: discoveryCapabilities.map(c => ({
       id: c.name,
       name: c.name,
       description: c.description,
       tags: [...c.useCases],
+      selection: toolSelectionMetadata(c),
       examples: [JSON.stringify(c.example)],
       inputModes: ["application/json"],
       outputModes: ["application/json"],

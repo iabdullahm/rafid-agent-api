@@ -1,6 +1,6 @@
-# Rafid Intelligence Network — Agent Distribution Pack
+# Rafid Agent API / Rafid Intelligence Network — Agent Distribution Pack
 
-Property intelligence built for AI agents.
+Structured intelligence and paid tools for AI agents across multiple capability categories.
 
 **Discover. Pay per call. Execute.**
 
@@ -30,6 +30,11 @@ This directory packages Rafid for distribution to AI agents, agent frameworks, a
 | [`examples/`](examples/) | Worked integration paths: OpenAI/Codex-style agents, Claude, Cursor, a generic HTTP/MCP/x402 agent, and a full example agent flow for a real Al Mouj question. |
 | [`snippets/`](snippets/) | Minimal, runnable curl/Node/MCP snippets. |
 | [`manifest.json`](manifest.json) | Machine-readable distribution manifest, generated from the capability registry (`npm run distribution:manifest`). |
+| [`platform.json`](platform.json) | Compact platform identity, protocol and discovery links. |
+| [`capabilities.json`](capabilities.json) | Generated capability summaries for directory submission. |
+| [`categories.json`](categories.json) | Generated category counts. |
+| [`intents.json`](intents.json) | Generated intent keys from capability names and use cases. |
+| [`directories/registry-readiness.md`](directories/registry-readiness.md) | External registry readiness matrix; no external submission is claimed. |
 
 ## Core value proposition
 

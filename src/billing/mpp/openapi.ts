@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { capabilities } from "../../domain/capabilities.js";
+import { capabilities, discoveryCapabilities } from "../../domain/capabilities.js";
 import type { MppConfig } from "./config.js";
 import { describeMppConfig } from "./config.js";
 import { mppBasePath } from "./routes.js";
@@ -73,7 +73,7 @@ export function buildMppOpenapiPaths(config: MppConfig | undefined): Record<stri
   paths[mppBasePath + "/status"] = { get: { operationId: "mpp_status", tags: ["MPP"], summary: "MPP runtime status (secret-free)", security: [], responses: { "200": { description: "Status" } } } };
   if (!config?.enabled) return paths;
   const d = describeMppConfig(config);
-  const tools = capabilities.map(c => c.name);
+  const tools = discoveryCapabilities.map(c => c.name);
 
   if (config.modes.includes("charge")) {
     paths[mppBasePath + "/charge/{tool}"] = { post: {

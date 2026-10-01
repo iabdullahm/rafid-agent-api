@@ -1083,6 +1083,11 @@ test("buildActivityFeed: sorts newest-first, produces a human-readable label per
   assert.match(feed[2]!.label, /MCP session initialized/);
   assert.match(feed[3]!.label, /Discovery hit on \/agent\.json/);
 
+  const durableChallenge = buildActivityFeed([analyticsEvent({
+    category: "x402", eventType: "payment_challenge", toolName: "analyze_property", createdAt: "2026-01-01T00:04:00.000Z"
+  }) as AnalyticsEvent]);
+  assert.match(durableChallenge[0]!.label, /402 payment challenge issued for analyze_property/);
+
   const many: AnalyticsEvent[] = Array.from({ length: 60 }, (_, i) =>
     analyticsEvent({ createdAt: new Date(Date.now() - i * 1000).toISOString() }) as AnalyticsEvent);
   assert.equal(buildActivityFeed(many).length, 50);

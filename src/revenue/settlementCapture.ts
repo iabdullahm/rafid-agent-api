@@ -105,6 +105,10 @@ export function buildSettlementRecord(args: {
   payToAddress: string;
   requirementAmountDecimal: number;
   currency: string;
+  paymentJourneyId?: string | null;
+  paymentAttemptId?: string | null;
+  challengeRequestId?: string | null;
+  client?: { isInternalTest?: boolean; testMarkerHash?: string | null; normalizedClient?: string | null; attributionConfidence?: string; trafficType?: string };
 }): RevenueSettlementInput {
   const { settlement, requestId, toolName, network, facilitator, payToAddress, requirementAmountDecimal, currency } = args;
   const status: RevenueSettlementStatus = settlement.success ? "settlement_succeeded" : "settlement_failed";
@@ -137,7 +141,8 @@ export function buildSettlementRecord(args: {
   const dedupeKey = buildSettlementDedupeKey({ network: settlement.network ?? network, transactionHash, requestId, toolName });
 
   return {
-    requestId, toolName, capabilityName: toolName,
+    requestId, paymentJourneyId: args.paymentJourneyId ?? null, paymentAttemptId: args.paymentAttemptId ?? null, challengeRequestId: args.challengeRequestId ?? null,
+    toolName, capabilityName: toolName,
     amountAtomic, amountDecimal, amountSource,
     currency: amountSource === "unavailable" ? null : currency,
     network: settlement.network ?? network,
@@ -150,7 +155,10 @@ export function buildSettlementRecord(args: {
     errorReason: status === "settlement_failed" ? settlement.errorReason : null,
     paymentVerifiedAt: now,
     settledAt: status === "settlement_succeeded" ? now : null,
-    dedupeKey
+    dedupeKey, settlementRecordedAt: now,
+    isInternalTest: args.client?.isInternalTest ?? null, testMarkerHash: args.client?.testMarkerHash ?? null,
+    normalizedClient: args.client?.normalizedClient ?? null, attributionConfidence: args.client?.attributionConfidence ?? null,
+    trafficType: args.client?.trafficType ?? null
   };
 }
 

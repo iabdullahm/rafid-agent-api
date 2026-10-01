@@ -691,9 +691,10 @@ test("MCP registration: oman_supplier_check is listed with its registry descript
     assert.deepEqual(tool.inputSchema.required, ["companyName"]);
     assert.equal(tool.annotations.idempotentHint, true);
     const called = await rpc(2, "tools/call", { name: "oman_supplier_check", arguments: { companyName: "Example Technical Services LLC", requiredProductOrService: "HVAC maintenance" } });
-    assert.equal(called.error?.code, -32002, JSON.stringify(called).slice(0, 300));
-    assert.match(called.error?.message ?? "", /Payment required/i);
-    assert.equal(called.error?.data?.paymentEndpoint, "/mcp/credits");
+    assert.equal(called.error, undefined, JSON.stringify(called).slice(0, 300));
+    assert.equal(called.result?.structuredContent?.status, "payment_required");
+    assert.equal(called.result?.structuredContent?.tool, "oman_supplier_check");
+    assert.equal(called.result?.structuredContent?.payment?.retrySameBody, true);
     const invalid = await rpc(3, "tools/call", { name: "oman_supplier_check", arguments: { website: "https://x.om" } });
     assert.ok(invalid.result?.isError || invalid.error);
   });

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { capabilities } from "../domain/capabilities.js";
+import { capabilities, discoveryCapabilities, toolSelectionMetadata } from "../domain/capabilities.js";
 import { prices } from "../billing/catalog.js";
 import { x402BasePath, x402DocsPath } from "../billing/x402.js";
 import { agentBasePath, buildAgentInfo, buildCapabilitiesRegistry, buildPricingInfo, buildToolCatalog, capabilitiesBasePath, pricingBasePath, toolsBasePath } from "./agent.js";
@@ -16,6 +16,7 @@ import { buildPaymentMethods, paymentMethodsPath, railAvailability } from "../bi
 import { accountBasePath } from "../billing/unified/http.js";
 import { mcpCreditsPath } from "../billing/unified/mcp.js";
 import { PLATFORM_DESCRIPTION, PLATFORM_NAME } from "../brand.js";
+import { buildDiscoveryOpenapiPaths } from "./discovery.js";
 const json = (schema: unknown, example?: unknown, summary = "Example") => ({ "application/json": {
   schema, ...(example === undefined ? {} : { examples: { default: { summary, value: example } } })
 } });
@@ -111,7 +112,7 @@ const billingResponses = anyRail ? {
   "402": { description: "Payment required. With no usable credential: `payment_required` listing every enabled rail. With a valid Rafid API key that can't cover the price: `insufficient_credits` / `subscription_exhausted` (price, balance, other enabled options). Nothing is charged. A request selecting x402/L402/MPP (X-Rafid-Payment-Method or its credential) receives that protocol's own standards-compliant 402 challenge instead.", content: json(billing402, { success: false, error: { code: "insufficient_credits", message: "The account balance does not cover research_company." }, tool: "research_company", price: { amount: "0.15", currency: "USD" }, balance: { amount: "0.07", currency: "USD" }, paymentOptions: ["x402", "api_credits"], paymentMethods: paymentMethodsPath, meta: { requestId: "example-request" } }) },
   ...(rails.billing ? { "409": { description: "idempotency_conflict (same Idempotency-Key, different body) or idempotency_in_progress.", content: json(errorSchema, { success: false, error: { code: "idempotency_conflict", message: "This Idempotency-Key was already used for this tool with a different request body." }, meta: { requestId: "example-request" } }) } } : {})
 } : {};
-for (const c of capabilities) {
+for (const c of discoveryCapabilities) {
   const operation = {
     operationId: c.name,
     tags: [
@@ -126,7 +127,7 @@ for (const c of capabilities) {
       "Property"
     ],
     summary: c.description,
-    description: `${c.description} Click Authorize and enter an active Rafid API key before using Try it out.` + (rails.billing ? " Accepts either a legacy X-API-Key or a Rafid billing key (Authorization: Bearer raf_live_…), which is charged the listed price from the account's subscription allowance / prepaid credits (response meta.billing and X-Rafid-* headers report the charge)." : ""),
+    description: `${c.description} Selection: ${toolSelectionMetadata(c).toolRole}; prefer for ${toolSelectionMetadata(c).recommendedFor.slice(0, 2).join(" or ")}. Click Authorize and enter an active Rafid API key before using Try it out.` + (rails.billing ? " Accepts either a legacy X-API-Key or a Rafid billing key (Authorization: Bearer raf_live_…), which is charged the listed price from the account's subscription allowance / prepaid credits (response meta.billing and X-Rafid-* headers report the charge)." : ""),
     security: [{ ApiKeyAuth: [] }, ...(rails.billing ? [{ BillingApiKey: [] }] : [])],
     parameters: paymentParameters,
     requestBody: { required: true, description: "Strict JSON input; unknown fields are rejected.", content: json(z.toJSONSchema(c.input), c.example, `${c.name} request`) },
@@ -141,7 +142,7 @@ for (const c of capabilities) {
   paths["/v1" + c.path] = { post: { ...operation, operationId: c.name + "_legacy", deprecated: true } };
 }
 if (config.x402Enabled) {
-  for (const c of capabilities) {
+  for (const c of discoveryCapabilities) {
     paths[x402BasePath + c.path] = { post: {
       operationId: c.name + "_x402",
       tags: ["x402"],
@@ -163,7 +164,7 @@ if (config.x402Enabled) {
   }
 }
 if (config.l402Enabled) {
-  for (const c of capabilities) {
+  for (const c of discoveryCapabilities) {
     paths[l402BasePath + c.path] = { post: {
       operationId: c.name + "_l402",
       tags: ["L402"],
@@ -223,7 +224,7 @@ if (config.l402Enabled) {
     summary: "Free preview: check data availability before paying",
     description: "FREE — no payment, X-PAYMENT header, X-API-Key or account required. Checks whether a paid capability has useful data/analysis available for the given input, without revealing the paid analysis itself: proof of \"I have information for this request,\" never \"here is the information.\" This route never runs the paid capability's `execute()` and never triggers x402/L402/MPP payment, blockchain settlement, invoice creation or paid usage consumption. Not every capability supports preview — check `preview.available` on GET /api/v1/capabilities, or call this route and read `status: \"unavailable\"` back. Recommended agent flow: discover -> preview -> evaluate -> pay -> execute.",
     security: [],
-    parameters: [{ name: "capability", in: "path", required: true, schema: { type: "string", enum: capabilities.map(c => c.name) }, description: "A capability name from GET /api/v1/capabilities, e.g. \"research_company\"." }],
+    parameters: [{ name: "capability", in: "path", required: true, schema: { type: "string", enum: discoveryCapabilities.map(c => c.name) }, description: "A capability name from GET /api/v1/capabilities, e.g. \"research_company\"." }],
     requestBody: { required: false, description: "The same input the paid capability accepts (unknown fields rejected). Optional: a capability whose preview needs no fields may be called with an empty body.", content: json({ type: "object" }, { companyName: "Example Technologies Ltd", country: "United Kingdom" }, "preview request (company_reputation_check example)") },
     responses: {
       "200": { description: "Preview result (see the `status` field for what it means). Always 200, whatever the capability's own coverage — an empty/thin result is `status: \"limited\"`, not an error.", content: { "application/json": { schema: previewSuccessSchema, examples: previewExamples } } },
@@ -244,7 +245,7 @@ const discoverySchema = { type: "object", required: ["name", "version", "docs", 
   name: { type: "string" }, version: { type: "string" }, docs: { type: "string" }, openapi: { type: "string" }, health: { type: "string" },
   agent: { type: "string" }, pricing: { type: "string" }, tools: { type: "string" }, x402: { type: "string" }, endpoints: { type: "array", items: { type: "string" } }
 } };
-const discoveryExample = { success: true, data: { name: PLATFORM_NAME, version: "0.1.0", docs: "/docs", openapi: "/openapi.json", health: "/api/v1/health", agent: agentBasePath, pricing: pricingBasePath, tools: toolsBasePath, ...(config.x402Enabled ? { x402: x402BasePath } : {}), endpoints: capabilities.map(c => "/api/v1" + c.path) }, meta: { requestId: "example-request" } };
+const discoveryExample = { success: true, data: { name: PLATFORM_NAME, version: "0.1.0", docs: "/docs", openapi: "/openapi.json", health: "/api/v1/health", agent: agentBasePath, pricing: pricingBasePath, tools: toolsBasePath, ...(config.x402Enabled ? { x402: x402BasePath } : {}), endpoints: discoveryCapabilities.map(c => "/api/v1" + c.path) }, meta: { requestId: "example-request" } };
 paths["/"] = { get: { operationId: "discovery", tags: ["System"], summary: "Service metadata or a browser-facing landing page", description: "Returns an HTML landing page for browsers (Accept: text/html, the default) and a JSON discovery payload for machine/agent clients that send Accept: application/json.", security: [], responses: {
   "200": { description: "Discovery (JSON) or landing page (HTML)", content: {
     ...json(discoverySchema, discoveryExample),
@@ -288,7 +289,7 @@ paths[x402BasePath] = { get: { operationId: "x402_info", tags: ["x402"], summary
     protocol: { type: "string" }, x402Version: { type: "integer" }, scheme: { type: "string" }, enabled: { type: "boolean" },
     network: { type: ["string", "null"] }, payTo: { type: ["string", "null"] }, facilitator: { type: ["string", "null"] },
     tools: { type: "array", items: { type: "object", required: ["name", "endpoint", "price"], properties: { name: { type: "string" }, endpoint: { type: "string" }, price: { type: "number" } } } }
-  } }), { success: true, data: { protocol: "x402", x402Version: 2, scheme: "exact", enabled: config.x402Enabled, network: config.x402Enabled ? config.x402Network : null, payTo: null, facilitator: null, tools: capabilities.map(c => ({ name: c.name, endpoint: x402BasePath + c.path, price: prices[c.name] })) }, meta: { requestId: "example-request" } }) } }
+  } }), { success: true, data: { protocol: "x402", x402Version: 2, scheme: "exact", enabled: config.x402Enabled, network: config.x402Enabled ? config.x402Network : null, payTo: null, facilitator: null, tools: discoveryCapabilities.map(c => ({ name: c.name, endpoint: x402BasePath + c.path, price: prices[c.name] })) }, meta: { requestId: "example-request" } }) } }
 } };
 // Section F hardening: a small, always-on, factual runtime status report distinct from the
 // informational endpoint above — see buildX402Status()'s doc comment for exactly why each
@@ -384,6 +385,7 @@ Object.assign(paths, buildMppOpenapiPaths(config.mpp));
 // retrieves the current state without holding an HTTP or MCP connection open.
 paths["/api/v1/calls/{callId}"] = { get: { operationId: "get_call_status", tags: ["Voice"], summary: "Retrieve asynchronous voice call status", description: "Returns the current verified call state. queued/dialing/ringing/answered/in_progress are not completed outcomes.", security: [], parameters: [{ name: "callId", in: "path", required: true, schema: { type: "string" } }], responses: { "200": { description: "Call status" }, "404": { description: "Call not found" } } } };
 paths["/api/v1/voice/webhooks"] = { post: { operationId: "voice_webhook", tags: ["Voice"], summary: "Receive a verified voice provider callback", description: "Provider callback endpoint. Requests must carry X-Voice-Signature and are replay/idempotency handled by the voice service boundary.", security: [], requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["callId", "status"], properties: { callId: { type: "string" }, status: { type: "string" }, durationSeconds: { type: "integer" }, result: { type: "object" } } } } } }, responses: { "200": { description: "Callback accepted" }, "401": { description: "Invalid signature" }, "409": { description: "Invalid state transition" } } } };
+Object.assign(paths, buildDiscoveryOpenapiPaths(config));
 return {
   openapi: "3.1.0", info: { title: `${PLATFORM_NAME} API`, version: "0.1.0", description: `${PLATFORM_DESCRIPTION} Property-specific calculations use OMR where documented; capability prices and payment rails are documented per operation. Use Authorize to set X-API-Key for compatibility routes or the enabled prepaid API-key billing rail.` },
   tags: [

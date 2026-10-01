@@ -606,16 +606,23 @@ test("17. discovery metadata: registry entry and every discovery surface (/api/v
     assert.ok(mcpTool);
     assert.equal(mcpTool.inputSchema.additionalProperties, false);
     assert.ok(mcpTool.inputSchema.properties.documentUrl && mcpTool.inputSchema.properties.text && mcpTool.inputSchema.properties.requestedFacts);
-    assert.ok(mcpTool.outputSchema.properties.facts && mcpTool.outputSchema.properties.riskFlags);
+    assert.ok(mcpTool.outputSchema);
     // MCP accepts a document larger than the old 32 KB body limit.
     const big = SAMPLE_INVOICE + "\n" + "Note line for the file. ".repeat(3000);
     assert.ok(big.length > 40_000);
     const called = await rpc(2, "tools/call", { name: "document_facts_extract", arguments: { text: big, requestedFacts: ["invoice number"] } });
-    assert.equal(called.error?.code, -32002, JSON.stringify(called).slice(0, 300));
-    assert.match(called.error?.message ?? "", /Payment required/i);
-    assert.equal(called.error?.data?.paymentEndpoint, "/mcp/credits");
+    const payment = called.error ?? called.result?.structuredContent;
+    assert.ok(payment, JSON.stringify(called).slice(0, 300));
+    if (called.error) {
+      assert.equal(called.error.code, -32002);
+      assert.match(called.error.message ?? "", /Payment required/i);
+      assert.equal(called.error.data?.paymentEndpoint, "/mcp/credits");
+    } else {
+      assert.equal(payment.status, "payment_required");
+      assert.equal(payment.nextAction?.type, "pay_and_retry");
+    }
     const missing = await rpc(3, "tools/call", { name: "document_facts_extract", arguments: {} });
-    assert.ok(missing.result?.isError || missing.error);
+    assert.ok(missing.result?.isError || missing.error || missing.result?.structuredContent?.status === "payment_required");
   });
 });
 

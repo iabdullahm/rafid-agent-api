@@ -6,6 +6,7 @@ import { agentBasePath, pricingBasePath, toolsBasePath, capabilitiesBasePath } f
 import { x402BasePath, x402DocsPath } from "../src/billing/x402.js";
 import { mcpRemotePath, mcpStatusBasePath } from "../src/mcp/remote.js";
 import { PRODUCTION_BASE_URL } from "./distributionConfig.js";
+import { discoveryBasePath, discoveryIntentsPath, discoverySearchPath, publicToolsPath } from "../src/api/discovery.js";
 
 /**
  * npm run distribution:check
@@ -55,6 +56,7 @@ const rel = (f: string) => relativePath(ROOT, f);
 const staticEndpoints = new Set<string>([
   "/", "/health", "/api/v1/health", "/openapi.json", "/docs",
   "/agent.json", "/.well-known/ai-plugin.json", "/.well-known/agent.json", "/llms.txt",
+  "/robots.txt", "/sitemap.xml", discoveryBasePath, discoverySearchPath, discoveryIntentsPath, publicToolsPath,
   agentBasePath, pricingBasePath, toolsBasePath, capabilitiesBasePath,
   mcpStatusBasePath, mcpRemotePath,
   x402BasePath, x402BasePath + "/status", x402DocsPath,
@@ -64,6 +66,7 @@ for (const c of capabilities) {
   capabilityEndpoints.add("/api/v1" + c.path);
   capabilityEndpoints.add("/v1" + c.path);
   capabilityEndpoints.add(x402BasePath + c.path);
+  capabilityEndpoints.add(`${publicToolsPath}/${c.name}`);
 }
 const knownEndpoints = new Set<string>([...staticEndpoints, ...capabilityEndpoints]);
 

@@ -1,0 +1,77 @@
+{
+  "platform": "Rafid Intelligence Network",
+  "description": "Rafid Agent API provides structured intelligence and paid APIs for AI agents across property, company and risk, supplier, finance, document, website, automotive, logistics, recruitment, trading, voice, video and business-planning workflows.",
+  "capabilityCount": 69,
+  "categories": [
+    {
+      "id": "automotive",
+      "count": 1
+    },
+    {
+      "id": "book_business",
+      "count": 25
+    },
+    {
+      "id": "document_intelligence",
+      "count": 1
+    },
+    {
+      "id": "finance_risk",
+      "count": 1
+    },
+    {
+      "id": "logistics",
+      "count": 1
+    },
+    {
+      "id": "property",
+      "count": 6
+    },
+    {
+      "id": "recruitment",
+      "count": 6
+    },
+    {
+      "id": "risk_intelligence",
+      "count": 12
+    },
+    {
+      "id": "supplier",
+      "count": 3
+    },
+    {
+      "id": "trading",
+      "count": 4
+    },
+    {
+      "id": "video_generation",
+      "count": 3
+    },
+    {
+      "id": "voice",
+      "count": 3
+    },
+    {
+      "id": "website_services",
+      "count": 3
+    }
+  ],
+  "discovery": {
+    "index": "https://api.rafidsystem.com/api/v1/discovery",
+    "search": "https://api.rafidsystem.com/api/v1/discovery/search?q=...",
+    "intents": "https://api.rafidsystem.com/api/v1/discovery/intents",
+    "capabilities": "https://api.rafidsystem.com/api/v1/capabilities",
+    "tools": "https://api.rafidsystem.com/tools",
+    "openapi": "https://api.rafidsystem.com/openapi.json",
+    "llms": "https://api.rafidsystem.com/llms.txt"
+  },
+  "protocols": {
+    "rest": true,
+    "mcp": true,
+    "a2a": true,
+    "x402": true,
+    "l402": "deployment_configured",
+    "mpp": "deployment_configured"
+  },
+  "generatedBy": "scripts/generateDiscoveryPack.ts"
+}

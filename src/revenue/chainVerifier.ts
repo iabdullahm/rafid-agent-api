@@ -41,6 +41,8 @@ export interface ChainVerificationResult {
   checks: ChainVerificationChecks;
   /** Human-readable explanation — never a proof, signature, or secret. */
   detail: string;
+  /** Canonical block timestamp when the RPC receipt includes a block number and the block can be read. */
+  chainSettledAt?: string | null;
 }
 
 export interface SettlementChainVerifier {
@@ -78,6 +80,7 @@ const ERC20_TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a116
  *  result — only the fields actually read below, not the full spec. */
 interface MinimalTransactionReceipt {
   status: string | null; // "0x1" success, "0x0" failure, null if not yet mined
+  blockNumber?: string | null;
   logs: Array<{ address: string; topics: string[]; data: string }>;
 }
 
@@ -182,6 +185,15 @@ export class EvmRpcSettlementChainVerifier implements SettlementChainVerifier {
       amountMatches = settlement.amountAtomic !== null ? false : null;
     }
 
+    let chainSettledAt: string | null = null;
+    if (receipt.blockNumber) {
+      try {
+        const block = await this.rpcCall("eth_getBlockByNumber", [receipt.blockNumber, false]) as { timestamp?: string } | null;
+        if (block?.timestamp) chainSettledAt = new Date(Number.parseInt(block.timestamp, 16) * 1000).toISOString();
+      } catch {
+        // The receipt remains independently verifiable even if the optional timestamp lookup is unavailable.
+      }
+    }
     const checks: ChainVerificationChecks = { transactionExists, networkMatches, amountMatches, recipientMatches, payerMatches };
     const allKnownChecksPass = [transactionExists, networkMatches, amountMatches, recipientMatches]
       .filter((c): c is boolean => c !== null)
@@ -189,6 +201,7 @@ export class EvmRpcSettlementChainVerifier implements SettlementChainVerifier {
     const status: ChainVerificationStatus = allKnownChecksPass ? "verified" : "mismatch";
     return {
       status, checks,
+      chainSettledAt,
       detail: status === "verified"
         ? `Transaction ${settlement.transactionHash} confirmed on-chain: succeeded, correct network, USDC transfer to the configured Rafid wallet${amountMatches !== null ? " for the expected amount" : ""}.`
         : `On-chain check(s) failed or could not be fully confirmed for transaction ${settlement.transactionHash} — see checks.`

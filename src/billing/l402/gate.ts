@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import type { Request, RequestHandler, Response } from "express";
 import type { Config } from "../../config/env.js";
 import type { CapabilityName } from "../catalog.js";
-import { capabilities } from "../../domain/capabilities.js";
+import { capabilities, discoveryCapabilities } from "../../domain/capabilities.js";
 import type { LightningBackend } from "./lightning.js";
 import type { BtcUsdRateProvider } from "./rates.js";
 import { usdToSats } from "./rates.js";
@@ -111,7 +111,7 @@ export function verifyL402Token(args: { header: string | undefined; rootKey: Buf
 }
 
 function errorBody(res: Response, code: string, message: string, extra: Record<string, unknown> = {}) {
-  return { success: false, error: { code, message }, ...extra, meta: { requestId: res.locals.requestId } };
+  return { success: false, error: { code, message }, ...extra, paymentJourneyId: res.locals.paymentJourneyId ?? null, meta: { requestId: res.locals.requestId, paymentJourneyId: res.locals.paymentJourneyId ?? null } };
 }
 
 /** Per-tool middleware for POST /api/v1/l402/<tool>. On success it sets res.locals.l402 and calls
@@ -200,7 +200,7 @@ export function buildL402Info(config: Pick<Config, "l402Enabled" | "l402Network"
     pricing: "Each tool's USD catalog price, converted to sats at the live BTC/USD rate when the 402 challenge is issued.",
     tokenPolicy: "One paid token buys one successful call. Failed calls do not consume the token.",
     authorization: "Authorization: L402 <macaroon>:<preimage-hex>",
-    tools: capabilities.map(c => ({ name: c.name, endpoint: l402BasePath + c.path, priceUsd: priceUsd(c.name) }))
+    tools: discoveryCapabilities.map(c => ({ name: c.name, endpoint: l402BasePath + c.path, priceUsd: priceUsd(c.name) }))
   };
 }
 

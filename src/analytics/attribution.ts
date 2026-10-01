@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Request } from "express";
 import type { RequestClientContext } from "./context.js";
+import { testMarkerHash } from "./paymentJourney.js";
 
 /** Applied to every stored User-Agent/Referer/X-Client-Name value — bounds how much of an
  *  arbitrary, caller-controlled header this table will ever hold, and keeps analytics rows small.
@@ -70,10 +71,26 @@ function classifyClientType(userAgent: string, clientName: string | null, req: R
 }
 
 function classifyTraffic(req: Request): RequestClientContext["trafficClass"] {
+  if (req.header("x-rafid-test")?.trim().toLowerCase() === "production-verification") return "internal_test";
   const requested = req.header("x-rafid-test-client")?.toLowerCase() === "true";
   const supplied = req.header("x-rafid-test-token");
   const configured = process.env.ANALYTICS_INTERNAL_API_KEY?.trim();
   return requested && configured && supplied === configured ? "internal_test" : "production_external";
+}
+
+function attribution(req: Request, userAgent: string, clientName: string | null): Pick<RequestClientContext, "normalizedClient" | "attributionConfidence" | "trafficType" | "interactionType" | "mcpClient" | "sdk" | "isInternalTest" | "testMarkerHash"> {
+  const explicit = `${clientName ?? ""} ${req.header("x-sdk-name") ?? ""}`.trim();
+  const mcpClient = truncate(req.header("x-mcp-client"));
+  const mcp = Boolean(req.header("mcp-protocol-version") || req.header("mcp-session-id") || mcpClient);
+  const marker = req.header("x-rafid-test");
+  const internal = classifyTraffic(req) === "internal_test";
+  const sdk = /openai|anthropic|x402|sdk/i.test(`${explicit} ${userAgent}`) ? truncate(explicit || userAgent, 100) : null;
+  if (internal) return { normalizedClient: "production-verification", attributionConfidence: "high", trafficType: "internal_test", interactionType: "payment", mcpClient, sdk, isInternalTest: true, testMarkerHash: testMarkerHash(marker) };
+  if (mcp) return { normalizedClient: mcpClient || (/claude/i.test(explicit) ? "Claude" : /chatgpt/i.test(explicit) ? "ChatGPT" : "MCP client"), attributionConfidence: mcpClient ? "high" : "medium", trafficType: "mcp_agent", interactionType: "mcp", mcpClient, sdk, isInternalTest: false, testMarkerHash: null };
+  if (/\b(bot|crawler|spider|slurp|headlesschrome|uptimerobot|pingdom)\b/i.test(userAgent)) return { normalizedClient: "crawler", attributionConfidence: "medium", trafficType: "crawler", interactionType: "discovery", mcpClient, sdk, isInternalTest: false, testMarkerHash: null };
+  if (/^Mozilla\//i.test(userAgent)) return { normalizedClient: "browser", attributionConfidence: "medium", trafficType: "browser_or_human", interactionType: req.method === "GET" ? "browser_navigation" : "capability", mcpClient, sdk, isInternalTest: false, testMarkerHash: null };
+  if (/^curl\//i.test(userAgent) || /^node$/i.test(userAgent) || /^axios\//i.test(userAgent)) return { normalizedClient: userAgent, attributionConfidence: "low", trafficType: "rest_agent", interactionType: "capability", mcpClient, sdk, isInternalTest: false, testMarkerHash: null };
+  return { normalizedClient: clientName || "unknown", attributionConfidence: clientName ? "low" : "unknown", trafficType: "unknown", interactionType: "unknown", mcpClient, sdk, isInternalTest: false, testMarkerHash: null };
 }
 
 /** A coarse, one-way client identity for grouping repeat callers in analytics — never a raw IP,
@@ -111,6 +128,7 @@ export function extractClientContext(req: Request): RequestClientContext {
     ?? sourceFromReferer(host)
     ?? (clientName ? normalizedSource(clientName) : null)
     ?? (host ? null : "direct");
+  const classified = attribution(req, userAgent, clientName);
   return {
     clientHash: hashClientIdentity(clientIp(req), userAgent),
     userAgent: truncate(userAgent),
@@ -122,6 +140,7 @@ export function extractClientContext(req: Request): RequestClientContext {
     utmContent: queryValue(req, "utm_content"),
     referrerHost: host,
     clientType: classifyClientType(userAgent, clientName, req),
-    trafficClass: classifyTraffic(req)
+    trafficClass: classifyTraffic(req),
+    ...classified
   };
 }

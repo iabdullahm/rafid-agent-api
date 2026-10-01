@@ -1,0 +1,559 @@
+{
+  "name": "Rafid Intelligence Network",
+  "description": "Rafid Agent API provides structured intelligence and paid APIs for AI agents across property, company and risk, supplier, finance, document, website, automotive, logistics, recruitment, trading, voice, video and business-planning workflows.",
+  "url": "https://api.rafidsystem.com/.well-known/agent.json",
+  "skills": [
+    {
+      "id": "analyze_property",
+      "name": "analyze_property",
+      "description": "Calculate gross/net rental yield, income, operating costs and simple payback in OMR. Calculations only.",
+      "category": "property",
+      "endpoint": "https://api.rafidsystem.com/api/v1/property/analyze",
+      "mcpTool": "analyze_property"
+    },
+    {
+      "id": "compare_properties",
+      "name": "compare_properties",
+      "description": "Compare 2–20 uniquely named properties in OMR using the same metrics; order by rounded net yield, preserving input order for ties.",
+      "category": "property",
+      "endpoint": "https://api.rafidsystem.com/api/v1/property/compare",
+      "mcpTool": "compare_properties"
+    },
+    {
+      "id": "estimate_maintenance",
+      "name": "estimate_maintenance",
+      "description": "Estimate an annual maintenance reserve in OMR from value, age and unit count with explicit optional assumptions. Uncalibrated heuristic, not a survey.",
+      "category": "property",
+      "endpoint": "https://api.rafidsystem.com/api/v1/maintenance/estimate",
+      "mcpTool": "estimate_maintenance"
+    },
+    {
+      "id": "analyze_oman_property",
+      "name": "analyze_oman_property",
+      "description": "Analyze an Oman residential property using local rental comparables, market context and investment metrics, including partner-supplied historical and recent Al Mouj Muscat property sales records with provenance and freshness metadata when coverage is available.",
+      "category": "property",
+      "endpoint": "https://api.rafidsystem.com/api/v1/oman/property/analyze",
+      "mcpTool": "analyze_oman_property"
+    },
+    {
+      "id": "search_oman_company",
+      "name": "search_oman_company",
+      "description": "Search structured Oman business records by name, registration number, governorate, wilayat and/or industry, returning candidate companies ranked by deterministic identity-match confidence.",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/business/search",
+      "mcpTool": "search_oman_company"
+    },
+    {
+      "id": "get_oman_company_profile",
+      "name": "get_oman_company_profile",
+      "description": "Return a structured profile for one Oman company by companyId — identity, registration, location and contact fields, digital-presence detection and full source provenance.",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/business/profile",
+      "mcpTool": "get_oman_company_profile"
+    },
+    {
+      "id": "analyze_oman_company",
+      "name": "analyze_oman_company",
+      "description": "Generate deterministic commercial-intelligence signals, risk flags and positive signals for one Oman company by companyId, for a stated evaluation purpose.",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/business/analyze",
+      "mcpTool": "analyze_oman_company"
+    },
+    {
+      "id": "due_diligence_oman_company",
+      "name": "due_diligence_oman_company",
+      "description": "Perform structured commercial due diligence on one Oman company by companyId ahead of a stated transaction, returning identity verification, risk assessment, a prioritized due-diligence checklist and known information gaps.",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/business/due-diligence",
+      "mcpTool": "due_diligence_oman_company"
+    },
+    {
+      "id": "research_company",
+      "name": "research_company",
+      "description": "Research a company from public web sources: overview, products, leadership, funding, competitors, technology signals, recent developments and risk flags, with cited sources and a confidence score.",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/intelligence/research-company",
+      "mcpTool": "research_company"
+    },
+    {
+      "id": "find_companies",
+      "name": "find_companies",
+      "description": "Discover companies from public web sources matching an industry, location, size and/or keyword criteria, returning cited candidate companies (never fabricated) with a stated confidence score.",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/intelligence/find-companies",
+      "mcpTool": "find_companies"
+    },
+    {
+      "id": "analyze_company_risk",
+      "name": "analyze_company_risk",
+      "description": "Gather evidence-tiered risk signals for a company across corporate identity, domain, website, sanctions-list name-matching, adverse news, reputation and legal/regulatory signals — never a safe/unsafe verdict.",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/intelligence/analyze-company-risk",
+      "mcpTool": "analyze_company_risk"
+    },
+    {
+      "id": "oman_supplier_check",
+      "name": "oman_supplier_check",
+      "description": "Screen an Oman supplier for procurement using company identity, business activity, website, contact consistency, address signals, public-risk indicators and sanctions screening.",
+      "category": "supplier",
+      "endpoint": "https://api.rafidsystem.com/api/v1/procurement/oman-supplier-check",
+      "mcpTool": "oman_supplier_check"
+    },
+    {
+      "id": "company_reputation_check",
+      "name": "company_reputation_check",
+      "description": "Investigate the public reputation and commercial risk signals of a company in any country — identity consistency against official registries, sanctions-list name screening, adverse media (with legal stage: allegation vs. outcome), customer reputation, online presence, business stability and domain signals — returning evidence-linked scores with a separate confidence score.",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/risk/company-reputation-check",
+      "mcpTool": "company_reputation_check"
+    },
+    {
+      "id": "business_risk_score",
+      "name": "business_risk_score",
+      "description": "Assess the risk of doing business with a company in any country using corporate, financial, compliance, reputation, operational and digital evidence. Returns a 0–100 risk score (100 = highest detected risk), a separate 0–1 confidence, per-category component scores, evidence-backed risk flags and positive signals, sanctions/restricted-party screening with match strength, and machine-readable due-diligence guidance (proceed / proceed_with_monitoring / enhanced_due_diligence / manual_review / avoid_automated_transaction).",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/risk/business-risk-score",
+      "mcpTool": "business_risk_score"
+    },
+    {
+      "id": "social_video_generate",
+      "name": "social_video_generate",
+      "description": "Generate a complete short-form social video from a topic or supplied script, including narration, visual materials, subtitles and final video composition.",
+      "category": "video_generation",
+      "endpoint": "https://api.rafidsystem.com/api/v1/video/social-generate",
+      "mcpTool": "social_video_generate"
+    },
+    {
+      "id": "news_video_generate",
+      "name": "news_video_generate",
+      "description": "Turn supplied factual news content into a publish-ready short-form news video without independently researching or fabricating current events.",
+      "category": "video_generation",
+      "endpoint": "https://api.rafidsystem.com/api/v1/video/news-generate",
+      "mcpTool": "news_video_generate"
+    },
+    {
+      "id": "product_promo_video",
+      "name": "product_promo_video",
+      "description": "Generate a promotional short video from structured product information, features, call to action and optional website.",
+      "category": "video_generation",
+      "endpoint": "https://api.rafidsystem.com/api/v1/video/product-promo",
+      "mcpTool": "product_promo_video"
+    },
+    {
+      "id": "company_due_diligence",
+      "name": "company_due_diligence",
+      "description": "Perform company due diligence for onboarding, procurement, partnership, investment or customer-risk decisions: resolve the entity, evaluate registration, website identity, sanctions, adverse news, legal, financial and reputation signals, then return a deterministic risk assessment with evidence and a machine-actionable next action.",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/risk/company-due-diligence",
+      "mcpTool": "company_due_diligence"
+    },
+    {
+      "id": "document_facts_extract",
+      "name": "document_facts_extract",
+      "description": "Extract structured, evidence-backed facts, entities, dates, amounts, obligations, deadlines and risk indicators from business documents (contracts, invoices, purchase orders, quotations, tenders/RFPs, leases, policies, financial reports, legal documents, CVs, company profiles) from any country. Every fact carries a 0–1 extraction confidence and source evidence (verbatim excerpt, character offsets, section, and the page when the document has real pages); dates, amounts, currencies, percentages and durations are normalized only when unambiguous. Accepts an https documentUrl (PDF with a text layer, DOCX, HTML, text) or extracted text, up to 25 pages.",
+      "category": "document_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/documents/facts-extract",
+      "mcpTool": "document_facts_extract"
+    },
+    {
+      "id": "invoice_anomaly_check",
+      "name": "invoice_anomaly_check",
+      "description": "Detect duplicate, inconsistent, unusual or potentially fraudulent invoices before payment using arithmetic, supplier-history, purchase-order and payment-detail checks. Returns a 0–100 risk score, a risk level, an advisory decision (continue / review / hold) and machine-readable anomalies (e.g. DUPLICATE_INVOICE, POSSIBLE_DUPLICATE, BANK_ACCOUNT_CHANGED, PO_AMOUNT_EXCEEDED, SPLIT_INVOICE_PATTERN, SUBTOTAL_MISMATCH), each with severity, confidence and structured evidence. Works on a single invoice (standalone) or with optional historical invoices, supplier profile, purchase order, contract, approval threshold and payment history (context-aware). Deterministic, decimal-safe, any country and currency.",
+      "category": "finance_risk",
+      "endpoint": "https://api.rafidsystem.com/api/v1/finance/invoice-anomaly-check",
+      "mcpTool": "invoice_anomaly_check"
+    },
+    {
+      "id": "vehicle_value_estimate",
+      "name": "vehicle_value_estimate",
+      "description": "Estimate the fair market value of a vehicle using make, model, year, trim, mileage, condition, ownership history, location and available market comparables. Returns a valuation range, private-sale estimate, dealer buy/retail estimates, depreciation, transparent valuation adjustments, confidence and risk flags.",
+      "category": "automotive",
+      "endpoint": "https://api.rafidsystem.com/api/v1/automotive/vehicle-value-estimate",
+      "mcpTool": "vehicle_value_estimate"
+    },
+    {
+      "id": "website_download",
+      "name": "website_download",
+      "description": "Download and mirror a publicly accessible website, including HTML pages and required frontend assets, and return a machine-readable manifest and optional downloadable archive.",
+      "category": "website_services",
+      "endpoint": "https://api.rafidsystem.com/api/v1/websites/download",
+      "mcpTool": "website_download"
+    },
+    {
+      "id": "extract_candidate_profile",
+      "name": "extract_candidate_profile",
+      "description": "Normalize an English, Arabic or mixed-language CV into a machine-readable candidate profile using only stated professional evidence; protected personal attributes are ignored.",
+      "category": "recruitment",
+      "endpoint": "https://api.rafidsystem.com/api/v1/recruitment/extract-candidate-profile",
+      "mcpTool": "extract_candidate_profile"
+    },
+    {
+      "id": "generate_job_profile",
+      "name": "generate_job_profile",
+      "description": "Normalize a job description into required and preferred professional requirements with transparent weights totaling 100.",
+      "category": "recruitment",
+      "endpoint": "https://api.rafidsystem.com/api/v1/recruitment/generate-job-profile",
+      "mcpTool": "generate_job_profile"
+    },
+    {
+      "id": "cv_score",
+      "name": "cv_score",
+      "description": "Score the completeness, clarity and ATS-readability of a CV on a transparent 0–100 scale; this is not job matching.",
+      "category": "recruitment",
+      "endpoint": "https://api.rafidsystem.com/api/v1/recruitment/cv-score",
+      "mcpTool": "cv_score"
+    },
+    {
+      "id": "cv_job_match",
+      "name": "cv_job_match",
+      "description": "Compare a candidate profile or CV with a job profile or description using normalized skills, experience evidence and transparent weighted scoring.",
+      "category": "recruitment",
+      "endpoint": "https://api.rafidsystem.com/api/v1/recruitment/cv-job-match",
+      "mcpTool": "cv_job_match"
+    },
+    {
+      "id": "cv_improve",
+      "name": "cv_improve",
+      "description": "Produce evidence-grounded CV improvement recommendations, optional job-specific guidance and ATS actions without inventing candidate facts.",
+      "category": "recruitment",
+      "endpoint": "https://api.rafidsystem.com/api/v1/recruitment/cv-improve",
+      "mcpTool": "cv_improve"
+    },
+    {
+      "id": "candidate_shortlist_score",
+      "name": "candidate_shortlist_score",
+      "description": "Score up to 100 supplied candidate profiles against one job profile with auditable matched requirements, gaps and confidence; no hiring decision is emitted.",
+      "category": "recruitment",
+      "endpoint": "https://api.rafidsystem.com/api/v1/recruitment/candidate-shortlist-score",
+      "mcpTool": "candidate_shortlist_score"
+    },
+    {
+      "id": "strategy_performance_analysis",
+      "name": "strategy_performance_analysis",
+      "description": "Calculate historical trade-level strategy performance metrics from supplied records, including P&L, win/loss statistics and supported drawdown metrics; this is historical analysis, not a forecast.",
+      "category": "trading",
+      "endpoint": "https://api.rafidsystem.com/api/v1/trading/strategy-performance-analysis",
+      "mcpTool": "strategy_performance_analysis"
+    },
+    {
+      "id": "trade_risk_score",
+      "name": "trade_risk_score",
+      "description": "Calculate a transparent deterministic 0–100 risk score for a proposed trade from entry, protection, sizing, account and portfolio context.",
+      "category": "trading",
+      "endpoint": "https://api.rafidsystem.com/api/v1/trading/trade-risk-score",
+      "mcpTool": "trade_risk_score"
+    },
+    {
+      "id": "portfolio_exposure_check",
+      "name": "portfolio_exposure_check",
+      "description": "Aggregate supplied open and proposed positions into gross, net, directional and concentration exposure with stop-risk and margin indicators.",
+      "category": "trading",
+      "endpoint": "https://api.rafidsystem.com/api/v1/trading/portfolio-exposure-check",
+      "mcpTool": "portfolio_exposure_check"
+    },
+    {
+      "id": "trade_log_analysis",
+      "name": "trade_log_analysis",
+      "description": "Analyze supplied raw trade records for deterministic performance, execution quality, grouping, streaks, data-quality issues and risk patterns.",
+      "category": "trading",
+      "endpoint": "https://api.rafidsystem.com/api/v1/trading/trade-log-analysis",
+      "mcpTool": "trade_log_analysis"
+    },
+    {
+      "id": "shipping_cost_estimate",
+      "name": "shipping_cost_estimate",
+      "description": "Estimate domestic or international shipping cost, chargeable weight, transit time and common shipping surcharges using shipment dimensions, weight, origin, destination and service level. Estimates are not guaranteed carrier quotes; duties and taxes are excluded.",
+      "category": "logistics",
+      "endpoint": "https://api.rafidsystem.com/api/v1/logistics/shipping-cost-estimate",
+      "mcpTool": "shipping_cost_estimate"
+    },
+    {
+      "id": "ai_call_agent",
+      "name": "ai_call_agent",
+      "description": "Initiate an authorized outbound AI telephone call and return a call identifier immediately; completion and duration arrive asynchronously.",
+      "category": "voice",
+      "endpoint": "https://api.rafidsystem.com/api/v1/voice/ai-call",
+      "mcpTool": "ai_call_agent"
+    },
+    {
+      "id": "voice_lead_qualifier",
+      "name": "voice_lead_qualifier",
+      "description": "Place an asynchronous sales qualification call and score captured evidence against a configurable rubric.",
+      "category": "voice",
+      "endpoint": "https://api.rafidsystem.com/api/v1/voice/lead-qualifier",
+      "mcpTool": "voice_lead_qualifier"
+    },
+    {
+      "id": "website_project_estimate",
+      "name": "website_project_estimate",
+      "description": "Produce a deterministic website project estimate with cost, timeline, hours, effort breakdown, maintenance range, assumptions and risk flags. It is an estimate, not a fixed quotation.",
+      "category": "website_services",
+      "endpoint": "https://api.rafidsystem.com/api/v1/websites/project-estimate",
+      "mcpTool": "website_project_estimate"
+    },
+    {
+      "id": "website_audit",
+      "name": "website_audit",
+      "description": "Perform a bounded, passive technical website inspection covering measurable SEO, performance, accessibility, security, UX and crawlability indicators; unavailable checks are reported honestly.",
+      "category": "website_services",
+      "endpoint": "https://api.rafidsystem.com/api/v1/websites/audit",
+      "mcpTool": "website_audit"
+    },
+    {
+      "id": "appointment_call_agent",
+      "name": "appointment_call_agent",
+      "description": "Place an asynchronous appointment call to propose, book, confirm, reschedule or cancel a slot through a calendar-provider abstraction.",
+      "category": "voice",
+      "endpoint": "https://api.rafidsystem.com/api/v1/voice/appointment",
+      "mcpTool": "appointment_call_agent"
+    },
+    {
+      "id": "supplier_due_diligence_report",
+      "name": "supplier_due_diligence_report",
+      "description": "Run an end-to-end Oman supplier screening workflow covering identity, activity, website, contact consistency, address, sanctions and public-risk evidence in one structured report.",
+      "category": "supplier",
+      "endpoint": "https://api.rafidsystem.com/api/v1/procurement/supplier-due-diligence-report",
+      "mcpTool": "supplier_due_diligence_report"
+    },
+    {
+      "id": "company_risk_report",
+      "name": "company_risk_report",
+      "description": "Combine evidence-first public reputation analysis with structured business-risk scoring into one company risk report.",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/risk/company-risk-report",
+      "mcpTool": "company_risk_report"
+    },
+    {
+      "id": "property_investment_report",
+      "name": "property_investment_report",
+      "description": "Combine Oman property market comparables, price positioning and rental-yield calculations into one investment report.",
+      "category": "property",
+      "endpoint": "https://api.rafidsystem.com/api/v1/property/property-investment-report",
+      "mcpTool": "property_investment_report"
+    },
+    {
+      "id": "portfolio_screen",
+      "name": "portfolio_screen",
+      "description": "Screen and rank a portfolio of 2–20 supplied properties using the shared rental-yield and income calculations.",
+      "category": "property",
+      "endpoint": "https://api.rafidsystem.com/api/v1/property/portfolio-screen",
+      "mcpTool": "portfolio_screen"
+    },
+    {
+      "id": "procurement_vendor_shortlist",
+      "name": "procurement_vendor_shortlist",
+      "description": "Screen and rank 2–50 Oman suppliers in one procurement workflow using identity, risk, sanctions and public-evidence signals.",
+      "category": "supplier",
+      "endpoint": "https://api.rafidsystem.com/api/v1/procurement/vendor-shortlist",
+      "mcpTool": "procurement_vendor_shortlist"
+    },
+    {
+      "id": "company_risk_batch",
+      "name": "company_risk_batch",
+      "description": "Assess 1–100 companies from structured rows or CSV in one bounded batch, preserving per-row risk results and provider failures.",
+      "category": "risk_intelligence",
+      "endpoint": "https://api.rafidsystem.com/api/v1/risk/company-risk-batch",
+      "mcpTool": "company_risk_batch"
+    },
+    {
+      "id": "startup_readiness_score",
+      "name": "startup_readiness_score",
+      "description": "Score the book's 15-question readiness assessment deterministically; does not predict business success.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/startup-readiness-score",
+      "mcpTool": "startup_readiness_score"
+    },
+    {
+      "id": "business_idea_validate",
+      "name": "business_idea_validate",
+      "description": "Evaluate problem, customer, solution and willingness-to-pay evidence; does not independently verify live demand.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/business-idea-validate",
+      "mcpTool": "business_idea_validate"
+    },
+    {
+      "id": "business_idea_generator",
+      "name": "business_idea_generator",
+      "description": "Generate candidate ideas from user-observed problems and constraints; does not claim market demand.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/business-idea-generator",
+      "mcpTool": "business_idea_generator"
+    },
+    {
+      "id": "business_validation_plan",
+      "name": "business_validation_plan",
+      "description": "Create the book's structured seven-day validation workflow; execution and evidence collection remain with the caller.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/business-validation-plan",
+      "mcpTool": "business_validation_plan"
+    },
+    {
+      "id": "ideal_customer_profile",
+      "name": "ideal_customer_profile",
+      "description": "Structure an ideal-customer profile from supplied observations; does not infer verified demographics.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/ideal-customer-profile",
+      "mcpTool": "ideal_customer_profile"
+    },
+    {
+      "id": "competitor_analysis",
+      "name": "competitor_analysis",
+      "description": "Compare 3-20 user-supplied competitors; does not discover or verify competitors without live evidence.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/competitor-analysis",
+      "mcpTool": "competitor_analysis"
+    },
+    {
+      "id": "business_model_builder",
+      "name": "business_model_builder",
+      "description": "Build the book's ten-element one-page business map from supplied inputs.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/business-model-builder",
+      "mcpTool": "business_model_builder"
+    },
+    {
+      "id": "startup_cost_estimate",
+      "name": "startup_cost_estimate",
+      "description": "Calculate startup capital, runway and reserve in OMR using integer baisa internally.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/startup-cost-estimate",
+      "mcpTool": "startup_cost_estimate"
+    },
+    {
+      "id": "product_pricing_calculator",
+      "name": "product_pricing_calculator",
+      "description": "Calculate unit cost, price, margin and markup in OMR; does not validate market willingness to pay.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/product-pricing-calculator",
+      "mcpTool": "product_pricing_calculator"
+    },
+    {
+      "id": "break_even_calculator",
+      "name": "break_even_calculator",
+      "description": "Calculate break-even and target-profit units from supplied fixed and variable costs.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/break-even-calculator",
+      "mcpTool": "break_even_calculator"
+    },
+    {
+      "id": "business_profitability_analysis",
+      "name": "business_profitability_analysis",
+      "description": "Calculate revenue, gross profit, net profit and margins from monthly supplied data.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/business-profitability-analysis",
+      "mcpTool": "business_profitability_analysis"
+    },
+    {
+      "id": "offer_builder",
+      "name": "offer_builder",
+      "description": "Construct a commercial offer from supplied outcome, bundle and delivery terms; never invents scarcity.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/offer-builder",
+      "mcpTool": "offer_builder"
+    },
+    {
+      "id": "oman_go_to_market_plan",
+      "name": "oman_go_to_market_plan",
+      "description": "Select supplied Oman-relevant channels for an ICP and create a 14-day action plan; live popularity is not checked.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/oman-go-to-market-plan",
+      "mcpTool": "oman_go_to_market_plan"
+    },
+    {
+      "id": "content_plan_generator",
+      "name": "content_plan_generator",
+      "description": "Generate a 14- or 30-day structured content calendar from an offer and selected channels.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/content-plan-generator",
+      "mcpTool": "content_plan_generator"
+    },
+    {
+      "id": "first_10_customers_plan",
+      "name": "first_10_customers_plan",
+      "description": "Create a non-spammy plan for 20 prospects and the first 10 paying customers.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/first-10-customers-plan",
+      "mcpTool": "first_10_customers_plan"
+    },
+    {
+      "id": "sales_response_builder",
+      "name": "sales_response_builder",
+      "description": "Draft a customer-facing response for a supplied sales situation; does not send messages.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/sales-response-builder",
+      "mcpTool": "sales_response_builder"
+    },
+    {
+      "id": "whatsapp_business_setup",
+      "name": "whatsapp_business_setup",
+      "description": "Create Arabic/English WhatsApp Business profile, reply and order-message templates.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/whatsapp-business-setup",
+      "mcpTool": "whatsapp_business_setup"
+    },
+    {
+      "id": "monthly_business_financial_report",
+      "name": "monthly_business_financial_report",
+      "description": "Generate a monthly business financial report from supplied OMR figures; not accounting advice.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/monthly-business-financial-report",
+      "mcpTool": "monthly_business_financial_report"
+    },
+    {
+      "id": "oman_business_launch_plan",
+      "name": "oman_business_launch_plan",
+      "description": "Generate the book's 30-day launch workflow with dependencies and status placeholders.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/oman-business-launch-plan",
+      "mcpTool": "oman_business_launch_plan"
+    },
+    {
+      "id": "business_90_day_growth_plan",
+      "name": "business_90_day_growth_plan",
+      "description": "Generate the book's three-month post-launch goals, milestones, KPIs and review gates.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/business-90-day-growth-plan",
+      "mcpTool": "business_90_day_growth_plan"
+    },
+    {
+      "id": "business_risk_check",
+      "name": "business_risk_check",
+      "description": "Diagnose the book's common mistakes from supplied signals; no unsupported probabilities are assigned.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/business-risk-check",
+      "mcpTool": "business_risk_check"
+    },
+    {
+      "id": "final_business_plan_builder",
+      "name": "final_business_plan_builder",
+      "description": "Assemble the book's final project plan from supplied business and financial inputs.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/final-business-plan-builder",
+      "mcpTool": "final_business_plan_builder"
+    },
+    {
+      "id": "oman_business_launch_advisor",
+      "name": "oman_business_launch_advisor",
+      "description": "Combine readiness, idea validation, finance and launch logic for an Oman-oriented founder workflow.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/oman-business-launch-advisor",
+      "mcpTool": "oman_business_launch_advisor"
+    },
+    {
+      "id": "oman_business_plan_generator",
+      "name": "oman_business_plan_generator",
+      "description": "Generate a premium structured business plan from supplied assumptions; not legal, tax, accounting or investment advice.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/oman-business-plan-generator",
+      "mcpTool": "oman_business_plan_generator"
+    },
+    {
+      "id": "oman_small_business_guide",
+      "name": "oman_small_business_guide",
+      "description": "Answer a question using book-grounded frameworks; current legal, tax and regulatory details require official verification.",
+      "category": "book_business",
+      "endpoint": "https://api.rafidsystem.com/api/v1/book/oman-small-business-guide",
+      "mcpTool": "oman_small_business_guide"
+    }
+  ]
+}
