@@ -25,7 +25,7 @@ test("atomic insert claims an unused subscriber key", async () => {
 test("duplicate with changed payload returns conflict", async () => {
   const pool = { query: async (_sql: string) => {
     if (_sql.startsWith("INSERT")) return { rowCount: 0 };
-    return { rows: [{ id: "existing", request_fingerprint: "b".repeat(64), status: "completed", response_status: 200, response_body: { ok: true } }] };
+    return { rows: [{ id: "existing", capability: "company_due_diligence", request_fingerprint: "b".repeat(64), status: "completed", response_status: 200, response_body: { ok: true } }] };
   } } as unknown as Pool;
   const result = await new RapidApiIdempotencyStore(pool).claim("consumer-a", "key-123", "a".repeat(64));
   assert.equal(result.kind, "conflict");
@@ -34,7 +34,7 @@ test("duplicate with changed payload returns conflict", async () => {
 test("identical completed duplicate replays prior response", async () => {
   const pool = { query: async (sql: string) => {
     if (sql.startsWith("INSERT")) return { rowCount: 0 };
-    return { rows: [{ id: "existing", request_fingerprint: "a".repeat(64), status: "completed", response_status: 200, response_body: { success: true } }] };
+    return { rows: [{ id: "existing", capability: "company_due_diligence", request_fingerprint: "a".repeat(64), status: "completed", response_status: 200, response_body: { success: true } }] };
   } } as unknown as Pool;
   const result = await new RapidApiIdempotencyStore(pool).claim("consumer-a", "key-123", "a".repeat(64));
   assert.deepEqual(result, { kind: "replay", requestId: "existing", status: 200, body: { success: true } });
@@ -43,7 +43,7 @@ test("identical completed duplicate replays prior response", async () => {
 test("identical in-flight duplicate remains pending", async () => {
   const pool = { query: async (sql: string) => {
     if (sql.startsWith("INSERT")) return { rowCount: 0 };
-    return { rows: [{ id: "existing", request_fingerprint: "a".repeat(64), status: "processing", response_status: null, response_body: null }] };
+    return { rows: [{ id: "existing", capability: "company_due_diligence", request_fingerprint: "a".repeat(64), status: "processing", response_status: null, response_body: null }] };
   } } as unknown as Pool;
   const result = await new RapidApiIdempotencyStore(pool).claim("consumer-a", "key-123", "a".repeat(64));
   assert.deepEqual(result, { kind: "pending", requestId: "existing" });
