@@ -33,9 +33,10 @@ test("real Neon HTTP: concurrent calls, replay, conflict, failure, isolation", {
   app.post("/test", express.json(), createRapidApiHandler(capability, {
     secret: () => "only-test-secret",
     enabled: () => true,
-    repository
+    repository: { claim: (...args: Parameters<RapidApiIdempotencyStore["claim"]>) => forceDbFailure ? Promise.reject(new Error("Simulated DB outage")) : repository.claim(...args), complete: (id: string, status: number, body: unknown) => repository.complete(id, status, body), markFailed: (id: string) => repository.markFailed(id) } as RapidApiIdempotencyStore
   }));
   let server: ReturnType<typeof app.listen> | undefined;
+  let forceDbFailure = false;
   try {
     const alive = await pool.query("SELECT to_regclass('public.rafid_rapidapi_requests') AS name");
     assert.ok(alive.rows[0]?.name, "Missing test schema: public.rafid_rapidapi_requests");
@@ -69,13 +70,12 @@ test("real Neon HTTP: concurrent calls, replay, conflict, failure, isolation", {
     assert.equal((await send(subscriber, prefix + "-one", "different")).status, 409);
     assert.equal((await send(subscriber + "-other", prefix + "-one", "a")).status, 200);
     assert.equal(executions, 2);
-    await pool.end();
+    forceDbFailure = true;
     assert.equal((await send(subscriber, prefix + "-db-down", "a")).status, 503);
   } finally {
     resolveExecution?.();
     if (server?.listening) await new Promise<void>(resolve => server!.close(() => resolve()));
+    await pool.query("DELETE FROM rafid_rapidapi_requests WHERE subscriber_id LIKE $1", [prefix + "%"]).catch(() => {});
     await pool.end().catch(() => {});
-    // Clean-up requires a live connection; when the pool has been ended, rows are
-    // uniquely namespaced and can be deleted manually with subscriber_id LIKE 'e2e-%'.
   }
 });
