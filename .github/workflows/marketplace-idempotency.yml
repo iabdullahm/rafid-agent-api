@@ -20,3 +20,5 @@ jobs:
       - run: npm run build
       - run: node --import tsx --test tests/rapidapi-idempotency.test.ts
       - run: node --import tsx --test tests/rapidapi-gateway.http.test.ts
+
+      - run: node --import tsx --test tests/rapidapi-bulk-audit.test.ts
