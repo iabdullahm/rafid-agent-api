@@ -33,7 +33,7 @@ test("real Neon HTTP: concurrent calls, replay, conflict, failure, isolation", {
   app.post("/test", express.json(), createRapidApiHandler(capability, {
     secret: () => "only-test-secret",
     enabled: () => true,
-    repository: { claim: (...args: Parameters<RapidApiIdempotencyStore["claim"]>) => forceDbFailure ? Promise.reject(new Error("Simulated DB outage")) : repository.claim(...args), complete: (id: string, status: number, body: unknown) => repository.complete(id, status, body), markFailed: (id: string) => repository.markFailed(id) } as RapidApiIdempotencyStore
+    repository: { claim: (...args: Parameters<RapidApiIdempotencyStore["claim"]>) => forceDbFailure ? Promise.reject(new Error("Simulated DB outage")) : repository.claim(...args), complete: (id: string, status: number, body: unknown) => repository.complete(id, status, body), markFailed: (id: string) => repository.markFailed(id) } as unknown as RapidApiIdempotencyStore
   }));
   let server: ReturnType<typeof app.listen> | undefined;
   let forceDbFailure = false;
