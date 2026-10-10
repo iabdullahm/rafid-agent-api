@@ -1,5 +1,5 @@
 import express, { type ErrorRequestHandler, type RequestHandler } from "express";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash, timingSafeEqual } from "node:crypto";
 import type { Config } from "../config/env.js";
 import { apiKeyAuth } from "../middleware/auth.js";
 import { ApiError, publicError } from "../utils/errors.js";
@@ -398,6 +398,24 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     try { send(res, mppServiceRef ? { ...buildMppStatus(config.mpp), ...(await mppServiceRef.status()) } : buildMppStatus(config.mpp)); } catch (error) { next(error); }
   });
   app.use(createVoiceRoutes(defaultVoiceService));
+  // RapidAPI staging route: authenticate gateway origin; never execute or charge until
+  // durable idempotency and gateway billing reconciliation are implemented and tested.
+  // Intentional fail-closed placeholder. Existing API routes are not affected.
+  app.post("/rapidapi/v1/risk/company-due-diligence", (req, res) => {
+    const configured = process.env.RAPIDAPI_PROXY_SECRET;
+    const supplied = req.header("x-rapidapi-proxy-secret");
+    if (!configured || !supplied) {
+      res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Unauthorized gateway request" } });
+      return;
+    }
+    const expectedHash = createHash("sha256").update(configured).digest();
+    const actualHash = createHash("sha256").update(supplied).digest();
+    if (!timingSafeEqual(expectedHash, actualHash)) {
+      res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Unauthorized gateway request" } });
+      return;
+    }
+    res.status(503).json({ success: false, error: { code: "RAPIDAPI_NOT_READY", message: "Gateway billing and idempotency checks are pending" } });
+  });
   const authenticate: RequestHandler = store ? async (req, res, next) => {
     try {
       const principal = await store.authenticate(req.header("x-api-key") ?? "");
