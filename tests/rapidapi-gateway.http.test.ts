@@ -40,7 +40,10 @@ test("HTTP gateway: execute once, replay, conflict, failure and auth checks", as
     enabled: () => true,
     repository: repository as never
   }));
-  const server: Server = app.listen(0, "127.0.0.1");
+  const server: Server = await new Promise<Server>((resolve, reject) => {
+    const instance = app.listen(0, "127.0.0.1", () => resolve(instance));
+    instance.once("error", reject);
+  });
   try {
     const address = server.address();
     assert.ok(address && typeof address !== "string");
@@ -67,6 +70,8 @@ test("HTTP gateway: execute once, replay, conflict, failure and auth checks", as
     assert.notEqual(rapidApiRequestFingerprint("test_capability", { value: "a" }),
       rapidApiRequestFingerprint("test_capability", { value: "b" }));
   } finally {
-    await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    if (server.listening) {
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
   }
 });
