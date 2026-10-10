@@ -23,7 +23,7 @@ test("Marketplace bulk audit: registry, schemas, outputs, pricing and execution 
     const inputCheck = c.input.safeParse(c.example);
     if (!inputCheck.success) issues.push("example_input_invalid");
     const outputCheck = c.output.safeParse(c.exampleOutput);
-    if (!outputCheck.success) issues.push("example_output_invalid");
+    if (!outputCheck.success) issues.push("example_output_invalid: " + outputCheck.error.issues.map(i => i.path.join(".") + " " + i.message).join(" | "));
     if (typeof c.estimatedLatencyMs === "number" && (!Number.isFinite(c.estimatedLatencyMs) || c.estimatedLatencyMs <= 0)) issues.push("invalid_latency_estimate");
     findings.push(...issues.map(issue => c.name + ": " + issue));
     return { name: c.name, path: c.path, price: c.price, currency: c.currency,
