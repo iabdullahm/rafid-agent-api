@@ -48,3 +48,13 @@ test("identical in-flight duplicate remains pending", async () => {
   const result = await new RapidApiIdempotencyStore(pool).claim("consumer-a", "key-123", "a".repeat(64));
   assert.deepEqual(result, { kind: "pending", requestId: "existing" });
 });
+
+
+test("same subscriber/key across two capabilities conflicts", async () => {
+  const pool = { query: async (sql: string) => {
+    if (sql.startsWith("INSERT")) return { rowCount: 0 };
+    return { rows: [{ id: "existing", capability: "company_due_diligence", request_fingerprint: "a".repeat(64), status: "completed", response_status: 200, response_body: { success: true } }] };
+  } } as unknown as Pool;
+  const result = await new RapidApiIdempotencyStore(pool).claim("consumer-a", "key-123", "a".repeat(64), "analyze_property");
+  assert.equal(result.kind, "conflict");
+});
