@@ -1,6 +1,7 @@
 import express, { type ErrorRequestHandler, type RequestHandler } from "express";
 import { randomUUID, createHash, timingSafeEqual } from "node:crypto";
 import type { Config } from "../config/env.js";
+import { marketplaceCatalog } from "../rapidapi/catalog.js";
 import { apiKeyAuth } from "../middleware/auth.js";
 import { ApiError, publicError } from "../utils/errors.js";
 import { createLogger, type Logger } from "../utils/logging.js";
@@ -401,37 +402,38 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
   // RapidAPI staging route: authenticate gateway origin; never execute or charge until
   // durable idempotency and gateway billing reconciliation are implemented and tested.
   // Intentional fail-closed placeholder. Existing API routes are not affected.
-  app.post("/rapidapi/v1/risk/company-due-diligence", (req, res) => {
-    const configured = process.env.RAPIDAPI_PROXY_SECRET;
-    const supplied = req.header("x-rapidapi-proxy-secret");
-    if (!configured || !supplied) {
-      console.warn("RAPIDAPI_AUTH_DIAGNOSTIC", { reason: !configured ? "missing_env" : "missing_header" });
-      res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Unauthorized gateway request" } });
-      return;
-    }
-    const expectedHash = createHash("sha256").update(configured).digest();
-    const actualHash = createHash("sha256").update(supplied).digest();
-    if (!timingSafeEqual(expectedHash, actualHash)) {
-      console.warn("RAPIDAPI_AUTH_DIAGNOSTIC", { reason: "mismatch" });
-      res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Unauthorized gateway request" } });
-      return;
-    }
-    // Phase 2 remains fail-closed. Database-backed deduplication is implemented
-    // in RapidApiIdempotencyStore, but must first pass live Neon concurrency tests,
-    // gateway reconciliation and a security review before any execution is enabled.
-    // Explicitly check prerequisites without touching the execution ledger.
-    if (!store) {
-      res.status(503).json({ success: false, error: { code: "RAPIDAPI_STORAGE_NOT_READY", message: "Marketplace database unavailable" } });
-      return;
-    }
-    const subscriber = req.header("x-rapidapi-user");
-    const idempotencyKey = req.header("idempotency-key");
-    if (!subscriber || !idempotencyKey || subscriber.length > 255 || idempotencyKey.length > 255) {
-      res.status(400).json({ success: false, error: { code: "RAPIDAPI_REQUEST_HEADERS_REQUIRED", message: "Verified subscriber and Idempotency-Key required" } });
-      return;
-    }
-    res.status(503).json({ success: false, error: { code: "RAPIDAPI_NOT_READY", message: "Gateway billing and idempotency checks are pending" } });
+  app.get("/rapidapi/v1/catalog", (_req, res) => {
+    res.json({ success: true, data: marketplaceCatalog() });
   });
+  // Universal Marketplace gateway remains fail-closed until the per-capability
+  // atomic ledger, replay, provider-readiness and RapidAPI billing are verified.
+  for (const marketplaceCapability of capabilities) {
+    app.post("/rapidapi/v1" + marketplaceCapability.path, (req, res) => {
+      const configured = process.env.RAPIDAPI_PROXY_SECRET;
+      const supplied = req.header("x-rapidapi-proxy-secret");
+      if (!configured || !supplied) {
+        res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Unauthorized gateway request" } });
+        return;
+      }
+      const expectedHash = createHash("sha256").update(configured).digest();
+      const actualHash = createHash("sha256").update(supplied).digest();
+      if (!timingSafeEqual(expectedHash, actualHash)) {
+        res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Unauthorized gateway request" } });
+        return;
+      }
+      if (!store) {
+        res.status(503).json({ success: false, error: { code: "RAPIDAPI_STORAGE_NOT_READY", message: "Marketplace database unavailable" } });
+        return;
+      }
+      const subscriber = req.header("x-rapidapi-user");
+      const idempotencyKey = req.header("idempotency-key");
+      if (!subscriber || !idempotencyKey || subscriber.length > 255 || idempotencyKey.length > 255) {
+        res.status(400).json({ success: false, error: { code: "RAPIDAPI_REQUEST_HEADERS_REQUIRED", message: "Verified subscriber and Idempotency-Key required" } });
+        return;
+      }
+      res.status(503).json({ success: false, error: { code: "RAPIDAPI_NOT_READY", message: "Capability execution and billing checks are pending" } });
+    });
+  }
   const authenticate: RequestHandler = store ? async (req, res, next) => {
     try {
       const principal = await store.authenticate(req.header("x-api-key") ?? "");
