@@ -413,7 +413,9 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     app.post("/rapidapi/v1" + capability.path, express.json({ limit: capability.requestBodyLimit ?? "32kb" }),
       createRapidApiHandler(capability, {
         secret: () => process.env.RAPIDAPI_PROXY_SECRET,
-        enabled: () => false,
+        enabled: () => process.env.RAPIDAPI_EXECUTION_ENABLED === "true" &&
+          process.env.RAPIDAPI_ENABLED_CAPABILITIES?.split(",").map(name => name.trim()).includes(capability.name) === true &&
+          capability.sideEffects === false,
         repository: rapidApiRepository
       }));
   }
