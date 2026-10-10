@@ -1,0 +1,21 @@
+name: Marketplace Idempotency Checks
+on:
+  push:
+    branches:
+      - marketplace/company-due-diligence-staging
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  marketplace-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: node --import tsx --test tests/rapidapi-idempotency.test.ts
