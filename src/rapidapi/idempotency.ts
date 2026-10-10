@@ -23,8 +23,8 @@ export function rapidApiRequestFingerprint(capability: string, validatedInput: u
 export class RapidApiIdempotencyStore {
   constructor(private readonly pool: Pool) {}
 
-  async claim(subscriberId: string, idempotencyKey: string, fingerprint: string): Promise<ClaimResult> {
-    if (!subscriberId || subscriberId.length > 255 || !idempotencyKey ||
+  async claim(subscriberId: string, idempotencyKey: string, fingerprint: string, capability = "company_due_diligence"): Promise<ClaimResult> {
+    if (!capability || capability.length > 128 || !/^[a-z][a-z0-9_]*$/.test(capability) || !subscriberId || subscriberId.length > 255 || !idempotencyKey ||
         idempotencyKey.length > 255 || !/^[0-9a-f]{64}$/.test(fingerprint)) {
       throw new Error("Invalid idempotency identifiers");
     }
@@ -32,21 +32,21 @@ export class RapidApiIdempotencyStore {
     const inserted = await this.pool.query(
       `INSERT INTO rafid_rapidapi_requests
         (id,subscriber_id,idempotency_key,capability,request_fingerprint,status)
-        VALUES ($1,$2,$3,'company_due_diligence',$4,'processing')
+        VALUES ($1,$2,$3,$4,$5,'processing')
         ON CONFLICT (subscriber_id,idempotency_key) DO NOTHING
         RETURNING id`,
-      [requestId, subscriberId, idempotencyKey, fingerprint]
+      [requestId, subscriberId, idempotencyKey, capability, fingerprint]
     );
     if (inserted.rowCount) return { kind: "claimed", requestId };
     const existing = await this.pool.query<{
-      id: string; request_fingerprint: string; status: RequestState;
+      id: string; capability: string; request_fingerprint: string; status: RequestState;
       response_status: number | null; response_body: unknown;
-    }>(`SELECT id,request_fingerprint,status,response_status,response_body
+    }>(`SELECT id,capability,request_fingerprint,status,response_status,response_body
          FROM rafid_rapidapi_requests WHERE subscriber_id=$1 AND idempotency_key=$2`,
       [subscriberId, idempotencyKey]);
     const row = existing.rows[0];
     if (!row) throw new Error("Idempotency claim race: retry required");
-    if (row.request_fingerprint !== fingerprint) return { kind: "conflict" };
+    if (row.capability !== capability || row.request_fingerprint !== fingerprint) return { kind: "conflict" };
     if (row.status === "completed") {
       if (row.response_status === null || row.response_body === null) throw new Error("Incomplete replay record");
       return { kind: "replay", requestId: row.id, status: row.response_status, body: row.response_body };
