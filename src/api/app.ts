@@ -405,12 +405,14 @@ export function createApp(config: Config, options: { logger?: Logger; billing?: 
     const configured = process.env.RAPIDAPI_PROXY_SECRET;
     const supplied = req.header("x-rapidapi-proxy-secret");
     if (!configured || !supplied) {
+      console.warn("RAPIDAPI_AUTH_DIAGNOSTIC", { reason: !configured ? "missing_env" : "missing_header" });
       res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Unauthorized gateway request" } });
       return;
     }
     const expectedHash = createHash("sha256").update(configured).digest();
     const actualHash = createHash("sha256").update(supplied).digest();
     if (!timingSafeEqual(expectedHash, actualHash)) {
+      console.warn("RAPIDAPI_AUTH_DIAGNOSTIC", { reason: "mismatch" });
       res.status(401).json({ success: false, error: { code: "UNAUTHORIZED", message: "Unauthorized gateway request" } });
       return;
     }
