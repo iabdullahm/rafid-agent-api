@@ -606,7 +606,11 @@ test("17. discovery metadata: registry entry and every discovery surface (/api/v
     assert.ok(mcpTool);
     assert.equal(mcpTool.inputSchema.additionalProperties, false);
     assert.ok(mcpTool.inputSchema.properties.documentUrl && mcpTool.inputSchema.properties.text && mcpTool.inputSchema.properties.requestedFacts);
-    assert.ok(mcpTool.outputSchema.properties.facts && mcpTool.outputSchema.properties.riskFlags);
+    // Paid-conversion MCP tools expose a union: normal extraction OR payment_required.
+    // JSON Schema serializes the union as anyOf/oneOf, not root-level properties.
+    const outputSchemas = mcpTool.outputSchema.anyOf ?? mcpTool.outputSchema.oneOf ?? [mcpTool.outputSchema];
+    assert.ok(outputSchemas.some((schema: any) => schema.properties?.facts && schema.properties?.riskFlags),
+      "document extraction output must expose facts and riskFlags");
     // MCP accepts a document larger than the old 32 KB body limit.
     const big = SAMPLE_INVOICE + "\n" + "Note line for the file. ".repeat(3000);
     assert.ok(big.length > 40_000);
