@@ -22,3 +22,5 @@ jobs:
       - run: node --import tsx --test tests/rapidapi-gateway.http.test.ts
 
       - run: node --import tsx --test tests/rapidapi-bulk-audit.test.ts
+
+      - run: node --import tsx --test tests/rapidapi-safe-execution.test.ts
