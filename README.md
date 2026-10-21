@@ -1282,3 +1282,14 @@ When `X402_ENABLED=true`, `@x402/express`, `@x402/core` and `@x402/evm` gate a s
 6. **Rafid Agent Intelligence, Phase 2/3:** Phase 1 (`research_company`, `find_companies`, `analyze_company_risk` — see "Rafid Agent Intelligence" above) is implemented, tested and inert-by-default. Still needed: Phase 2 (`research_web`, `deep_research`) and Phase 3 (`extract_document`, `analyze_document`, architecture prep only) from the same expansion spec; this README's REST API table above still does not list the four pre-existing Oman business capabilities (`search_oman_company`, `get_oman_company_profile`, `analyze_oman_company`, `due_diligence_oman_company`) either — a pre-existing documentation gap, not introduced by this phase, worth closing in the same pass as Phase 2.
 
 See [implementation review](docs/implementation-review.md) for the initial findings, exact scope and verification.
+
+## Postman API Network
+
+Explore the [Rafid Agent API public Postman workspace](https://www.postman.com/iabdullahms-team/rafid-ai-agent-apis) for runnable developer requests:
+
+- Discover available capabilities: `GET /api/v1/capabilities`
+- Inspect supported payment methods: `GET /api/v1/payment-methods`
+- Check x402 availability: `GET /api/v1/x402/status`
+- Preview company due diligence: `POST /api/v1/preview/company_due_diligence`
+
+API base URL: `https://api.rafidsystem.com`. Preview and discovery endpoints do not require payment; full paid capabilities follow the payment methods advertised by the API. Do not paste credentials, payment signatures, or private keys into public workspaces.
