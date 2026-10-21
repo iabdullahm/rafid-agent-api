@@ -32,6 +32,34 @@ An unsigned request receives an **HTTP 402** challenge. Read and decode the `PAY
 
 During the production check on 21 Oct 2026, the offer advertised **0.01 USDC** on Base Mainnet (`eip155:8453`). The live `PAYMENT-REQUIRED` terms are authoritative: **always confirm the current network, token, amount and receiver before authorizing payment.**
 
+## Free preview → paid supplier due diligence
+
+**Best starting point for procurement and finance agents:** `company_due_diligence` — **$1.50 per completed paid call** as currently advertised by production discovery. It supports a **free preview** before a buyer authorizes payment.
+
+- Free preview: `POST https://api.rafidsystem.com/api/v1/preview/company_due_diligence`
+- Paid x402 route: `POST https://api.rafidsystem.com/api/v1/x402/risk/company-due-diligence`
+- REST route: `POST https://api.rafidsystem.com/api/v1/risk/company-due-diligence`
+- MCP tool: `company_due_diligence`
+
+Example review request (use a company you are authorized to assess):
+
+```json
+{
+  "company": "Example Supplier LLC",
+  "purpose": "supplier_onboarding",
+  "depth": "standard",
+  "checks": {
+    "registry": true,
+    "sanctions": true,
+    "adverseMedia": true,
+    "reputation": true,
+    "businessRisk": true
+  }
+}
+```
+
+The preview only indicates analysis availability and a next-action payment contract; it does **not** provide the paid report. Check the production API's current input schema, preview terms, and payment challenge before using. A free preview is not proof of verified screening data or a sales conversion.
+
 ## Other agent use cases
 
 - **Procurement agents:** research vendors and business-risk signals before review.
