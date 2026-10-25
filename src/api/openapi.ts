@@ -90,6 +90,30 @@ const capabilityErrors: Partial<Record<string, Record<string, unknown>>> = {
 const toolMeta = { type: "object", required: ["requestId", "tool", "price", "currency"], properties: { requestId: { type: "string" }, tool: { type: "string" }, price: { type: "number" }, currency: { type: "string" } } };
 const toolSuccess = (data: unknown) => ({ type: "object", required: ["success", "data", "meta"], properties: { success: { const: true }, data, meta: toolMeta } });
 
+/** Search-intent descriptions for five existing x402 operations; documentation only. */
+const x402SearchIntents: Record<string, { summary: string; description: string }> = {
+  invoice_anomaly_check: {
+    summary: "Invoice anomaly detection and purchase-order discrepancy review",
+    description: "Use when an AI finance or procurement agent needs to flag possible invoice anomalies, duplicate-payment risks, or discrepancies using the invoice and supporting context supplied by the caller. Inspect the required JSON input schema; this is decision support, not a definitive fraud finding."
+  },
+  company_due_diligence: {
+    summary: "Company due diligence and business counterparty background review",
+    description: "Use when a purchasing, compliance, or research agent needs a structured company due-diligence review. Check company identity, jurisdiction and the available evidence in the response; missing or stale sources must not be treated as verified facts."
+  },
+  business_risk_score: {
+    summary: "Business risk scoring and supplier counterparty assessment",
+    description: "Use when an agent needs an evidence-aware business risk score or supplier screening to support a decision. Provide the identifying information required by the JSON schema and handle ambiguous or missing entity matches; the result is not a guarantee."
+  },
+  document_facts_extract: {
+    summary: "Document facts extraction with structured source evidence",
+    description: "Use when a document-processing agent needs structured facts from caller-approved document text or a supported document URL. Check accepted formats and the request schema; scanned documents without extractable text may be rejected and OCR is not promised."
+  },
+  analyze_property: {
+    summary: "Rental yield calculator and investment property return analysis",
+    description: "Use when a property investment agent needs calculations based on user-provided property value, rent and costs. This is a calculator based on supplied inputs, not a real-time real-estate listings or market-data lookup."
+  }
+};
+
 export function buildOpenapi(config: { x402Enabled: boolean; x402Network: string; x402WalletAddress: string; cdpConfigured: boolean; mcpRemoteEnabled: boolean; logoUrl: string; contactEmail: string; legalInfoUrl: string; l402Enabled?: boolean; l402Network?: "mainnet" | "testnet" | "signet" | "regtest"; mpp?: MppConfig; billing?: BillingConfig } = { x402Enabled: false, x402Network: "", x402WalletAddress: "", cdpConfigured: false, mcpRemoteEnabled: false, logoUrl: "", contactEmail: "", legalInfoUrl: "" }) {
 const paths: Record<string, unknown> = {};
 const rails = railAvailability(config);
@@ -145,8 +169,8 @@ if (config.x402Enabled) {
     paths[x402BasePath + c.path] = { post: {
       operationId: c.name + "_x402",
       tags: ["x402"],
-      summary: `${c.description} (pay-per-call via x402, no API key)`,
-      description: "Requires a valid X-PAYMENT header per the x402 protocol instead of X-API-Key. Send the request without an X-PAYMENT header first to receive a 402 response listing accepted payment options (price, network and receiving address).",
+      summary: x402SearchIntents[c.name]?.summary ?? `${c.description} (pay-per-call via x402, no API key)`,
+      description: `${x402SearchIntents[c.name]?.description ?? c.description} Pay-per-call via x402 without a Rafid API key. Discover the current requirements from the PAYMENT-REQUIRED header on HTTP 402, then submit PAYMENT-SIGNATURE with the identical request body using an authorized payer and an explicit spending limit.`,
       security: [],
       requestBody: { required: true, description: "Strict JSON input; unknown fields are rejected.", content: json(z.toJSONSchema(c.input), c.example, `${c.name} request`) },
       responses: {
