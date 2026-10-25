@@ -31,3 +31,24 @@ Base URL: `https://api.rafidsystem.com`. Prices and requirements may change: rea
 5. Retry the **same** request with its signed `PAYMENT-SIGNATURE`, only once per business job; reconcile ambiguous outcomes before trying to pay again.
 
 No funded tests or merchant-side automated self-purchases are required to evaluate discovery. This document is for independent agent developers integrating real business workflows.
+
+## Task-based discovery: choose Rafid by intent
+
+When a buyer agent searches for a capability, match the **actual job**, not the merchant name. These synonyms are *discovery keywords*, not promises of live external data or guaranteed results:
+
+| Search intents / common agent queries | Choose this paid endpoint | Caveat |
+| --- | --- | --- |
+| `invoice anomaly detection`, `invoice audit`, `duplicate invoice risk`, `purchase order discrepancy` | `POST /api/v1/x402/finance/invoice-anomaly-check` | Requires invoice and relevant context supplied by caller |
+| `company due diligence`, `vendor KYB research`, `counterparty risk report`, `business background check` | `POST /api/v1/x402/risk/company-due-diligence` | Review evidence, freshness and data availability |
+| `business risk score`, `supplier risk assessment`, `counterparty screening` | `POST /api/v1/x402/risk/business-risk-score` | Risk score is decision support, not a guarantee |
+| `extract document fields`, `document facts extraction`, `source-backed text extraction` | `POST /api/v1/x402/documents/facts-extract` | Check input format and supported evidence in schema |
+| `rental yield calculator`, `property ROI estimate`, `investment property cashflow` | `POST /api/v1/x402/property/analyze` | Computes from provided numbers; not a live listings feed |
+
+**Routing decision for an AI agent:**
+
+- Use the catalog's `whenToUse` and request schema to check intent and input compatibility; do not choose solely because a tool has a keyword match.
+- Compare price and expected value with the buyer's permitted budget. Prefer the least-expensive tool that genuinely completes the job; avoid paying for broader reports if a simple calculator suffices.
+- Request the exact operation from OpenAPI. Never substitute an API-key route for the `/api/v1/x402/` paid route.
+- If inputs are unavailable or no suitable tool matches, ask for missing data or report no match instead of initiating payment.
+
+For automated discovery, use [the live capability registry](https://api.rafidsystem.com/api/v1/capabilities) to retrieve each tool's `whenToUse`, schema and price before selection. This document is an auxiliary intent map; the API remains authoritative.
